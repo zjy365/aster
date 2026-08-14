@@ -1,0 +1,44 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# environment — never commit real keys
+.env
+.env.*
+!.env.example
+
+# runtime / session state
+.aster/
+
+# test & coverage
+coverage/
+
+# logs
+*.log
+logs/
+*.log.*
+
+# local config & secrets
+.local/
+
+# packaging artifacts
+*.tgz
+output/
+core/bin/
+
+# typeScript build info
+*.tsbuildinfo
+
+# macOS
+.DS_Store
+
+# editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+todo.md
+
+specs

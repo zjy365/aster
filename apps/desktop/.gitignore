@@ -1,0 +1,11 @@
+# Dependencies
+/node_modules/
+
+# Generated application output
+/dist/
+/dist-electron/
+/release/
+
+# Local operating-system and tool output
+.DS_Store
+*.log

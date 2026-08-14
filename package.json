@@ -1,0 +1,21 @@
+{
+  "name": "aster",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A fast, local-first Kubernetes desktop workbench.",
+  "author": "Aster contributors",
+  "type": "module",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.12.2",
+  "scripts": {
+    "build": "pnpm --dir apps/desktop build",
+    "check": "pnpm typecheck && pnpm test && go -C core test -race ./... && go -C core vet ./... && pnpm build",
+    "dev": "pnpm --dir apps/desktop dev",
+    "pack": "pnpm --dir apps/desktop run pack",
+    "test": "pnpm --dir apps/desktop test",
+    "typecheck": "pnpm --dir apps/desktop typecheck"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

@@ -1,0 +1,117 @@
+name: Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package-desktop:
+    name: Package ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            builder_args: --mac --arm64
+            label: macOS arm64
+            artifact_suffix: macos-arm64
+            smoke_arch: arm64
+            run_visual_smoke: true
+          - os: macos-15-intel
+            builder_args: --mac --x64
+            label: macOS x64
+            artifact_suffix: macos-x64
+            smoke_arch: x64
+          - os: windows-latest
+            builder_args: --win --x64
+            label: Windows x64
+            artifact_suffix: windows-x64
+          - os: ubuntu-22.04
+            builder_args: --linux --x64
+            label: Linux x64
+            artifact_suffix: linux-x64
+            needs_linux_tools: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Linux packaging and display tools
+        if: matrix.needs_linux_tools == true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm xvfb
+
+      - name: Configure Go from module
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: Configure pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.2
+          run_install: false
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Restore JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify application
+        run: pnpm check
+
+      - name: Create unsigned package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: >-
+          pnpm --dir apps/desktop exec electron-builder
+          ${{ matrix.builder_args }}
+          --publish never
+          --config.mac.notarize=false
+
+      - name: Smoke test packaged application
+        if: matrix.needs_linux_tools != true
+        env:
+          ASTER_PACKAGED_ARCH: ${{ matrix.smoke_arch }}
+        run: pnpm --dir apps/desktop smoke:packaged
+
+      - name: Capture packaged Electron visual evidence
+        if: matrix.run_visual_smoke == true
+        env:
+          ASTER_PACKAGED_ARCH: ${{ matrix.smoke_arch }}
+        run: pnpm --dir apps/desktop smoke:visual
+
+      - name: Smoke test packaged application in Xvfb
+        if: matrix.needs_linux_tools == true
+        run: xvfb-run -a pnpm --dir apps/desktop smoke:packaged
+
+      - name: Upload distributables
+        uses: actions/upload-artifact@v7
+        with:
+          name: Aster-${{ matrix.artifact_suffix }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.rpm
+          if-no-files-found: error
+
+      - name: Upload visual evidence
+        if: matrix.run_visual_smoke == true
+        uses: actions/upload-artifact@v7
+        with:
+          name: Aster-${{ matrix.artifact_suffix }}-playwright
+          path: output/playwright/aster-fixture*
+          if-no-files-found: error

@@ -1,0 +1,136 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ResourceKind, ResourceListResponse, ResourceRow, ResourceWatchBatch } from "../../shared/types";
+import { applyResourceWatchBatches } from "../lib/resource-watch";
+
+export interface ResourceListOptions {
+  contextId: string;
+  kind: ResourceKind;
+  namespace: string;
+  coreReady: boolean;
+  setError(message: string): void;
+}
+
+export interface ResourceListState {
+  list: ResourceListResponse;
+  loading: boolean;
+  loadingMore: boolean;
+  query: string;
+  setQuery(query: string): void;
+  visibleRows: ResourceRow[];
+  /** Bumps on every explicit refresh; detail view uses it to close stale selections. */
+  generation: number;
+  refresh(): void;
+  loadMore(): Promise<void>;
+  reset(): void;
+}
+
+/**
+ * Owns the resource table data: the snapshot+delta watch subscription with a
+ * 24ms flush queue, manual next-page loading (server pagination is kept),
+ * the filter query, and the visible error. Selection resets triggered by
+ * list scope changes live in useResourceDetail via `generation`.
+ */
+export function useResourceList({ contextId, kind, namespace, coreReady, setError }: ResourceListOptions): ResourceListState {
+  const [list, setList] = useState<ResourceListResponse>({ items: [] });
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [query, setQuery] = useState("");
+  const [generation, setGeneration] = useState(0);
+  const listRequest = useRef(0);
+  const watchQueue = useRef<ResourceWatchBatch[]>([]);
+  const watchHasSnapshot = useRef(false);
+  const watchFlushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const loadMore = useCallback(async () => {
+    if (!contextId || !coreReady || !list.continueToken) return;
+    const request = ++listRequest.current;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const response = await window.aster.resources.list({
+        contextId,
+        resourceKind: kind,
+        ...(kind.namespaced && namespace ? { namespace } : {}),
+        limit: 100,
+        continueToken: list.continueToken,
+      });
+      if (request !== listRequest.current) return;
+      setList((current) => ({ ...response, items: [...current.items, ...response.items] }));
+    } catch {
+      // Keep the loaded page; the footer button retries with the same token.
+    } finally {
+      if (request === listRequest.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    }
+  }, [contextId, coreReady, kind, list.continueToken, namespace, setError]);
+
+  useEffect(() => {
+    if (!contextId || !coreReady) return;
+    ++listRequest.current;
+    setLoading(true);
+    setError("");
+    setList({ items: [] });
+    watchQueue.current = [];
+    watchHasSnapshot.current = false;
+
+    const stop = window.aster.resources.watch({
+      contextId,
+      resourceKind: kind,
+      ...(kind.namespaced && namespace ? { namespace } : {}),
+      limit: 100,
+    }, (batch) => {
+      if (batch.kind === "error") {
+        setLoading(false);
+        if (!watchHasSnapshot.current) setError(batch.message);
+        return;
+      }
+      if (batch.kind === "snapshot") watchHasSnapshot.current = true;
+      watchQueue.current.push(batch);
+      if (watchFlushTimer.current !== undefined) return;
+      watchFlushTimer.current = setTimeout(() => {
+        watchFlushTimer.current = undefined;
+        const batches = watchQueue.current;
+        watchQueue.current = [];
+        setList((current) => applyResourceWatchBatches(current, batches));
+        setLoading(false);
+      }, 24);
+    });
+
+    return () => {
+      stop();
+      watchQueue.current = [];
+      if (watchFlushTimer.current !== undefined) {
+        clearTimeout(watchFlushTimer.current);
+        watchFlushTimer.current = undefined;
+      }
+    };
+  }, [contextId, namespace, kind, coreReady, generation, setError]);
+
+  const visibleRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return list.items;
+    return list.items.filter((item) =>
+      item.name.toLowerCase().includes(needle)
+      || item.namespace.toLowerCase().includes(needle)
+      || item.status?.toLowerCase().includes(needle),
+    );
+  }, [list.items, query]);
+
+  const refresh = useCallback(() => setGeneration((value) => value + 1), []);
+  const reset = useCallback(() => setList({ items: [] }), []);
+
+  return {
+    list,
+    loading,
+    loadingMore,
+    query,
+    setQuery,
+    visibleRows,
+    generation,
+    refresh,
+    loadMore,
+    reset,
+  };
+}

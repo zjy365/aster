@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-14T05:42:51Z",
+  "title": "Design System: Aster",
+  "extensions": {
+    "colorMeta": {
+      "window": { "role": "neutral", "displayName": "Window Gray", "canonical": "#f5f5f7", "tonalRamp": ["oklch(15% 0 0)", "oklch(26% 0 0)", "oklch(38% 0 0)", "oklch(50% 0 0)", "oklch(62% 0 0)", "oklch(74% 0 0)", "oklch(86% 0 0)", "oklch(95% 0 0)"] },
+      "sidebar": { "role": "neutral", "displayName": "Source List Gray", "canonical": "#efeff1", "tonalRamp": ["oklch(15% 0.003 265)", "oklch(26% 0.003 265)", "oklch(38% 0.003 265)", "oklch(50% 0.003 265)", "oklch(62% 0.003 265)", "oklch(74% 0.003 265)", "oklch(86% 0.003 265)", "oklch(95% 0.003 265)"] },
+      "surface": { "role": "neutral", "displayName": "Workspace White", "canonical": "#ffffff", "tonalRamp": ["oklch(15% 0 0)", "oklch(26% 0 0)", "oklch(38% 0 0)", "oklch(50% 0 0)", "oklch(62% 0 0)", "oklch(74% 0 0)", "oklch(86% 0 0)", "oklch(95% 0 0)"] },
+      "surface-muted": { "role": "neutral", "displayName": "Muted Control Surface", "canonical": "#f6f6f7", "tonalRamp": ["oklch(15% 0.002 265)", "oklch(26% 0.002 265)", "oklch(38% 0.002 265)", "oklch(50% 0.002 265)", "oklch(62% 0.002 265)", "oklch(74% 0.002 265)", "oklch(86% 0.002 265)", "oklch(95% 0.002 265)"] },
+      "surface-hover": { "role": "neutral", "displayName": "Neutral Hover", "canonical": "#ededf0", "tonalRamp": ["oklch(15% 0.004 265)", "oklch(26% 0.004 265)", "oklch(38% 0.004 265)", "oklch(50% 0.004 265)", "oklch(62% 0.004 265)", "oklch(74% 0.004 265)", "oklch(86% 0.004 265)", "oklch(95% 0.004 265)"] },
+      "text": { "role": "neutral", "displayName": "Primary Ink", "canonical": "#1d1d1f", "tonalRamp": ["oklch(15% 0.003 265)", "oklch(26% 0.003 265)", "oklch(38% 0.003 265)", "oklch(50% 0.003 265)", "oklch(62% 0.003 265)", "oklch(74% 0.003 265)", "oklch(86% 0.003 265)", "oklch(95% 0.003 265)"] },
+      "text-secondary": { "role": "neutral", "displayName": "Secondary Ink", "canonical": "#66666b", "tonalRamp": ["oklch(15% 0.006 265)", "oklch(26% 0.006 265)", "oklch(38% 0.006 265)", "oklch(50% 0.006 265)", "oklch(62% 0.006 265)", "oklch(74% 0.006 265)", "oklch(86% 0.006 265)", "oklch(95% 0.006 265)"] },
+      "faint": { "role": "neutral", "displayName": "Contrast-Safe Microcopy", "canonical": "#68686d", "tonalRamp": ["oklch(15% 0.006 265)", "oklch(26% 0.006 265)", "oklch(38% 0.006 265)", "oklch(50% 0.006 265)", "oklch(62% 0.006 265)", "oklch(74% 0.006 265)", "oklch(86% 0.006 265)", "oklch(95% 0.006 265)"] },
+      "border": { "role": "neutral", "displayName": "Hairline Border", "canonical": "rgb(60 60 67 / 18%)", "tonalRamp": ["oklch(15% 0.004 265)", "oklch(26% 0.004 265)", "oklch(38% 0.004 265)", "oklch(50% 0.004 265)", "oklch(62% 0.004 265)", "oklch(74% 0.004 265)", "oklch(86% 0.004 265)", "oklch(95% 0.004 265)"] },
+      "border-strong": { "role": "neutral", "displayName": "Strong Hairline", "canonical": "rgb(60 60 67 / 28%)", "tonalRamp": ["oklch(15% 0.004 265)", "oklch(26% 0.004 265)", "oklch(38% 0.004 265)", "oklch(50% 0.004 265)", "oklch(62% 0.004 265)", "oklch(74% 0.004 265)", "oklch(86% 0.004 265)", "oklch(95% 0.004 265)"] },
+      "aster-orange": { "role": "secondary", "displayName": "Aster Orange", "canonical": "#c65f2d", "tonalRamp": ["oklch(15% 0.07 45)", "oklch(26% 0.09 45)", "oklch(38% 0.11 45)", "oklch(50% 0.13 45)", "oklch(62% 0.14 45)", "oklch(74% 0.11 45)", "oklch(86% 0.07 45)", "oklch(95% 0.03 45)"] },
+      "aster-orange-soft": { "role": "secondary", "displayName": "Aster Orange Wash", "canonical": "rgb(198 95 45 / 10%)", "tonalRamp": ["oklch(15% 0.07 45)", "oklch(26% 0.09 45)", "oklch(38% 0.11 45)", "oklch(50% 0.13 45)", "oklch(62% 0.14 45)", "oklch(74% 0.11 45)", "oklch(86% 0.07 45)", "oklch(95% 0.03 45)"] },
+      "aster-orange-text": { "role": "secondary", "displayName": "Aster Orange Ink", "canonical": "#88401f", "tonalRamp": ["oklch(15% 0.07 45)", "oklch(26% 0.09 45)", "oklch(38% 0.11 45)", "oklch(50% 0.13 45)", "oklch(62% 0.14 45)", "oklch(74% 0.11 45)", "oklch(86% 0.07 45)", "oklch(95% 0.03 45)"] },
+      "system-blue": { "role": "primary", "displayName": "System Interaction Blue", "canonical": "#007aff", "tonalRamp": ["oklch(15% 0.08 250)", "oklch(26% 0.12 250)", "oklch(38% 0.17 250)", "oklch(50% 0.20 250)", "oklch(62% 0.21 250)", "oklch(74% 0.16 250)", "oklch(86% 0.09 250)", "oklch(95% 0.04 250)"] },
+      "system-blue-soft": { "role": "primary", "displayName": "System Blue Selection Wash", "canonical": "rgb(0 122 255 / 11%)", "tonalRamp": ["oklch(15% 0.08 250)", "oklch(26% 0.12 250)", "oklch(38% 0.17 250)", "oklch(50% 0.20 250)", "oklch(62% 0.21 250)", "oklch(74% 0.16 250)", "oklch(86% 0.09 250)", "oklch(95% 0.04 250)"] },
+      "system-blue-deep": { "role": "primary", "displayName": "System Blue Selected Ink", "canonical": "#0059b7", "tonalRamp": ["oklch(15% 0.08 250)", "oklch(26% 0.12 250)", "oklch(38% 0.17 250)", "oklch(50% 0.20 250)", "oklch(62% 0.21 250)", "oklch(74% 0.16 250)", "oklch(86% 0.09 250)", "oklch(95% 0.04 250)"] },
+      "positive": { "role": "tertiary", "displayName": "Operational Green", "canonical": "#18753a", "tonalRamp": ["oklch(15% 0.06 145)", "oklch(26% 0.08 145)", "oklch(38% 0.10 145)", "oklch(50% 0.12 145)", "oklch(62% 0.13 145)", "oklch(74% 0.10 145)", "oklch(86% 0.06 145)", "oklch(95% 0.03 145)"] },
+      "caution": { "role": "tertiary", "displayName": "Operational Amber", "canonical": "#9a6700", "tonalRamp": ["oklch(15% 0.06 80)", "oklch(26% 0.09 80)", "oklch(38% 0.12 80)", "oklch(50% 0.14 80)", "oklch(62% 0.15 80)", "oklch(74% 0.12 80)", "oklch(86% 0.07 80)", "oklch(95% 0.03 80)"] },
+      "destructive": { "role": "tertiary", "displayName": "Operational Red", "canonical": "#d70015", "tonalRamp": ["oklch(15% 0.08 25)", "oklch(26% 0.12 25)", "oklch(38% 0.17 25)", "oklch(50% 0.21 25)", "oklch(62% 0.22 25)", "oklch(74% 0.17 25)", "oklch(86% 0.09 25)", "oklch(95% 0.04 25)"] },
+      "dark-window": { "role": "neutral", "displayName": "Dark Window", "canonical": "#1c1c1e", "tonalRamp": ["oklch(15% 0.003 265)", "oklch(26% 0.003 265)", "oklch(38% 0.003 265)", "oklch(50% 0.003 265)", "oklch(62% 0.003 265)", "oklch(74% 0.003 265)", "oklch(86% 0.003 265)", "oklch(95% 0.003 265)"] },
+      "dark-sidebar": { "role": "neutral", "displayName": "Dark Source List", "canonical": "#232326", "tonalRamp": ["oklch(15% 0.004 265)", "oklch(26% 0.004 265)", "oklch(38% 0.004 265)", "oklch(50% 0.004 265)", "oklch(62% 0.004 265)", "oklch(74% 0.004 265)", "oklch(86% 0.004 265)", "oklch(95% 0.004 265)"] },
+      "dark-surface": { "role": "neutral", "displayName": "Dark Workspace", "canonical": "#1c1c1e", "tonalRamp": ["oklch(15% 0.003 265)", "oklch(26% 0.003 265)", "oklch(38% 0.003 265)", "oklch(50% 0.003 265)", "oklch(62% 0.003 265)", "oklch(74% 0.003 265)", "oklch(86% 0.003 265)", "oklch(95% 0.003 265)"] },
+      "dark-surface-muted": { "role": "neutral", "displayName": "Dark Muted Surface", "canonical": "#252528", "tonalRamp": ["oklch(15% 0.005 265)", "oklch(26% 0.005 265)", "oklch(38% 0.005 265)", "oklch(50% 0.005 265)", "oklch(62% 0.005 265)", "oklch(74% 0.005 265)", "oklch(86% 0.005 265)", "oklch(95% 0.005 265)"] },
+      "dark-surface-hover": { "role": "neutral", "displayName": "Dark Hover Surface", "canonical": "#303034", "tonalRamp": ["oklch(15% 0.006 265)", "oklch(26% 0.006 265)", "oklch(38% 0.006 265)", "oklch(50% 0.006 265)", "oklch(62% 0.006 265)", "oklch(74% 0.006 265)", "oklch(86% 0.006 265)", "oklch(95% 0.006 265)"] },
+      "dark-text": { "role": "neutral", "displayName": "Dark Primary Ink", "canonical": "#f5f5f7", "tonalRamp": ["oklch(15% 0.003 265)", "oklch(26% 0.003 265)", "oklch(38% 0.003 265)", "oklch(50% 0.003 265)", "oklch(62% 0.003 265)", "oklch(74% 0.003 265)", "oklch(86% 0.003 265)", "oklch(95% 0.003 265)"] },
+      "dark-text-secondary": { "role": "neutral", "displayName": "Dark Secondary Ink", "canonical": "#aeaeb2", "tonalRamp": ["oklch(15% 0.005 265)", "oklch(26% 0.005 265)", "oklch(38% 0.005 265)", "oklch(50% 0.005 265)", "oklch(62% 0.005 265)", "oklch(74% 0.005 265)", "oklch(86% 0.005 265)", "oklch(95% 0.005 265)"] },
+      "dark-faint": { "role": "neutral", "displayName": "Dark Microcopy", "canonical": "#8e8e93", "tonalRamp": ["oklch(15% 0.006 265)", "oklch(26% 0.006 265)", "oklch(38% 0.006 265)", "oklch(50% 0.006 265)", "oklch(62% 0.006 265)", "oklch(74% 0.006 265)", "oklch(86% 0.006 265)", "oklch(95% 0.006 265)"] },
+      "dark-border": { "role": "neutral", "displayName": "Dark Hairline Border", "canonical": "rgb(84 84 88 / 55%)", "tonalRamp": ["oklch(15% 0.006 265)", "oklch(26% 0.006 265)", "oklch(38% 0.006 265)", "oklch(50% 0.006 265)", "oklch(62% 0.006 265)", "oklch(74% 0.006 265)", "oklch(86% 0.006 265)", "oklch(95% 0.006 265)"] },
+      "dark-border-strong": { "role": "neutral", "displayName": "Dark Strong Hairline", "canonical": "rgb(99 99 102 / 75%)", "tonalRamp": ["oklch(15% 0.006 265)", "oklch(26% 0.006 265)", "oklch(38% 0.006 265)", "oklch(50% 0.006 265)", "oklch(62% 0.006 265)", "oklch(74% 0.006 265)", "oklch(86% 0.006 265)", "oklch(95% 0.006 265)"] },
+      "dark-aster-orange": { "role": "secondary", "displayName": "Dark Aster Orange", "canonical": "#e17b48", "tonalRamp": ["oklch(15% 0.07 45)", "oklch(26% 0.09 45)", "oklch(38% 0.11 45)", "oklch(50% 0.13 45)", "oklch(62% 0.14 45)", "oklch(74% 0.11 45)", "oklch(86% 0.07 45)", "oklch(95% 0.03 45)"] },
+      "dark-aster-orange-soft": { "role": "secondary", "displayName": "Dark Aster Orange Wash", "canonical": "rgb(225 123 72 / 14%)", "tonalRamp": ["oklch(15% 0.07 45)", "oklch(26% 0.09 45)", "oklch(38% 0.11 45)", "oklch(50% 0.13 45)", "oklch(62% 0.14 45)", "oklch(74% 0.11 45)", "oklch(86% 0.07 45)", "oklch(95% 0.03 45)"] },
+      "dark-aster-orange-text": { "role": "secondary", "displayName": "Dark Aster Orange Ink", "canonical": "#ffab7d", "tonalRamp": ["oklch(15% 0.07 45)", "oklch(26% 0.09 45)", "oklch(38% 0.11 45)", "oklch(50% 0.13 45)", "oklch(62% 0.14 45)", "oklch(74% 0.11 45)", "oklch(86% 0.07 45)", "oklch(95% 0.03 45)"] },
+      "dark-system-blue": { "role": "primary", "displayName": "Dark System Blue", "canonical": "#0a84ff", "tonalRamp": ["oklch(15% 0.08 250)", "oklch(26% 0.12 250)", "oklch(38% 0.17 250)", "oklch(50% 0.20 250)", "oklch(62% 0.21 250)", "oklch(74% 0.16 250)", "oklch(86% 0.09 250)", "oklch(95% 0.04 250)"] },
+      "dark-system-blue-soft": { "role": "primary", "displayName": "Dark System Blue Wash", "canonical": "rgb(10 132 255 / 18%)", "tonalRamp": ["oklch(15% 0.08 250)", "oklch(26% 0.12 250)", "oklch(38% 0.17 250)", "oklch(50% 0.20 250)", "oklch(62% 0.21 250)", "oklch(74% 0.16 250)", "oklch(86% 0.09 250)", "oklch(95% 0.04 250)"] },
+      "dark-system-blue-text": { "role": "primary", "displayName": "Dark System Blue Ink", "canonical": "#d9ecff", "tonalRamp": ["oklch(15% 0.08 250)", "oklch(26% 0.12 250)", "oklch(38% 0.17 250)", "oklch(50% 0.20 250)", "oklch(62% 0.21 250)", "oklch(74% 0.16 250)", "oklch(86% 0.09 250)", "oklch(95% 0.04 250)"] },
+      "dark-positive": { "role": "tertiary", "displayName": "Dark Operational Green", "canonical": "#30d158", "tonalRamp": ["oklch(15% 0.06 145)", "oklch(26% 0.08 145)", "oklch(38% 0.10 145)", "oklch(50% 0.12 145)", "oklch(62% 0.13 145)", "oklch(74% 0.10 145)", "oklch(86% 0.06 145)", "oklch(95% 0.03 145)"] },
+      "dark-caution": { "role": "tertiary", "displayName": "Dark Operational Amber", "canonical": "#ffd60a", "tonalRamp": ["oklch(15% 0.06 80)", "oklch(26% 0.09 80)", "oklch(38% 0.12 80)", "oklch(50% 0.14 80)", "oklch(62% 0.15 80)", "oklch(74% 0.12 80)", "oklch(86% 0.07 80)", "oklch(95% 0.03 80)"] },
+      "dark-destructive": { "role": "tertiary", "displayName": "Dark Operational Red", "canonical": "#ff453a", "tonalRamp": ["oklch(15% 0.08 25)", "oklch(26% 0.12 25)", "oklch(38% 0.17 25)", "oklch(50% 0.21 25)", "oklch(62% 0.22 25)", "oklch(74% 0.17 25)", "oklch(86% 0.09 25)", "oklch(95% 0.04 25)"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Entry Display", "purpose": "Context picker and largest entry headings." },
+      "headline": { "displayName": "Workspace Headline", "purpose": "Resource-list and resource-detail titles." },
+      "title": { "displayName": "Section Title", "purpose": "Full-detail section headings." },
+      "body": { "displayName": "Interface Body", "purpose": "Core interface copy and context descriptions." },
+      "label": { "displayName": "Compact Label", "purpose": "Metadata, toolbar controls, table chrome, and dense secondary copy." },
+      "mono": { "displayName": "Operational Mono", "purpose": "YAML, diffs, logs, terminal output, and object identifiers." }
+    },
+    "shadows": [
+      { "name": "popover-ambient", "value": "0 4px 6px -1px rgb(0 0 0 / 10%), 0 2px 4px -2px rgb(0 0 0 / 10%)", "purpose": "Select and menu popovers only; resting workspace surfaces remain shadowless." }
+    ],
+    "motion": [
+      { "name": "state-fast", "value": "100ms ease", "purpose": "Source-list and resource-row hover or selection transitions." },
+      { "name": "state-standard", "value": "120ms ease", "purpose": "Context rows and compact state changes." },
+      { "name": "component-standard", "value": "150ms ease", "purpose": "Buttons, badges, and tabs." },
+      { "name": "ease-out", "value": "cubic-bezier(0.23, 1, 0.32, 1)", "purpose": "Selected-state indicator settling motion." }
+    ],
+    "breakpoints": [
+      { "name": "desktop-compact", "value": "1120px" },
+      { "name": "desktop-tight", "value": "960px" },
+      { "name": "desktop-minimum", "value": "900px" },
+      { "name": "short-viewport-height", "value": "720px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The leading action within a local operation or confirmation flow.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Apply changes</button>",
+      "css": ".ds-btn-primary { height: 28px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: var(--primary, #007aff); color: var(--primary-foreground, #fff); font: 600 11px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease, transform 150ms ease; cursor: pointer; } .ds-btn-primary:hover { filter: brightness(1.04); } .ds-btn-primary:focus-visible { outline: 2px solid var(--focus, #007aff); outline-offset: 2px; } .ds-btn-primary:active { transform: scale(.97); }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "A neutral operation button for ordinary or reversible actions.",
+      "html": "<button class=\"ds-btn-outline\" type=\"button\">Scale</button>",
+      "css": ".ds-btn-outline { height: 28px; padding: 0 8px; border: 1px solid var(--border, rgb(60 60 67 / 18%)); border-radius: 6px; background: var(--surface-muted, #f6f6f7); color: var(--text, #1d1d1f); font: 600 11px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease, transform 150ms ease; cursor: pointer; } .ds-btn-outline:hover { border-color: var(--border-strong, rgb(60 60 67 / 28%)); background: var(--surface-hover, #ededf0); } .ds-btn-outline:focus-visible { outline: 2px solid var(--focus, #007aff); outline-offset: 2px; } .ds-btn-outline:active { transform: scale(.97); }"
+    },
+    {
+      "name": "Ghost Icon Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "A low-chrome toolbar action whose icon carries an accessible label.",
+      "html": "<button class=\"ds-btn-ghost\" type=\"button\" aria-label=\"Refresh resources\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6v6h-6\"/><path d=\"M20 12a8 8 0 1 1-2.34-5.66L20 8\"/></svg></button>",
+      "css": ".ds-btn-ghost { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary, #66666b); transition: color 120ms ease, background-color 120ms ease, transform 150ms ease; cursor: pointer; } .ds-btn-ghost:hover { color: var(--text, #1d1d1f); background: var(--surface-hover, #ededf0); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--focus, #007aff); outline-offset: 0; } .ds-btn-ghost:active { transform: scale(.97); }"
+    },
+    {
+      "name": "Toolbar Search Field",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "The centered unified-toolbar filter for the current resource set.",
+      "html": "<label class=\"ds-search\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/></svg><input aria-label=\"Filter current resources\" placeholder=\"Filter current resources\"/><kbd>⌘F</kbd></label>",
+      "css": ".ds-search { display: flex; height: 30px; align-items: center; gap: 8px; padding: 0 8px 0 11px; border: 1px solid var(--border, rgb(60 60 67 / 18%)); border-radius: 7px; background: var(--surface-muted, #f6f6f7); color: var(--text-secondary, #66666b); font: 400 13px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; } .ds-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text, #1d1d1f); font: inherit; } .ds-search kbd { padding: 2px 5px; border: 1px solid var(--border, rgb(60 60 67 / 18%)); border-radius: 4px; background: var(--surface, #fff); color: var(--faint, #68686d); font-size: 10px; } .ds-search:hover { border-color: var(--border-strong, rgb(60 60 67 / 28%)); } .ds-search:focus-within { border-color: var(--focus, #007aff); box-shadow: 0 0 0 1px var(--focus, #007aff); }"
+    },
+    {
+      "name": "Source List Item",
+      "kind": "nav",
+      "refersTo": "source-list-item-active",
+      "description": "A compact persistent navigation row with tonal active selection.",
+      "html": "<button class=\"ds-source-item\" type=\"button\" aria-current=\"page\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"m12 3 8 4.5v9L12 21l-8-4.5v-9z\"/><path d=\"m4.3 7.7 7.7 4.4 7.7-4.4M12 21v-8.9\"/></svg><span>Deployments</span></button>",
+      "css": ".ds-source-item { display: flex; width: 100%; height: 29px; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary, #66666b); font: 600 12px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; text-align: left; transition: color 100ms ease, background-color 100ms ease; cursor: pointer; } .ds-source-item:hover { color: var(--text, #1d1d1f); background: color-mix(in srgb, var(--surface, #fff) 62%, transparent); } .ds-source-item[aria-current='page'] { color: var(--sidebar-accent-foreground, #0059b7); background: var(--sidebar-accent, rgb(0 122 255 / 11%)); } .ds-source-item:focus-visible { outline: 2px solid var(--focus, #007aff); outline-offset: -2px; }"
+    },
+    {
+      "name": "Resource Table Row",
+      "kind": "custom",
+      "refersTo": "resource-table-row-selected",
+      "description": "A 38px virtualized data row with a border-led scan rhythm and tonal selection.",
+      "html": "<button class=\"ds-resource-row\" type=\"button\" aria-selected=\"true\"><span class=\"ds-resource-name\"><i aria-hidden=\"true\"></i>api-server</span><span>platform</span><span>Ready</span><span>3/3</span><span>12d</span></button>",
+      "css": ".ds-resource-row { display: grid; width: 100%; height: 38px; grid-template-columns: minmax(220px,2fr) minmax(100px,1fr) minmax(90px,1fr) 62px 52px; align-items: center; padding: 0 14px; border: 0; border-bottom: 1px solid var(--border, rgb(60 60 67 / 18%)); background: var(--surface, #fff); color: var(--text-secondary, #66666b); font: 400 12px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; text-align: left; transition: color 100ms ease, background-color 100ms ease; cursor: pointer; } .ds-resource-name { display: flex; align-items: center; gap: 8px; color: var(--text, #1d1d1f); font-weight: 560; } .ds-resource-name i { width: 7px; height: 7px; border-radius: 50%; background: var(--healthy, #18753a); } .ds-resource-row:hover { background: var(--surface-hover, #ededf0); } .ds-resource-row[aria-selected='true'] { color: var(--text, #1d1d1f); background: color-mix(in srgb, var(--focus, #007aff) 11%, var(--surface, #fff)); } .ds-resource-row:focus-visible { outline: 2px solid var(--focus, #007aff); outline-offset: -2px; }"
+    },
+    {
+      "name": "Line Tabs",
+      "kind": "nav",
+      "refersTo": "tabs-line",
+      "description": "Full-detail tabs that preserve a flat section plane and underline only the active view.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button role=\"tab\" aria-selected=\"true\">Overview</button><button role=\"tab\" aria-selected=\"false\">YAML</button><button role=\"tab\" aria-selected=\"false\">Events</button></div>",
+      "css": ".ds-tabs { display: flex; height: 38px; align-items: stretch; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--border, rgb(60 60 67 / 18%)); background: var(--surface, #fff); } .ds-tabs button { position: relative; padding: 0 6px; border: 0; background: transparent; color: var(--text-secondary, #66666b); font: 500 12px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; transition: color 150ms ease; cursor: pointer; } .ds-tabs button:hover { color: var(--text, #1d1d1f); } .ds-tabs button[aria-selected='true'] { color: var(--text, #1d1d1f); } .ds-tabs button[aria-selected='true']::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--text, #1d1d1f); content: ''; } .ds-tabs button:focus-visible { outline: 2px solid var(--focus, #007aff); outline-offset: -2px; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "status-badge",
+      "description": "A compact state annotation that pairs color with readable status text.",
+      "html": "<span class=\"ds-status\"><i aria-hidden=\"true\"></i>Ready</span>",
+      "css": ".ds-status { display: inline-flex; height: 20px; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid transparent; border-radius: 999px; background: var(--secondary, #e9e9ec); color: var(--secondary-foreground, #1d1d1f); font: 600 10px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease; } .ds-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--healthy, #18753a); }"
+    },
+    {
+      "name": "Dry-run Review Dialog",
+      "kind": "custom",
+      "refersTo": "dialog",
+      "description": "A focused modal surface for reviewing an exact mutation Diff before Apply.",
+      "html": "<div class=\"ds-dialog-stage\"><section class=\"ds-dialog\" role=\"dialog\" aria-labelledby=\"ds-dialog-title\"><h2 id=\"ds-dialog-title\">Review dry-run changes</h2><p>Review the exact changes before applying them.</p><pre>--- live object\n+++ dry-run object\n- replicas: 1\n+ replicas: 2</pre><footer><button type=\"button\">Cancel</button><button class=\"ds-dialog-apply\" type=\"button\">Apply changes</button></footer></section></div>",
+      "css": ".ds-dialog-stage { padding: 36px; background: rgb(0 0 0 / 80%); } .ds-dialog { width: min(680px, calc(100vw - 72px)); padding: 16px; border-radius: 12px; background: var(--popover, #fff); color: var(--popover-foreground, #1d1d1f); box-shadow: 0 0 0 1px rgb(29 29 31 / 10%); font: 400 13px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; } .ds-dialog h2 { margin: 0; font-size: 14px; font-weight: 620; } .ds-dialog p { color: var(--text-secondary, #66666b); } .ds-dialog pre { min-height: 180px; padding: 14px 16px; overflow: auto; border: 1px solid var(--border, rgb(60 60 67 / 18%)); border-radius: 7px; background: var(--surface-muted, #f6f6f7); color: var(--text, #1d1d1f); font: 11px/1.55 'SF Mono', ui-monospace, monospace; } .ds-dialog footer { display: flex; justify-content: flex-end; gap: 8px; } .ds-dialog button { height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text, #1d1d1f); cursor: pointer; } .ds-dialog .ds-dialog-apply { background: var(--primary, #007aff); color: var(--primary-foreground, #fff); } .ds-dialog button:hover { background: var(--surface-hover, #ededf0); } .ds-dialog .ds-dialog-apply:hover { filter: brightness(1.04); } .ds-dialog button:focus-visible { outline: 2px solid var(--focus, #007aff); outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Quiet Native Workbench",
+    "overview": "Aster is a restrained, professional, high-density desktop workspace. It feels native to macOS through system typography, compact controls, desktop conventions, calm neutral materials, and clear focus behavior—not through decorative chrome.\n\nIts defining topology is a persistent Source List beside one continuous workspace, with a unified scope toolbar, dense resource table, and full-width detail flow. Aptakube authorizes that topology only; Aster's visual skin remains its own restrained combination of neutral layers, system-blue interaction, sparse orange identity, and border-led structure.",
+    "keyCharacteristics": [
+      "Persistent Source List and one uninterrupted work area",
+      "Compact 29–38px navigation, control, and table rhythms",
+      "System blue for interaction, Aster orange for identity, semantic color for status",
+      "Flat tonal layering with fine separators and shadow reserved for overlays",
+      "Full-width resource detail that preserves navigation context"
+    ],
+    "rules": [
+      { "name": "The Two Accents, Two Jobs Rule", "body": "System blue owns interaction; Aster orange owns identity. Do not swap their roles or let either dominate the neutral workspace.", "section": "colors" },
+      { "name": "The Semantic Color Rule", "body": "Green, amber, and red are reserved for operational meaning and never serve as decoration.", "section": "colors" },
+      { "name": "The Native Type Rule", "body": "Build hierarchy with size, weight, and density inside the system stack; do not introduce a decorative display face into the workbench.", "section": "typography" },
+      { "name": "The Flat-by-Default Rule", "body": "Resting workspace surfaces remain shadowless; elevation is reserved for modal and popover layers.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do preserve the persistent Source List, unified toolbar, dense resource table, and full-workspace detail topology.",
+      "Do use system blue for focus, selection, navigation, and primary actions; keep Aster orange rare and brand-specific.",
+      "Do express hierarchy with neutral tonal layers, one-pixel separators, compact spacing, and clear type weight.",
+      "Do keep primary workflows keyboard-operable, visibly focused, and compatible with reduced motion.",
+      "Do pair every status color with text, an icon, or another non-color cue."
+    ],
+    "donts": [
+      "Don't turn resource lists or detail sections into a card-heavy web dashboard.",
+      "Don't add decorative chrome, ornamental borders, side stripes, or resting shadows to the core workspace.",
+      "Don't borrow Aptakube's visual skin; only its approved workbench topology is part of Aster's system.",
+      "Don't use Aster orange as the general interaction color or system blue as decorative branding.",
+      "Don't hide mutation safety: dry-run state, exact Diff, read-only mode, and the final Apply action must remain explicit."
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+packages:
+  - "apps/desktop"
+
+onlyBuiltDependencies:
+  - "electron"
+  - "esbuild"
+
+# Packaging runs for Intel and Apple Silicon from the same dependency graph.
+supportedArchitectures:
+  os:
+    - "current"
+  cpu:
+    - "x64"
+    - "arm64"
+  libc:
+    - "current"

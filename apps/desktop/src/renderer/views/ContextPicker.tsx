@@ -1,0 +1,471 @@
+import {
+  AlertCircle,
+  ArrowRight,
+  Boxes,
+  CheckCircle2,
+  Gauge,
+  LayoutGrid,
+  List as ListIcon,
+  LoaderCircle,
+  Moon,
+  RefreshCw,
+  Search,
+  Sun,
+} from "lucide-react";
+import { useRef, type KeyboardEvent, type ReactNode } from "react";
+
+import type { ContextInfo, CoreStatus } from "../../shared/types";
+import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import type { ContextLayout } from "../lib/context-picker";
+
+type Theme = "light" | "dark";
+
+interface ContextPickerProps {
+  core: CoreStatus;
+  contexts: ContextInfo[];
+  totalContexts: number;
+  selectedId: string;
+  query: string;
+  layout: ContextLayout;
+  loading: boolean;
+  error: string;
+  theme: Theme;
+  onQueryChange(value: string): void;
+  onLayoutChange(value: ContextLayout): void;
+  onSelect(value: string): void;
+  onRefresh(): void;
+  onConnect(contextId?: string): void;
+  onToggleTheme(): void;
+}
+
+function ContextPicker({
+  core,
+  contexts,
+  totalContexts,
+  selectedId,
+  query,
+  layout,
+  loading,
+  error,
+  theme,
+  onQueryChange,
+  onLayoutChange,
+  onSelect,
+  onRefresh,
+  onConnect,
+  onToggleTheme,
+}: ContextPickerProps) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const selected = contexts.find((context) => context.id === selectedId);
+  const firstSelectableId = contexts.find((context) => !context.error)?.id;
+  const canConnect =
+    core.state === "ready" && !loading && Boolean(selected) && !selected?.error;
+  const coreLabel = {
+    ready: "Core ready",
+    starting: "Starting",
+    error: "Error",
+    stopped: "Stopped",
+  }[core.state];
+
+  function connect(context: ContextInfo) {
+    if (core.state !== "ready" || loading || context.error) return;
+    if (context.id !== selectedId) onSelect(context.id);
+    onConnect(context.id);
+  }
+
+  function focusOption(edgeOrOffset: "first" | "last" | -1 | 1) {
+    const options = Array.from(
+      listRef.current?.querySelectorAll<HTMLButtonElement>(
+        "[data-context-option]:not(:disabled)",
+      ) ?? [],
+    );
+    if (!options.length) return;
+
+    const currentIndex = options.findIndex(
+      (option) => option.dataset.contextId === selectedId,
+    );
+    const nextIndex =
+      edgeOrOffset === "first"
+        ? 0
+        : edgeOrOffset === "last"
+          ? options.length - 1
+          : Math.max(
+              0,
+              Math.min(
+                options.length - 1,
+                (currentIndex < 0 ? 0 : currentIndex) + edgeOrOffset,
+              ),
+            );
+    const next = options[nextIndex];
+    const nextId = next.dataset.contextId;
+    next.focus();
+    if (nextId) onSelect(nextId);
+  }
+
+  function handleOptionKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    context: ContextInfo,
+  ) {
+    if (event.nativeEvent.isComposing) return;
+
+    switch (event.key) {
+      case "Enter":
+        event.preventDefault();
+        connect(context);
+        break;
+      case "ArrowDown":
+      case "ArrowRight":
+        event.preventDefault();
+        focusOption(1);
+        break;
+      case "ArrowUp":
+      case "ArrowLeft":
+        event.preventDefault();
+        focusOption(-1);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusOption("first");
+        break;
+      case "End":
+        event.preventDefault();
+        focusOption("last");
+        break;
+    }
+  }
+
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusOption("first");
+    } else if (event.key === "Enter" && selected) {
+      event.preventDefault();
+      connect(selected);
+    }
+  }
+
+  return (
+    <div className="context-picker" data-testid="context-picker">
+      <header className="context-picker-titlebar">
+        <div className="titlebar-drag" aria-hidden="true" />
+        <div className="context-picker-title-actions">
+          <div
+            className="context-picker-core-status"
+            data-state={core.state}
+            role="status"
+            aria-live="polite"
+            title={core.message || `Core ${core.state}`}
+          >
+            {core.state === "ready" ? (
+              <CheckCircle2 aria-hidden="true" />
+            ) : core.state === "starting" ? (
+              <LoaderCircle className="spin" aria-hidden="true" />
+            ) : (
+              <AlertCircle aria-hidden="true" />
+            )}
+            <span>{coreLabel}</span>
+          </div>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  className="context-picker-theme-toggle"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={theme === "light" ? "Use dark theme" : "Use light theme"}
+                  onClick={onToggleTheme}
+                  data-testid="context-picker-theme-toggle"
+                />
+              }
+            >
+              {theme === "light" ? <Moon aria-hidden="true" /> : <Sun aria-hidden="true" />}
+            </TooltipTrigger>
+            <TooltipContent>
+              {theme === "light" ? "Use dark theme" : "Use light theme"}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </header>
+
+      <main className="context-picker-main">
+        <section
+          className="context-picker-panel"
+          aria-labelledby="context-picker-heading"
+        >
+          <div className="context-picker-heading">
+            <div className="context-picker-brand" aria-hidden="true">
+              <span className="brand-mark">
+                <Gauge size={25} strokeWidth={2.1} />
+              </span>
+              <strong>Aster</strong>
+            </div>
+            <h1 id="context-picker-heading">Choose a cluster</h1>
+            <p>Select a Kubernetes context to open its resource workbench.</p>
+          </div>
+
+          <div
+            className="context-picker-toolbar"
+            role="group"
+            aria-label="Cluster controls"
+          >
+            <label className="context-search">
+              <Search aria-hidden="true" />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search contexts"
+                aria-label="Search contexts"
+                autoComplete="off"
+                data-testid="context-picker-search"
+              />
+            </label>
+
+            <div
+              className="context-layout-toggle"
+              role="group"
+              aria-label="Context layout"
+            >
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      className="context-layout-button"
+                      variant={layout === "grid" ? "secondary" : "ghost"}
+                      size="icon"
+                      aria-label="Grid view"
+                      aria-pressed={layout === "grid"}
+                      onClick={() => onLayoutChange("grid")}
+                      data-testid="context-layout-grid"
+                    />
+                  }
+                >
+                  <LayoutGrid aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipContent>Grid view</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      className="context-layout-button"
+                      variant={layout === "list" ? "secondary" : "ghost"}
+                      size="icon"
+                      aria-label="List view"
+                      aria-pressed={layout === "list"}
+                      onClick={() => onLayoutChange("list")}
+                      data-testid="context-layout-list"
+                    />
+                  }
+                >
+                  <ListIcon aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipContent>List view</TooltipContent>
+              </Tooltip>
+            </div>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    className="context-refresh-button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={loading ? "Refreshing contexts" : "Refresh contexts"}
+                    disabled={loading}
+                    onClick={onRefresh}
+                    data-testid="context-picker-refresh"
+                  />
+                }
+              >
+                <RefreshCw className={loading ? "spin" : undefined} aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent>
+                {loading ? "Refreshing contexts" : "Refresh contexts"}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+
+          <div
+            ref={listRef}
+            className={`context-list context-list-${layout}`}
+            data-layout={layout}
+            data-testid="context-picker-list"
+            aria-live="polite"
+            aria-busy={loading}
+            role="listbox"
+            aria-label="Kubernetes contexts"
+          >
+            {core.state === "starting" || (loading && totalContexts === 0) ? (
+              <ContextState
+                kind="loading"
+                icon={<LoaderCircle className="spin" aria-hidden="true" />}
+                title={
+                  core.state === "starting"
+                    ? "Starting local core"
+                    : "Reading kubeconfig"
+                }
+                description={
+                  core.state === "starting"
+                    ? "Preparing the secure local Kubernetes connection."
+                    : "Discovering local Kubernetes contexts."
+                }
+              />
+            ) : core.state === "error" || core.state === "stopped" ? (
+              <ContextState
+                kind="core-error"
+                tone="error"
+                icon={<AlertCircle aria-hidden="true" />}
+                title="Local core is unavailable"
+                description={core.message || `Core ${core.state}`}
+              />
+            ) : error ? (
+              <ContextState
+                kind="load-error"
+                tone="error"
+                icon={<AlertCircle aria-hidden="true" />}
+                title="Could not load contexts"
+                description={error}
+                action={
+                  <Button type="button" variant="outline" onClick={onRefresh}>
+                    Try again
+                  </Button>
+                }
+              />
+            ) : contexts.length ? (
+              contexts.map((context) => {
+                const isSelected = context.id === selectedId;
+                const isTabStop = isSelected || (!selected && context.id === firstSelectableId);
+
+                return (
+                  <Button
+                    key={context.id}
+                    type="button"
+                    className="context-card"
+                    variant="ghost"
+                    role="option"
+                    aria-selected={isSelected}
+                    disabled={Boolean(context.error)}
+                    tabIndex={isTabStop ? 0 : -1}
+                    data-context-option
+                    data-context-id={context.id}
+                    data-selected={isSelected || undefined}
+                    data-current={context.current || undefined}
+                    data-testid={`context-option-${context.id}`}
+                    onClick={() => onSelect(context.id)}
+                    onDoubleClick={() => connect(context)}
+                    onKeyDown={(event) => handleOptionKeyDown(event, context)}
+                  >
+                    <span className="kubernetes-mark" aria-hidden="true">
+                      <Boxes />
+                    </span>
+                    <span className="context-card-copy">
+                      <strong>{context.name}</strong>
+                      <span>{context.cluster || "Kubernetes cluster"}</span>
+                      {context.error && <small>{context.error}</small>}
+                    </span>
+                    {context.current && (
+                      <span className="current-context-badge">Current</span>
+                    )}
+                    <span className="context-selected-indicator" aria-hidden="true">
+                      <CheckCircle2 />
+                    </span>
+                  </Button>
+                );
+              })
+            ) : (
+              <ContextState
+                kind="empty"
+                icon={<Search aria-hidden="true" />}
+                title={totalContexts ? "No matching contexts" : "No contexts found"}
+                description={
+                  totalContexts
+                    ? "Try another name or cluster."
+                    : "Add a context to your kubeconfig, then refresh."
+                }
+              />
+            )}
+          </div>
+
+          <footer className="context-picker-footer">
+            <span className="context-picker-selection" role="status" aria-live="polite">
+              {selected ? (
+                <>
+                  <strong>{selected.name}</strong> selected
+                </>
+              ) : (
+                `${totalContexts} context${totalContexts === 1 ? "" : "s"} available`
+              )}
+            </span>
+            <Button
+              type="button"
+              className="connect-context"
+              size="lg"
+              disabled={!canConnect}
+              onClick={() => selected && connect(selected)}
+              data-testid="context-picker-connect"
+            >
+              Connect
+              <ArrowRight data-icon="inline-end" aria-hidden="true" />
+            </Button>
+          </footer>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function ContextState({
+  kind,
+  tone,
+  icon,
+  title,
+  description,
+  action,
+}: {
+  kind: "loading" | "core-error" | "load-error" | "empty";
+  tone?: "error";
+  icon: ReactNode;
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
+  return (
+    <Empty
+      className="context-picker-state"
+      data-state={kind}
+      data-tone={tone}
+      data-testid={`context-picker-${kind}`}
+      role={tone === "error" ? "alert" : "status"}
+    >
+      <EmptyHeader>
+        <EmptyMedia variant="icon">{icon}</EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+      {action && <EmptyContent>{action}</EmptyContent>}
+    </Empty>
+  );
+}
+
+export { ContextPicker };
+export type { ContextPickerProps };
