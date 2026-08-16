@@ -22,6 +22,10 @@ const userData = path.join(temporaryRoot, "desktop-data");
 await fs.mkdir(outputDir, { recursive: true });
 
 const fixture = mode === "fixture" ? await startKubernetesFixture(temporaryRoot) : undefined;
+// Serves an update feed with a newer version so the update notice can be
+// captured end-to-end (check → available → dismiss) against the real
+// electron-updater client in the packaged app.
+const updaterFixture = mode === "fixture" ? await startUpdaterFixture() : undefined;
 const consoleErrors = [];
 const launchStartedAt = performance.now();
 const app = await electron.launch({
@@ -29,7 +33,12 @@ const app = await electron.launch({
   env: {
     ...process.env,
     ASTER_DESKTOP_USER_DATA: userData,
-    ...(fixture ? { KUBECONFIG: fixture.kubeconfig } : {}),
+    ...(fixture ? {
+      KUBECONFIG: fixture.kubeconfig,
+      // A second source file: proves multi-source merging end to end.
+      ASTER_KUBECONFIG_SOURCES: fixture.extraKubeconfig,
+    } : {}),
+    ...(updaterFixture ? { ASTER_UPDATER_FEED: updaterFixture.url } : {}),
   },
 });
 
@@ -42,6 +51,7 @@ const result = {
   nativeClusterScreenshot: path.join(outputDir, `aster-${mode}-clusters-native-900x640.png`),
   nativeDarkClusterScreenshot: path.join(outputDir, `aster-${mode}-clusters-native-dark-900x640.png`),
   compactScreenshot: path.join(outputDir, `aster-${mode}-resources-900x640${themeSuffix}.png`),
+  namespacePopupScreenshot: path.join(outputDir, `aster-${mode}-namespace-popup-900x640${themeSuffix}.png`),
   screenshot: path.join(outputDir, `aster-${mode}-resources-1280x800${themeSuffix}.png`),
   paletteScreenshot: path.join(outputDir, `aster-${mode}-command-palette-900x640${themeSuffix}.png`),
   paletteWideScreenshot: path.join(outputDir, `aster-${mode}-command-palette-1280x800${themeSuffix}.png`),
@@ -52,8 +62,13 @@ const result = {
   customResourceScreenshot: path.join(outputDir, `aster-${mode}-custom-resource-1280x800${themeSuffix}.png`),
   customResourceCompactScreenshot: path.join(outputDir, `aster-${mode}-custom-resource-900x640${themeSuffix}.png`),
   paletteSearchScreenshot: path.join(outputDir, `aster-${mode}-palette-search-900x640${themeSuffix}.png`),
+  settingsScreenshot: path.join(outputDir, `aster-${mode}-settings-900x640${themeSuffix}.png`),
+  sidebarRailScreenshot: path.join(outputDir, `aster-${mode}-sidebar-rail-1280x800${themeSuffix}.png`),
   compactDetailScreenshot: path.join(outputDir, `aster-${mode}-deployment-900x640${themeSuffix}.png`),
   detailScreenshot: path.join(outputDir, `aster-${mode}-deployment-1280x800${themeSuffix}.png`),
+  ...(updaterFixture ? {
+    updateNoticeScreenshot: path.join(outputDir, `aster-${mode}-update-notice-900x640${themeSuffix}.png`),
+  } : {}),
   ...(fixture ? {
     diffScreenshot: path.join(outputDir, `aster-fixture-dry-run-diff${themeSuffix}.png`),
     diagnosticsScreenshot: path.join(outputDir, `aster-fixture-pod-diagnostics${themeSuffix}.png`),
@@ -86,6 +101,33 @@ try {
   assert.equal(systemAppearance.applied, systemAppearance.osDark ? "dark" : "light", "system theme did not resolve to the OS appearance");
 
   result.viewportEvidence.push(await setElectronViewport(app, page, 900, 640, "cluster-picker"));
+
+  if (updaterFixture) {
+    const notice = page.getByTestId("update-notice");
+    await notice.waitFor({ timeout: 20_000 });
+    await notice.filter({ hasText: "9.9.9" }).waitFor({ timeout: 5_000 });
+    assert.equal(
+      await page.getByTestId("update-link").getAttribute("href"),
+      "https://github.com/zjy365/aster/releases/tag/v9.9.9",
+      "update notice changelog link points at the wrong release",
+    );
+    const noticeText = await notice.innerText();
+    assert.ok(noticeText.includes("Fixture release notes"), `update notice lost its release notes: ${noticeText}`);
+    assert.ok(!/[<>]|&amp;/.test(noticeText), `update notes were not stripped to plain text: ${noticeText}`);
+    const noticeBox = await notice.boundingBox();
+    assert.ok(
+      noticeBox && noticeBox.x >= 0 && noticeBox.y >= 0
+        && noticeBox.x + noticeBox.width <= 901 && noticeBox.y + noticeBox.height <= 641,
+      `update notice overflows the 900x640 viewport: ${JSON.stringify(noticeBox)}`,
+    );
+    await page.screenshot({ path: result.updateNoticeScreenshot, animations: "disabled" });
+    result.updateNotice = { version: "9.9.9", dismissed: false };
+    await page.getByTestId("update-dismiss").click();
+    await notice.waitFor({ state: "detached", timeout: 5_000 });
+    result.updateNotice.dismissed = true;
+    progress("update notice verified and dismissed");
+  }
+
   const contextCount = await page.getByRole("option").count();
   assert.ok(contextCount > 0, `${mode} kubeconfig exposes no contexts`);
   result.clusterPicker = { search: false, layoutToggle: false, connect: false, roundTrip: false, ...(fixture ? { requestsBeforeConnect: fixture.requests.length } : {}) };
@@ -93,6 +135,21 @@ try {
   assert.ok(pickerLayout.contextPicker, `cluster picker is missing: ${JSON.stringify(pickerLayout)}`);
   assertNoViewportOverflow(pickerLayout, "cluster picker at 900x640");
   assertPickerRegionsVisible(pickerLayout, "cluster picker at 900x640");
+  if (fixture) {
+    // Multi-source: the extra kubeconfig file contributes its own context
+    // under a labeled group, without touching the primary chain.
+    await page.getByTestId("context-option-fixture-extra").waitFor({ state: "visible", timeout: 10_000 });
+    const groupLabels = await page.locator(".context-source-label").allTextContents();
+    assert.ok(groupLabels.some((label) => label.includes("extra-cluster.yaml")), `source group label missing: ${JSON.stringify(groupLabels)}`);
+    // Settings dialog: default chain entry is present and not removable.
+    await page.getByTestId("context-picker-settings").click();
+    await page.getByTestId("settings-dialog").waitFor();
+    await page.locator(".settings-source-item").filter({ hasText: "~/.kube/config" }).waitFor();
+    await page.screenshot({ path: result.settingsScreenshot, animations: "disabled" });
+    await page.keyboard.press("Escape");
+    await page.getByTestId("settings-dialog").waitFor({ state: "detached" });
+    result.clusterPicker.multiSource = true;
+  }
   if (fixture) assert.equal(fixture.requests.length, 0, "cluster APIs were called before the user connected a context");
   const contextSearch = page.getByTestId("context-picker-search");
   await contextSearch.fill("__missing_context__");
@@ -131,13 +188,19 @@ try {
     pickerRegressions.push("Aster branding is rendered in the macOS titlebar beside the traffic lights");
   }
   const pickerThemeToggle = page.getByTestId("context-picker-theme-toggle");
-  if (await page.evaluate(() => document.documentElement.dataset.theme) !== "light") {
-    await pickerThemeToggle.click();
-    await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
-  }
+  // The toggle cycles system → light → dark → system, so reaching a target
+  // effective theme can take up to three clicks.
+  const cyclePickerTheme = async (target) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (await page.evaluate(() => document.documentElement.dataset.theme) === target) return;
+      await pickerThemeToggle.click();
+      await page.waitForTimeout(150);
+    }
+    await page.waitForFunction((expected) => document.documentElement.dataset.theme === expected, target);
+  };
+  await cyclePickerTheme("light");
   const lightAppearance = await readAppearance(page);
-  await pickerThemeToggle.click();
-  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  await cyclePickerTheme("dark");
   const darkAppearance = await readAppearance(page);
   if (lightAppearance.windowBackground === darkAppearance.windowBackground || lightAppearance.textColor === darkAppearance.textColor) {
     pickerRegressions.push(`dark theme does not change computed renderer colors: ${JSON.stringify({ lightAppearance, darkAppearance })}`);
@@ -146,8 +209,7 @@ try {
   if (nativeThemeSource !== "dark") pickerRegressions.push(`Electron nativeTheme stayed ${nativeThemeSource} after selecting dark`);
   await page.screenshot({ path: result.darkClusterScreenshot, animations: "disabled" });
   await captureNativeWindow(app, result.nativeDarkClusterScreenshot);
-  await pickerThemeToggle.click();
-  await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+  await cyclePickerTheme("light");
   result.clusterPicker.appearance = true;
   await contextSearch.focus();
   await page.screenshot({ path: result.focusedClusterScreenshot, animations: "disabled" });
@@ -182,6 +244,22 @@ try {
   await page.getByTestId("workbench-shell").waitFor();
   await waitForResourceLoad(page);
   result.performance.launchToFirstPageMs = roundedElapsed(launchStartedAt);
+
+  // Namespace combobox: opens with a search input, filters the list, and
+  // Escape closes it without disturbing the current selection.
+  await page.getByTestId("namespace-select").click();
+  const namespaceFilter = page.getByTestId("namespace-filter");
+  await namespaceFilter.waitFor({ state: "visible" });
+  const namespaceItems = () => [...document.querySelectorAll(".namespace-combobox-item")].map((el) => el.textContent?.trim() ?? "");
+  await page.waitForFunction(() => document.querySelectorAll(".namespace-combobox-item").length === 2);
+  assert.deepEqual(await page.evaluate(namespaceItems), ["All namespaces", "fast-ns"], "namespace popup did not list all namespaces initially");
+  await namespaceFilter.fill("fast");
+  await page.waitForFunction(() => document.querySelectorAll(".namespace-combobox-item").length === 1);
+  assert.deepEqual(await page.evaluate(namespaceItems), ["fast-ns"], "namespace filter did not narrow the list");
+  await page.screenshot({ path: result.namespacePopupScreenshot, animations: "disabled" });
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelectorAll(".namespace-combobox-item").length === 0);
+  assert.equal((await page.getByTestId("namespace-select").innerText()).trim(), "fast-ns", "namespace selection changed after closing the filter popup");
 
   if (workbenchTheme === "dark") {
     await selectWorkbenchTheme(page, app, "Dark");
@@ -248,6 +326,7 @@ try {
   }
 
   await page.screenshot({ path: result.screenshot, animations: "disabled" });
+  result.sidebar = await assertSidebarCollapseAndRail(page, result);
   result.performance.detailLoadMs = await clickDeploymentAndAssertSanitizedYaml(page, fixture);
   progress("detail, Events and Related complete");
   result.viewportEvidence.push(await setElectronViewport(app, page, 900, 640, "resource-detail"));
@@ -303,6 +382,7 @@ try {
 } finally {
   await app.close();
   await fixture?.close();
+  await updaterFixture?.close();
   await fs.rm(temporaryRoot, { recursive: true, force: true });
 }
 
@@ -543,8 +623,17 @@ async function assertFixtureWorkflows(page, fixture, diffScreenshot, diagnostics
   await page.waitForFunction(() => ![...document.querySelectorAll(".table-row .primary-cell")].some((cell) => cell.textContent?.includes("fixture-created")), undefined, { timeout: 15_000 });
   progress("delete complete");
 
-  // CRD discovery: the custom group appears, and custom resources use the same read/write pipeline.
+  // CRD discovery: custom kinds nest under one "Custom Resources" umbrella
+  // with a collapsible subgroup per API group; subgroups start collapsed.
   await waitForResourceLoad(page);
+  const umbrellaToggle = page.getByTestId("group-toggle-custom-resources");
+  await umbrellaToggle.waitFor({ state: "visible" });
+  assert.equal(await umbrellaToggle.getAttribute("aria-expanded"), "true", "Custom Resources umbrella should start expanded");
+  const subgroupToggle = page.getByTestId("group-toggle-custom-resources-example-com");
+  assert.equal(await subgroupToggle.getAttribute("aria-expanded"), "false", "custom API subgroup should start collapsed");
+  assert.equal(await page.getByTestId("resource-nav-crd-example-com-v1-widgets").count(), 0, "collapsed subgroup still rendered its items");
+  await subgroupToggle.click();
+  assert.equal(await subgroupToggle.getAttribute("aria-expanded"), "true", "custom API subgroup did not expand on toggle");
   await clickSidebarKind(page, fixture, "resource-nav-crd-example-com-v1-widgets", "Widgets", "/widgets");
   await waitForResourceLoad(page);
   await page.screenshot({ path: result.customResourceScreenshot, animations: "disabled" });
@@ -651,6 +740,43 @@ async function assertFixtureWorkflows(page, fixture, diffScreenshot, diagnostics
       mainReadOnlyBoundary: true,
     },
   };
+}
+
+async function assertSidebarCollapseAndRail(page, result) {
+  // Group folding: collapse a group that does not contain the active kind
+  // (the active kind's group auto-expands by design).
+  const storageToggle = page.getByTestId("group-toggle-storage");
+  assert.equal(await storageToggle.getAttribute("aria-expanded"), "true", "built-in groups should start expanded");
+  await storageToggle.click();
+  assert.equal(await storageToggle.getAttribute("aria-expanded"), "false", "Storage group did not collapse");
+  assert.equal(await page.getByTestId("resource-nav-storageclasses").count(), 0, "collapsed group still rendered its items");
+  const groupPrefs = await page.evaluate(() => JSON.parse(localStorage.getItem("aster.sidebar.groupCollapsed") || "{}"));
+  assert.equal(groupPrefs.Storage, true, "group collapse was not persisted to localStorage");
+  await storageToggle.click();
+  assert.equal(await storageToggle.getAttribute("aria-expanded"), "true", "Storage group did not re-expand");
+  await page.getByTestId("resource-nav-storageclasses").waitFor();
+
+  // Icon rail: the titlebar toggle collapses the sidebar, Meta+B restores it.
+  const sourceList = page.getByTestId("source-list");
+  const expandedWidth = (await sourceList.boundingBox())?.width || 0;
+  await page.getByTestId("toggle-sidebar").click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="workbench-shell"]')?.classList.contains("sidebar-rail"));
+  const railWidth = (await sourceList.boundingBox())?.width || 0;
+  assert.ok(railWidth > 0 && railWidth <= 56 && railWidth < expandedWidth, `rail width ${railWidth}px did not shrink from ${expandedWidth}px`);
+  assert.equal(await page.evaluate(() => localStorage.getItem("aster.sidebar.collapsed")), "true", "rail state was not persisted");
+  if (process.platform === "darwin") {
+    const toggleBox = await page.getByTestId("toggle-sidebar").boundingBox();
+    assert.ok(toggleBox && toggleBox.y >= 31, `rail toggle overlaps the macOS traffic lights (y 18-30): ${JSON.stringify(toggleBox)}`);
+  }
+  assert.equal(await page.getByTestId("group-toggle-workloads").count(), 0, "group labels should be hidden in rail mode");
+  await page.getByTestId("resource-nav-deployments").waitFor({ state: "visible" });
+  assertNoViewportOverflow(await readLayout(page), "sidebar rail at 1280x800");
+  await page.screenshot({ path: result.sidebarRailScreenshot, animations: "disabled" });
+  await page.keyboard.press("Meta+B");
+  await page.waitForFunction(() => !document.querySelector('[data-testid="workbench-shell"]')?.classList.contains("sidebar-rail"));
+  const restoredWidth = (await sourceList.boundingBox())?.width || 0;
+  assert.ok(Math.abs(restoredWidth - expandedWidth) <= 1, `sidebar width ${restoredWidth}px did not restore to ${expandedWidth}px`);
+  return { groupFold: true, iconRail: true };
 }
 
 async function assertAndApplyDryRun(page, expected) {
@@ -896,12 +1022,46 @@ async function startKubernetesFixture(temporaryRoot) {
   const [fastPort, slowPort] = await Promise.all([listen(fastServer), listen(slowServer)]);
   const kubeconfig = path.join(temporaryRoot, "fixture-kubeconfig.yaml");
   await fs.writeFile(kubeconfig, fixtureKubeconfig(fastPort, slowPort), { mode: 0o600 });
+  const extraKubeconfig = path.join(temporaryRoot, "extra-cluster.yaml");
+  await fs.writeFile(extraKubeconfig, extraKubeconfigDocument(fastPort), { mode: 0o600 });
   return {
     kubeconfig,
+    extraKubeconfig,
     requests,
     close: async () => {
       await Promise.all([closeServer(fastServer), closeServer(slowServer)]);
     },
+  };
+}
+
+async function startUpdaterFixture() {
+  const sha512 = `${"A".repeat(87)}=`;
+  const latestYml = [
+    "version: 9.9.9",
+    "path: Aster_9.9.9.zip",
+    `sha512: ${sha512}`,
+    "releaseNotes: |",
+    "  Fixture release notes with **markdown** and <b>html</b> markup",
+    "files:",
+    "  - url: Aster_9.9.9.zip",
+    `    sha512: ${sha512}`,
+    "    size: 1024",
+    "",
+  ].join("\n");
+  const server = http.createServer((request, response) => {
+    const url = new URL(request.url || "/", "http://updater.local");
+    if (request.method === "GET" && url.pathname.endsWith(".yml")) {
+      response.writeHead(200, { "content-type": "text/yaml" });
+      response.end(latestYml);
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  const port = await listen(server);
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => closeServer(server),
   };
 }
 
@@ -1234,6 +1394,10 @@ function closeServer(server) {
 
 function fixtureKubeconfig(fastPort, slowPort) {
   return `apiVersion: v1\nkind: Config\nclusters:\n  - name: fixture-fast-cluster\n    cluster:\n      server: http://127.0.0.1:${fastPort}\n  - name: fixture-slow-cluster\n    cluster:\n      server: http://127.0.0.1:${slowPort}\nusers:\n  - name: fixture-fast-user\n    user:\n      token: fast-token\n  - name: fixture-slow-user\n    user:\n      token: slow-token\ncontexts:\n  - name: fixture-fast\n    context:\n      cluster: fixture-fast-cluster\n      user: fixture-fast-user\n      namespace: fast-ns\n  - name: fixture-slow\n    context:\n      cluster: fixture-slow-cluster\n      user: fixture-slow-user\n      namespace: slow-ns\ncurrent-context: fixture-fast\n`;
+}
+
+function extraKubeconfigDocument(fastPort) {
+  return `apiVersion: v1\nkind: Config\nclusters:\n  - name: fixture-extra-cluster\n    cluster:\n      server: http://127.0.0.1:${fastPort}\nusers:\n  - name: fixture-extra-user\n    user:\n      token: extra-token\ncontexts:\n  - name: fixture-extra\n    context:\n      cluster: fixture-extra-cluster\n      user: fixture-extra-user\n      namespace: fast-ns\n`;
 }
 
 function kubernetesList(kind, items, resourceVersion) {
