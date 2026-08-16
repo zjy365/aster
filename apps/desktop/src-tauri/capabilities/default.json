@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Renderer capabilities: core defaults only (events for listen/emit). Dialog and updater run through Rust-side proxies, not the renderer.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

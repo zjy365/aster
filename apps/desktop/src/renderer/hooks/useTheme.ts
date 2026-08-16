@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AppearanceTheme } from "../../shared/types";
+import { desktop } from "../lib/desktop";
 
 export type EffectiveTheme = "light" | "dark";
 
@@ -34,7 +35,7 @@ export function useTheme(): {
     document.documentElement.dataset.theme = effectiveTheme;
     document.documentElement.classList.toggle("dark", effectiveTheme === "dark");
     localStorage.setItem("aster.theme", theme);
-    void window.aster.appearance.setThemeSource(theme);
+    void desktop.appearance.setThemeSource(theme);
   }, [effectiveTheme, theme]);
 
   // Cycle system → light → dark → system so the "follow system" preference is

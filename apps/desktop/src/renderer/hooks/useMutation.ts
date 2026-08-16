@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ResourceKind, ResourceMutationRequest, ResourceRow } from "../../shared/types";
 import { messageOf } from "../lib/format";
+import { desktop } from "../lib/desktop";
 
 export type MutationDraft = Omit<ResourceMutationRequest, "contextId" | "resourceKind" | "namespace" | "name">;
 
@@ -75,7 +76,7 @@ export function useMutation({ contextId, kind, namespace, selected, readOnly, wr
       const base: ResourceMutationRequest = isCreate
         ? { contextId, resourceKind: kind, namespace: namespace || undefined, name: "", ...request }
         : { contextId, resourceKind: kind, namespace: selected?.namespace || undefined, name: selected?.name || "", resourceVersion: selected?.resourceVersion, ...request };
-      const preview = await window.aster.resources.mutate({ ...base, dryRun: true });
+      const preview = await desktop.resources.mutate({ ...base, dryRun: true });
       setMutationPreview(preview.yaml || "");
       setPendingMutation(base);
       setMutationMessage(preview.changed ? "Dry-run ready — review the Diff" : "Dry-run found no changes");
@@ -91,7 +92,7 @@ export function useMutation({ contextId, kind, namespace, selected, readOnly, wr
     setMutationBusy(true);
     setMutationMessage("Applying…");
     try {
-      const applied = await window.aster.resources.mutate({ ...pendingMutation, dryRun: false });
+      const applied = await desktop.resources.mutate({ ...pendingMutation, dryRun: false });
       const targetName = applied.name || pendingMutation.name;
       setJournalByContext((all) => ({ ...all, [pendingMutation.contextId]: [`${new Date().toLocaleTimeString()} ${pendingMutation.operation} ${targetName}`.trim(), ...(all[pendingMutation.contextId] || [])].slice(0, 20) }));
       setMutationMessage(applied.changed ? "Applied" : "No change needed");

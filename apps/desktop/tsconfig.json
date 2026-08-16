@@ -24,7 +24,8 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "vite.config.ts",
-    "tsup.config.ts"
+    "playwright.config.ts",
+    "tests/**/*.ts"
   ],
-  "exclude": ["dist", "dist-electron", "release"]
+  "exclude": ["dist", "release", "src-tauri/target"]
 }

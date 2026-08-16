@@ -75,6 +75,24 @@ func run() error {
 		serverError <- httpServer.Serve(listener)
 	}()
 
+	// aster-core is a sidecar: when the desktop shell dies without cleanup
+	// (crash, SIGKILL, dev-mode rebuild), the OS reparents this process to
+	// pid 1. Poll for that and shut down instead of leaking. The ppid!=parent
+	// check covers the normal case; the ppid==1 check covers the race where
+	// the shell already exited before the first sample. Windows never
+	// reparents, so this is a no-op there (same behavior as the old shell).
+	parent := os.Getppid()
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if current := os.Getppid(); current != parent || current == 1 {
+				_ = httpServer.Close()
+				return
+			}
+		}
+	}()
+
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	select {

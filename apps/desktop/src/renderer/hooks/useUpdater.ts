@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UpdaterSnapshot } from "../../shared/types";
+import { desktop } from "../lib/desktop";
 
 const IDLE_SNAPSHOT: UpdaterSnapshot = { state: "idle", currentVersion: "" };
 const CARD_STATES: UpdaterSnapshot["state"][] = ["available", "downloading", "downloaded"];
@@ -29,10 +30,10 @@ export function useUpdater(): UpdateCard | undefined {
 
   useEffect(() => {
     let alive = true;
-    void window.aster.updater.state().then((current) => {
+    void desktop.updater.state().then((current) => {
       if (alive) setSnapshot(current);
     }).catch(() => undefined);
-    const stop = window.aster.updater.onState((next) => {
+    const stop = desktop.updater.onState((next) => {
       if (alive) setSnapshot(next);
     });
     return () => {
@@ -41,8 +42,8 @@ export function useUpdater(): UpdateCard | undefined {
     };
   }, []);
 
-  const download = useCallback(() => void window.aster.updater.download().catch(() => undefined), []);
-  const install = useCallback(() => void window.aster.updater.install().catch(() => undefined), []);
+  const download = useCallback(() => void desktop.updater.download().catch(() => undefined), []);
+  const install = useCallback(() => void desktop.updater.install().catch(() => undefined), []);
 
   if (CARD_STATES.includes(snapshot.state)) hadUpdate.current = true;
   const dismissed = snapshot.version !== undefined && dismissedVersion.current === snapshot.version;

@@ -10,6 +10,7 @@ import type {
   ResourceRow,
 } from "../../shared/types";
 import { messageOf } from "../lib/format";
+import { desktop } from "../lib/desktop";
 
 export interface DiagnosticsOptions {
   contextId: string;
@@ -58,7 +59,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
       return;
     }
     let active = true;
-    void window.aster.resources.logs({ contextId, namespace: selected.namespace, name: selected.name, tailLines: 2_000 })
+    void desktop.resources.logs({ contextId, namespace: selected.namespace, name: selected.name, tailLines: 2_000 })
       .then((value) => active && setLogs(value))
       .catch(() => active && setLogs(undefined));
     return () => { active = false; };
@@ -71,7 +72,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
     setFollowing(false);
     setFollowLines([]);
     setPortForward((active) => {
-      if (active) void window.aster.resources.portForwardStop(active.id);
+      if (active) void desktop.resources.portForwardStop(active.id);
       return undefined;
     });
     setPortForwardMessage("");
@@ -83,7 +84,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
       return;
     }
     let active = true;
-    void window.aster.metrics.pods(contextId, selected.namespace)
+    void desktop.metrics.pods(contextId, selected.namespace)
       .then((pods) => active && setPodMetric(pods.find((pod) => pod.name === selected.name)))
       .catch(() => active && setPodMetric(undefined));
     return () => { active = false; };
@@ -95,7 +96,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
       return;
     }
     let active = true;
-    void window.aster.resources.events({ contextId, resourceKind: kind, namespace: selected.namespace, name: selected.name })
+    void desktop.resources.events({ contextId, resourceKind: kind, namespace: selected.namespace, name: selected.name })
       .then((items) => active && setEvents(items))
       .catch(() => active && setEvents([]));
     return () => { active = false; };
@@ -107,7 +108,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
       return;
     }
     let active = true;
-    void window.aster.resources.related({ contextId, resourceKind: kind, namespace: selected.namespace || undefined, name: selected.name })
+    void desktop.resources.related({ contextId, resourceKind: kind, namespace: selected.namespace || undefined, name: selected.name })
       .then((items) => active && setRelated(items))
       .catch(() => active && setRelated([]));
     return () => { active = false; };
@@ -122,7 +123,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
     }
     if (!selected || selected.kind !== "Pod" || !contextId || !selected.namespace) return;
     setFollowLines([]);
-    const stop = window.aster.resources.followLogs(
+    const stop = desktop.resources.followLogs(
       { contextId, namespace: selected.namespace, name: selected.name, tailLines: 200 },
       (batch) => {
         if (batch.type === "error") {
@@ -144,7 +145,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
     if (!selected || selected.kind !== "Pod" || !contextId || !selected.namespace || !execAllowed) return;
     setPortForwardMessage("");
     try {
-      setPortForward(await window.aster.resources.portForwardStart({ contextId, namespace: selected.namespace, name: selected.name, podPort }));
+      setPortForward(await desktop.resources.portForwardStart({ contextId, namespace: selected.namespace, name: selected.name, podPort }));
     } catch (cause) {
       setPortForward(undefined);
       setPortForwardMessage(messageOf(cause));
@@ -153,7 +154,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
 
   const stopPortForward = useCallback(async () => {
     setPortForward((active) => {
-      if (active) void window.aster.resources.portForwardStop(active.id);
+      if (active) void desktop.resources.portForwardStop(active.id);
       return undefined;
     });
     setPortForwardMessage("");
@@ -162,7 +163,7 @@ export function useDiagnostics({ contextId, kind, selected, execAllowed }: Diagn
   const runExec = useCallback(async (command: string[]) => {
     if (!selected || !contextId || !selected.namespace || !execAllowed) return;
     try {
-      setExecResult(await window.aster.resources.exec({ contextId, namespace: selected.namespace, name: selected.name, command }));
+      setExecResult(await desktop.resources.exec({ contextId, namespace: selected.namespace, name: selected.name, command }));
     } catch (cause) {
       setExecResult({ stdout: "", stderr: messageOf(cause) });
     }

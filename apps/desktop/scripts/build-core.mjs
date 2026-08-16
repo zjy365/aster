@@ -13,3 +13,20 @@ execFileSync("go", ["build", "-trimpath", "-o", target, "./cmd/aster-core"], {
   env: { ...process.env, CGO_ENABLED: "0" },
   stdio: "inherit",
 });
+
+// Tauri's externalBin convention: binaries/aster-core-<target-triple>[.exe].
+// CARGO_BUILD_TARGET overrides the triple for cross builds in CI.
+const RUST_TRIPLES = {
+  "darwin-arm64": "aarch64-apple-darwin",
+  "darwin-x64": "x86_64-apple-darwin",
+  "linux-x64": "x86_64-unknown-linux-gnu",
+  "linux-arm64": "aarch64-unknown-linux-gnu",
+  "win32-x64": "x86_64-pc-windows-msvc",
+};
+const triple = process.env.CARGO_BUILD_TARGET || RUST_TRIPLES[`${process.platform}-${process.arch}`];
+if (triple) {
+  const binariesDir = path.join(desktopRoot, "src-tauri", "binaries");
+  fs.mkdirSync(binariesDir, { recursive: true });
+  const sidecarName = `aster-core-${triple}${triple.includes("windows") ? ".exe" : ""}`;
+  fs.copyFileSync(target, path.join(binariesDir, sidecarName));
+}

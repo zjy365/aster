@@ -9,9 +9,9 @@
   "packageManager": "pnpm@10.12.2",
   "scripts": {
     "build": "pnpm --dir apps/desktop build",
-    "check": "pnpm typecheck && pnpm test && go -C core test -race ./... && go -C core vet ./... && pnpm build",
+    "check": "pnpm typecheck && pnpm test && go -C core test -race ./... && go -C core vet ./... && pnpm --dir apps/desktop test:rust && pnpm build",
     "dev": "pnpm --dir apps/desktop dev",
-    "pack": "pnpm --dir apps/desktop run pack",
+    "dist": "pnpm --dir apps/desktop dist",
     "test": "pnpm --dir apps/desktop test",
     "typecheck": "pnpm --dir apps/desktop typecheck"
   },

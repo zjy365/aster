@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ResourceKind, ResourceListResponse, ResourceRow, ResourceWatchBatch } from "../../shared/types";
 import { applyResourceWatchBatches } from "../lib/resource-watch";
+import { desktop } from "../lib/desktop";
 
 export interface ResourceListOptions {
   contextId: string;
@@ -47,7 +48,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     setLoadingMore(true);
     setError("");
     try {
-      const response = await window.aster.resources.list({
+      const response = await desktop.resources.list({
         contextId,
         resourceKind: kind,
         ...(kind.namespaced && namespace ? { namespace } : {}),
@@ -75,7 +76,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     watchQueue.current = [];
     watchHasSnapshot.current = false;
 
-    const stop = window.aster.resources.watch({
+    const stop = desktop.resources.watch({
       contextId,
       resourceKind: kind,
       ...(kind.namespaced && namespace ? { namespace } : {}),

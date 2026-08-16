@@ -1,12 +1,12 @@
 # Aster
 
-Aster is a fast, local-first Kubernetes desktop workbench. It pairs an Electron desktop shell with a narrow Go sidecar, using lazy Kubernetes clients, native server-side pagination, and a virtualized resource table instead of a web platform, a global cache, or full-list rendering.
+Aster is a fast, local-first Kubernetes desktop workbench. It pairs a Tauri desktop shell with a narrow Go sidecar, using lazy Kubernetes clients, native server-side pagination, and a virtualized resource table instead of a web platform, a global cache, or full-list rendering.
 
 ## Current state
 
 The current v0.1 milestone includes:
 
-- Electron main/preload/renderer isolation with a typed `window.aster` API.
+- A typed renderer-facing `DesktopApi` with the Tauri Rust side as the only privileged process.
 - A loopback-only Go sidecar with one-time bearer authentication.
 - Default kubeconfig context discovery without exposing credentials.
 - Lazy dynamic clients for the common Kubernetes resource catalog (workloads, traffic, storage, config, and RBAC), with sanitized detail projections.
@@ -24,14 +24,14 @@ ConfigMap/YAML editing, one-shot Terminal, a semantic dry-run diff preview, owne
 ## Architecture
 
 ```text
-React renderer -> allowlisted preload -> Electron main -> local Go sidecar -> Kubernetes API
+React renderer -> DesktopApi (invoke/events) -> Tauri Rust shell -> local Go sidecar -> Kubernetes API
 ```
 
 The renderer never receives kubeconfig contents, API credentials, the sidecar token, or its base URL. The sidecar listens on a random loopback port and creates Kubernetes clients only when a context is queried.
 
 ## Development
 
-Requirements: Node.js 22.19+, pnpm 10.12.2, Go 1.26+, and an optional kubeconfig for live data.
+Requirements: Node.js 22.19+, pnpm 10.12.2, Go 1.26+, Rust stable (rustup), and an optional kubeconfig for live data.
 
 ```bash
 pnpm install
@@ -39,7 +39,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm dev
-pnpm run pack
+pnpm dist
 ```
 
 Go checks run from `core/`:

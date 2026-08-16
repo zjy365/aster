@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from "react";
 import type { DiscoveredResource } from "../../shared/types";
+import { desktop } from "../lib/desktop";
 
 /**
  * Lazily discovers custom resources (CRDs) for the connected context. Runs
@@ -16,7 +17,7 @@ export function useDiscovery(contextId: string, coreReady: boolean): DiscoveredR
       return;
     }
     let active = true;
-    window.aster.discovery.list(contextId)
+    desktop.discovery.list(contextId)
       .then((items) => { if (active) setResources(items); })
       .catch(() => { if (active) setResources([]); });
     return () => { active = false; };

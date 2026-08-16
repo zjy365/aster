@@ -1,6 +1,6 @@
 import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 const rendererSource = fileURLToPath(new URL("./src/renderer", import.meta.url));
@@ -20,5 +20,9 @@ export default defineConfig({
     rollupOptions: {
       input: rendererEntry,
     },
+  },
+  test: {
+    // tests/ holds the Playwright suite, which vitest must not collect.
+    exclude: [...configDefaults.exclude, "tests/**"],
   },
 });

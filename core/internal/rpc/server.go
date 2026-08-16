@@ -85,13 +85,34 @@ func (s *Server) listNamespaces(writer http.ResponseWriter, request *http.Reques
 		writeError(writer, http.StatusBadRequest, "invalid_request", err)
 		return
 	}
+	if limit < 0 || limit > maxListLimit {
+		writeError(writer, http.StatusBadRequest, "invalid_request", fmt.Errorf("limit must be between 1 and %d", maxListLimit))
+		return
+	}
+	query := request.URL.Query()
+	if err := validateContextID(query.Get("contextId")); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	if err := checkLength("continueToken", query.Get("continueToken"), maxContinueToken); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	if err := checkLength("labelSelector", query.Get("labelSelector"), maxSelector); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	if err := checkLength("fieldSelector", query.Get("fieldSelector"), maxSelector); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
 	result, err := s.resources.List(request.Context(), resources.ListRequest{
-		ContextID:     request.URL.Query().Get("contextId"),
+		ContextID:     query.Get("contextId"),
 		GVR:           resources.GVR{Version: "v1", Resource: "namespaces"},
 		Limit:         limit,
-		ContinueToken: request.URL.Query().Get("continueToken"),
-		LabelSelector: request.URL.Query().Get("labelSelector"),
-		FieldSelector: request.URL.Query().Get("fieldSelector"),
+		ContinueToken: query.Get("continueToken"),
+		LabelSelector: query.Get("labelSelector"),
+		FieldSelector: query.Get("fieldSelector"),
 	})
 	if err != nil {
 		writeServiceError(writer, err)
@@ -101,7 +122,12 @@ func (s *Server) listNamespaces(writer http.ResponseWriter, request *http.Reques
 }
 
 func (s *Server) listDiscovery(writer http.ResponseWriter, request *http.Request) {
-	discovered, err := s.resources.Discover(request.Context(), request.URL.Query().Get("contextId"))
+	contextID := request.URL.Query().Get("contextId")
+	if err := validateContextID(contextID); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	discovered, err := s.resources.Discover(request.Context(), contextID)
 	if err != nil {
 		writeServiceError(writer, err)
 		return
@@ -112,6 +138,9 @@ func (s *Server) listDiscovery(writer http.ResponseWriter, request *http.Request
 func (s *Server) listResources(writer http.ResponseWriter, request *http.Request) {
 	var value resources.ListRequest
 	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateListRequest(value)) {
 		return
 	}
 	result, err := s.resources.List(request.Context(), value)
@@ -127,6 +156,9 @@ func (s *Server) getResource(writer http.ResponseWriter, request *http.Request) 
 	if err := decodeJSON(writer, request, &value); err != nil {
 		return
 	}
+	if rejectInvalid(writer, validateGetRequest(value)) {
+		return
+	}
 	result, err := s.resources.Get(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
@@ -138,6 +170,9 @@ func (s *Server) getResource(writer http.ResponseWriter, request *http.Request) 
 func (s *Server) mutateResource(writer http.ResponseWriter, request *http.Request) {
 	var value resources.MutationRequest
 	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateMutationRequest(value)) {
 		return
 	}
 	result, err := s.resources.Mutate(request.Context(), value)
@@ -153,6 +188,9 @@ func (s *Server) relatedResources(writer http.ResponseWriter, request *http.Requ
 	if err := decodeJSON(writer, request, &value); err != nil {
 		return
 	}
+	if rejectInvalid(writer, validateGetRequest(value)) {
+		return
+	}
 	result, err := s.resources.Related(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
@@ -166,6 +204,9 @@ func (s *Server) searchResources(writer http.ResponseWriter, request *http.Reque
 	if err := decodeJSON(writer, request, &value); err != nil {
 		return
 	}
+	if rejectInvalid(writer, validateSearchRequest(value)) {
+		return
+	}
 	result, err := s.resources.Search(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
@@ -177,6 +218,9 @@ func (s *Server) searchResources(writer http.ResponseWriter, request *http.Reque
 func (s *Server) streamPodLogs(writer http.ResponseWriter, request *http.Request) {
 	var value resources.LogsRequest
 	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateLogsRequest(value)) {
 		return
 	}
 	flusher, ok := writer.(http.Flusher)
@@ -220,6 +264,9 @@ func (s *Server) startPortForward(writer http.ResponseWriter, request *http.Requ
 	if err := decodeJSON(writer, request, &value); err != nil {
 		return
 	}
+	if rejectInvalid(writer, validatePortForwardRequest(value)) {
+		return
+	}
 	result, err := s.resources.StartPortForward(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
@@ -233,6 +280,9 @@ func (s *Server) stopPortForward(writer http.ResponseWriter, request *http.Reque
 	if err := decodeJSON(writer, request, &value); err != nil {
 		return
 	}
+	if rejectInvalid(writer, validatePortForwardStopRequest(value)) {
+		return
+	}
 	if err := s.resources.StopPortForward(request.Context(), value.ID); err != nil {
 		writeServiceError(writer, err)
 		return
@@ -243,6 +293,9 @@ func (s *Server) stopPortForward(writer http.ResponseWriter, request *http.Reque
 func (s *Server) podMetrics(writer http.ResponseWriter, request *http.Request) {
 	var value resources.MetricsRequest
 	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateMetricsRequest(value)) {
 		return
 	}
 	result, err := s.resources.PodMetrics(request.Context(), value)
@@ -258,6 +311,9 @@ func (s *Server) podLogs(writer http.ResponseWriter, request *http.Request) {
 	if err := decodeJSON(writer, request, &value); err != nil {
 		return
 	}
+	if rejectInvalid(writer, validateLogsRequest(value)) {
+		return
+	}
 	result, err := s.resources.Logs(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
@@ -271,6 +327,9 @@ func (s *Server) podExec(writer http.ResponseWriter, request *http.Request) {
 	if err := decodeJSON(writer, request, &value); err != nil {
 		return
 	}
+	if rejectInvalid(writer, validateExecRequest(value)) {
+		return
+	}
 	result, err := s.resources.Exec(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
@@ -282,6 +341,9 @@ func (s *Server) podExec(writer http.ResponseWriter, request *http.Request) {
 func (s *Server) watchResources(writer http.ResponseWriter, request *http.Request) {
 	var value resources.WatchRequest
 	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateWatchRequest(value)) {
 		return
 	}
 	flusher, ok := writer.(http.Flusher)

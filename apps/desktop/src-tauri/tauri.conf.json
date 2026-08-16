@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Aster",
+  "version": "0.1.0",
+  "identifier": "app.aster.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "pnpm vite --host 127.0.0.1",
+    "beforeBuildCommand": "pnpm build:renderer"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEMjVDOTc3RERFNkZERTYKUldUbS9lYmRkOGtsdlduK2lwR2ZuWHlTaEswL25EYkw5VGdBaU9EY21yVDBLeWNsQ3dFUW5SZ2UK",
+      "endpoints": [
+        "https://github.com/zjy365/aster/releases/latest/download/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Developer Tools",
+    "externalBin": ["binaries/aster-core"],
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "entitlements": "../build/entitlements.tauri.plist",
+      "hardenedRuntime": true
+    }
+  }
+}

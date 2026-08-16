@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ContextInfo, CoreStatus } from "../../shared/types";
 import { filterContexts, retainedContextChoice, type ContextLayout } from "../lib/context-picker";
 import { messageOf } from "../lib/format";
+import { desktop } from "../lib/desktop";
 
 export type AppView = "contexts" | "workbench";
 
@@ -44,7 +45,7 @@ export function useContexts(core: CoreStatus): ContextsState {
     setContextsLoading(true);
     setContextsError("");
     try {
-      const next = await window.aster.contexts.list();
+      const next = await desktop.contexts.list();
       setContexts(next);
       setContextChoice((current) => {
         // Preselect the last connected context across launches; connecting

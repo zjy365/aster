@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ResourceGetResponse, ResourceKind, ResourceRow } from "../../shared/types";
 import { messageOf } from "../lib/format";
+import { desktop } from "../lib/desktop";
 
 export interface ResourceDetailOptions {
   contextId: string;
@@ -54,7 +55,7 @@ export function useResourceDetail({ contextId, kind, namespace, generation, item
     const request = ++detailRequest.current;
     setDetail(undefined);
     setDetailError("");
-    void window.aster.resources.get({
+    void desktop.resources.get({
       contextId,
       resourceKind: kind,
       namespace: selected.namespace,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ContextInfo, NamespaceInfo } from "../../shared/types";
 import { messageOf } from "../lib/format";
+import { desktop } from "../lib/desktop";
 
 export interface NamespacesState {
   namespaces: NamespaceInfo[];
@@ -27,7 +28,7 @@ export function useNamespaces(
       return;
     }
     let active = true;
-    void window.aster.namespaces.list(contextId).then((items) => {
+    void desktop.namespaces.list(contextId).then((items) => {
       if (!active) return;
       setNamespaces(items);
       const context = contexts.find((item) => item.id === contextId);

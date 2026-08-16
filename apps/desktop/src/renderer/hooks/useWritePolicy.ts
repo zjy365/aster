@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { messageOf } from "../lib/format";
+import { desktop } from "../lib/desktop";
 
 export interface WritePolicyState {
   /** Defaults to true for every context until the user explicitly enables writes. */
@@ -33,7 +34,7 @@ export function useWritePolicy(contextId: string, onError: (message: string) => 
     setWritePolicySynced(false);
     if (!contextId) return;
     let active = true;
-    void window.aster.safety.setReadOnly(contextId, readOnly)
+    void desktop.safety.setReadOnly(contextId, readOnly)
       .then(() => { if (active) setWritePolicySynced(true); })
       .catch((cause) => { if (active) onError(messageOf(cause)); });
     return () => { active = false; };

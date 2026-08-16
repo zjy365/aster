@@ -23,6 +23,7 @@ import { Sidebar } from "./shell/Sidebar";
 import { UnifiedToolbar } from "./shell/UnifiedToolbar";
 import { WorkbenchShell } from "./shell/WorkbenchShell";
 import { ContextPicker } from "./views/ContextPicker";
+import { desktop } from "./lib/desktop";
 
 const ResourceDetailView = lazy(() => import("./detail/ResourceDetailView").then((module) => ({
   default: module.ResourceDetailView,
@@ -126,7 +127,7 @@ export default function App() {
     }
     let active = true;
     const timer = setTimeout(() => {
-      window.aster.resources.search({
+      desktop.resources.search({
         contextId,
         query,
         namespace: namespaces.namespace || contexts.activeContext?.namespace || "default",
@@ -235,7 +236,7 @@ export default function App() {
     }
   }, [resources, showContextPicker, connectContext, namespaces, setTheme, resourceGroups, kind.id, detail, openResource]);
 
-  useEffect(() => window.aster.app.onCommand((command) => {
+  useEffect(() => desktop.app.onCommand((command) => {
     if (command === "show-contexts") {
       showContextPicker();
       return;
@@ -256,7 +257,7 @@ export default function App() {
   const searchItems = useMemo(() => searchResultItems(searchResults, paletteQuery), [searchResults, paletteQuery]);
 
   useEffect(() => {
-    void window.aster.settings.get().then(setSettings).catch(() => setSettings({ kubeconfigSources: [] }));
+    void desktop.settings.get().then(setSettings).catch(() => setSettings({ kubeconfigSources: [] }));
   }, []);
 
   if (contexts.view === "contexts") {
@@ -285,11 +286,11 @@ export default function App() {
         onOpenChange={setSettingsOpen}
         settings={settings}
         onApply={async (sources) => {
-          await window.aster.settings.applyKubeconfigSources(sources);
+          await desktop.settings.applyKubeconfigSources(sources);
           setSettings({ kubeconfigSources: sources });
         }}
-        onPickFile={() => window.aster.settings.pickKubeconfigFile()}
-        onPickFolder={() => window.aster.settings.pickKubeconfigFolder()}
+        onPickFile={() => desktop.settings.pickKubeconfigFile()}
+        onPickFolder={() => desktop.settings.pickKubeconfigFolder()}
       />
       {updateCard && <UpdateNotice card={updateCard} />}
       </>
@@ -446,11 +447,11 @@ export default function App() {
         onOpenChange={setSettingsOpen}
         settings={settings}
         onApply={async (sources) => {
-          await window.aster.settings.applyKubeconfigSources(sources);
+          await desktop.settings.applyKubeconfigSources(sources);
           setSettings({ kubeconfigSources: sources });
         }}
-        onPickFile={() => window.aster.settings.pickKubeconfigFile()}
-        onPickFolder={() => window.aster.settings.pickKubeconfigFolder()}
+        onPickFile={() => desktop.settings.pickKubeconfigFile()}
+        onPickFolder={() => desktop.settings.pickKubeconfigFolder()}
       />
     </WorkbenchShell>
   );

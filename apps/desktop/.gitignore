@@ -9,3 +9,6 @@
 # Local operating-system and tool output
 .DS_Store
 *.log
+
+# Playwright local run output
+/test-results/
