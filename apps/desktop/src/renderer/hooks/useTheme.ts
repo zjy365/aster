@@ -12,7 +12,7 @@ export function useTheme(): {
   theme: AppearanceTheme;
   effectiveTheme: EffectiveTheme;
   setTheme(theme: AppearanceTheme): void;
-  toggleEffectiveTheme(): void;
+  cycleTheme(): void;
 } {
   const [theme, setTheme] = useState<AppearanceTheme>(() => {
     const stored = localStorage.getItem("aster.theme");
@@ -37,9 +37,11 @@ export function useTheme(): {
     void window.aster.appearance.setThemeSource(theme);
   }, [effectiveTheme, theme]);
 
-  const toggleEffectiveTheme = useCallback(() => {
-    setTheme(effectiveTheme === "light" ? "dark" : "light");
-  }, [effectiveTheme]);
+  // Cycle system → light → dark → system so the "follow system" preference is
+  // never silently discarded by a single toggle click.
+  const cycleTheme = useCallback(() => {
+    setTheme((current) => (current === "system" ? "light" : current === "light" ? "dark" : "system"));
+  }, []);
 
-  return { theme, effectiveTheme, setTheme, toggleEffectiveTheme };
+  return { theme, effectiveTheme, setTheme, cycleTheme };
 }

@@ -1,20 +1,22 @@
 import {
   AlertCircle,
   ArrowRight,
+  Asterisk,
   Boxes,
   CheckCircle2,
-  Gauge,
   LayoutGrid,
   List as ListIcon,
   LoaderCircle,
   Moon,
   RefreshCw,
   Search,
+  Settings,
   Sun,
+  SunMoon,
 } from "lucide-react";
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 
-import type { ContextInfo, CoreStatus } from "../../shared/types";
+import type { AppearanceTheme, ContextInfo, CoreStatus } from "../../shared/types";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -31,8 +33,6 @@ import {
 } from "@/components/ui/tooltip";
 import type { ContextLayout } from "../lib/context-picker";
 
-type Theme = "light" | "dark";
-
 interface ContextPickerProps {
   core: CoreStatus;
   contexts: ContextInfo[];
@@ -42,13 +42,14 @@ interface ContextPickerProps {
   layout: ContextLayout;
   loading: boolean;
   error: string;
-  theme: Theme;
+  theme: AppearanceTheme;
   onQueryChange(value: string): void;
   onLayoutChange(value: ContextLayout): void;
   onSelect(value: string): void;
   onRefresh(): void;
   onConnect(contextId?: string): void;
   onToggleTheme(): void;
+  onOpenSettings(): void;
 }
 
 function ContextPicker({
@@ -67,6 +68,7 @@ function ContextPicker({
   onRefresh,
   onConnect,
   onToggleTheme,
+  onOpenSettings,
 }: ContextPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selected = contexts.find((context) => context.id === selectedId);
@@ -187,16 +189,34 @@ function ContextPicker({
                   className="context-picker-theme-toggle"
                   variant="ghost"
                   size="icon"
-                  aria-label={theme === "light" ? "Use dark theme" : "Use light theme"}
+                  aria-label="Settings"
+                  onClick={onOpenSettings}
+                  data-testid="context-picker-settings"
+                />
+              }
+            >
+              <Settings aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent>Settings</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  className="context-picker-theme-toggle"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Appearance: ${theme}`}
                   onClick={onToggleTheme}
                   data-testid="context-picker-theme-toggle"
                 />
               }
             >
-              {theme === "light" ? <Moon aria-hidden="true" /> : <Sun aria-hidden="true" />}
+              {theme === "system" ? <SunMoon aria-hidden="true" /> : theme === "light" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
             </TooltipTrigger>
             <TooltipContent>
-              {theme === "light" ? "Use dark theme" : "Use light theme"}
+              {theme === "system" ? "Appearance: follows system" : theme === "light" ? "Appearance: light" : "Appearance: dark"}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -210,7 +230,7 @@ function ContextPicker({
           <div className="context-picker-heading">
             <div className="context-picker-brand" aria-hidden="true">
               <span className="brand-mark">
-                <Gauge size={25} strokeWidth={2.1} />
+                <Asterisk size={25} strokeWidth={2.1} />
               </span>
               <strong>Aster</strong>
             </div>
@@ -352,13 +372,17 @@ function ContextPicker({
                 }
               />
             ) : contexts.length ? (
-              contexts.map((context) => {
+              contexts.map((context, index) => {
+                const previous = contexts[index - 1];
+                const sourceLabel = context.source || "default kubeconfig";
+                const showGroupLabel = !previous || (previous.source || "default kubeconfig") !== sourceLabel;
                 const isSelected = context.id === selectedId;
                 const isTabStop = isSelected || (!selected && context.id === firstSelectableId);
 
                 return (
+                  <div className="context-source-group" key={context.id}>
+                  {showGroupLabel && <div className="context-source-label">{sourceLabel}</div>}
                   <Button
-                    key={context.id}
                     type="button"
                     className="context-card"
                     variant="ghost"
@@ -390,6 +414,7 @@ function ContextPicker({
                       <CheckCircle2 />
                     </span>
                   </Button>
+                  </div>
                 );
               })
             ) : (

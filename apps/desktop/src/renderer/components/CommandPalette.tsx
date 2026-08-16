@@ -78,6 +78,11 @@ export function CommandPalette({ open, onOpenChange, items, onExecute, onQueryCh
               </Command.Group>
             ))}
           </Command.List>
+          <div className="command-palette-footer" aria-hidden="true">
+            <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+            <span><kbd>↵</kbd> Run</span>
+            <span><kbd>esc</kbd> Close</span>
+          </div>
         </Command>
       </DialogContent>
     </Dialog>

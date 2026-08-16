@@ -34,7 +34,7 @@ export function useContexts(core: CoreStatus): ContextsState {
   const [view, setView] = useState<AppView>("contexts");
   const [contexts, setContexts] = useState<ContextInfo[]>([]);
   const [contextId, setContextId] = useState("");
-  const [contextChoice, setContextChoice] = useState("");
+  const [contextChoice, setContextChoice] = useState(() => localStorage.getItem("aster.lastContext") || "");
   const [contextQuery, setContextQuery] = useState("");
   const [contextLayout, setContextLayout] = useState<ContextLayout>("list");
   const [contextsLoading, setContextsLoading] = useState(false);
@@ -46,7 +46,16 @@ export function useContexts(core: CoreStatus): ContextsState {
     try {
       const next = await window.aster.contexts.list();
       setContexts(next);
-      setContextChoice((current) => retainedContextChoice(next, current));
+      setContextChoice((current) => {
+        // Preselect the last connected context across launches; connecting
+        // still requires an explicit click.
+        const preferred = retainedContextChoice(next, current);
+        const stored = localStorage.getItem("aster.lastContext");
+        if (current === "" && stored && next.some((item) => item.id === stored)) {
+          return stored;
+        }
+        return preferred;
+      });
     } catch (cause) {
       setContextsError(messageOf(cause));
     } finally {

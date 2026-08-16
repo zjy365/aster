@@ -65,6 +65,33 @@ describe("buildCommandItems", () => {
     expect(byId.get("action:refresh")?.disabled).toBe(true);
     expect(byId.has("kind:off")).toBe(false);
   });
+
+  it("lists nested subgroup items with their own label as hint", () => {
+    const items = buildCommandItems(makeState({
+      resourceGroups: [
+        {
+          label: "Custom Resources",
+          items: [],
+          children: [
+            {
+              label: "devbox.sealos.io",
+              items: [
+                { id: "crd:devbox.sealos.io/v1alpha1/devboxes", kind: "Devbox", category: "Custom", label: "Devboxs" },
+                { id: "crd:devbox.sealos.io/v1alpha1/off", kind: "Off", category: "Custom", enabled: false },
+              ],
+            },
+          ],
+        },
+      ],
+    }));
+    const byId = new Map(items.map((item) => [item.id, item]));
+
+    const devboxes = byId.get("kind:crd:devbox.sealos.io/v1alpha1/devboxes");
+    expect(devboxes?.label).toBe("Devboxs");
+    expect(devboxes?.hint).toBe("devbox.sealos.io");
+    expect(devboxes?.keywords).toContain("devbox.sealos.io");
+    expect(byId.has("kind:crd:devbox.sealos.io/v1alpha1/off")).toBe(false);
+  });
 });
 
 describe("groupCommandItems", () => {

@@ -6,7 +6,7 @@ export function useCoreStatus(): CoreStatus {
   const [core, setCore] = useState<CoreStatus>({ state: "starting" });
 
   useEffect(() => {
-    setCore(window.aster.core.status());
+    window.aster.core.status().then(setCore).catch(() => undefined);
     return window.aster.core.onStatus(setCore);
   }, []);
 

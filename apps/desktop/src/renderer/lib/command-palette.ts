@@ -29,15 +29,18 @@ export interface CommandGroup {
   items: CommandItem[];
 }
 
+export interface PaletteResourceItem {
+  id: string;
+  kind: string;
+  category: string;
+  label?: string;
+  enabled?: boolean;
+}
+
 export interface PaletteResourceGroup {
   label: string;
-  items: {
-    id: string;
-    kind: string;
-    category: string;
-    label?: string;
-    enabled?: boolean;
-  }[];
+  items: PaletteResourceItem[];
+  children?: PaletteResourceGroup[];
 }
 
 export interface CommandPaletteState {
@@ -59,6 +62,25 @@ const GROUP_ORDER: { id: PaletteGroupId; heading: string }[] = [
   { id: "namespaces", heading: "Namespaces" },
   { id: "appearance", heading: "Appearance" },
 ];
+
+/**
+ * Yields every resource group with a hint built from its nesting path,
+ * dropping the umbrella label so nested custom resources read as
+ * "sealos.io / devbox" instead of "Custom Resources / sealos.io / devbox".
+ */
+function walkResourceGroups(
+  groups: PaletteResourceGroup[],
+  path: string[] = [],
+): { items: PaletteResourceItem[]; hint: string; labels: string[] }[] {
+  return groups.flatMap((group) => {
+    const nextPath = [...path, group.label];
+    const hint = nextPath.length > 1 ? nextPath.slice(1).join(" / ") : group.label;
+    return [
+      { items: group.items, hint, labels: nextPath },
+      ...walkResourceGroups(group.children ?? [], nextPath),
+    ];
+  });
+}
 
 /**
  * Pure command construction for the ⌘K palette: which commands exist and how
@@ -97,15 +119,15 @@ export function buildCommandItems(state: CommandPaletteState): CommandItem[] {
     });
   }
 
-  for (const group of state.resourceGroups) {
-    for (const item of group.items) {
+  for (const { items: groupItems, hint, labels } of walkResourceGroups(state.resourceGroups)) {
+    for (const item of groupItems) {
       if (item.enabled === false) continue;
       items.push({
         id: `kind:${item.id}`,
         group: "resources",
         label: item.label || item.kind,
-        hint: group.label,
-        keywords: [item.kind, item.id, "resource", group.label],
+        hint,
+        keywords: [item.kind, item.id, "resource", ...labels],
         current: item.id === state.activeKindId,
         action: { type: "select-kind", kindId: item.id },
       });

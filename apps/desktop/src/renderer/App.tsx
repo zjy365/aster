@@ -1,7 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
-import type { RelatedResource, ResourceKind } from "../shared/types";
+import type { AsterSettings, RelatedResource, ResourceKind } from "../shared/types";
 import { CommandPalette } from "./components/CommandPalette";
+import { SettingsDialog } from "./components/SettingsDialog";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { ResourceTable, TableState } from "./components/ResourceTable";
 import { useContexts } from "./hooks/useContexts";
 import { useCoreStatus } from "./hooks/useCoreStatus";
@@ -12,10 +14,11 @@ import { useNamespaces } from "./hooks/useNamespaces";
 import { useResourceDetail } from "./hooks/useResourceDetail";
 import { useResourceList } from "./hooks/useResourceList";
 import { useTheme } from "./hooks/useTheme";
+import { useUpdater } from "./hooks/useUpdater";
 import { useWritePolicy } from "./hooks/useWritePolicy";
 import { buildCommandItems, searchResultItems, type CommandAction } from "./lib/command-palette";
 import { pluralize } from "./lib/format";
-import { customResourceGroups, DEFAULT_KIND, findKindInGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
+import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
 import { Sidebar } from "./shell/Sidebar";
 import { UnifiedToolbar } from "./shell/UnifiedToolbar";
 import { WorkbenchShell } from "./shell/WorkbenchShell";
@@ -35,7 +38,8 @@ const CreateResourceDialog = lazy(() => import("./detail/CreateResourceDialog").
  */
 export default function App() {
   const core = useCoreStatus();
-  const { theme, effectiveTheme, setTheme, toggleEffectiveTheme } = useTheme();
+  const updateCard = useUpdater();
+  const { theme, setTheme, cycleTheme } = useTheme();
   const contexts = useContexts(core);
   const { contextId } = contexts;
   const [error, setError] = useState("");
@@ -73,6 +77,8 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<AsterSettings>({ kubeconfigSources: [] });
   const discovered = useDiscovery(contextId, core.state === "ready");
   const resourceGroups = useMemo(() => {
     const custom = customResourceGroups(discovered);
@@ -81,12 +87,19 @@ export default function App() {
   const [pendingSelect, setPendingSelect] = useState<{ name: string; namespace: string }>();
   const [paletteQuery, setPaletteQuery] = useState("");
   const [searchResults, setSearchResults] = useState<RelatedResource[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("aster.sidebar.collapsed") === "true");
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((value) => {
+      const next = !value;
+      localStorage.setItem("aster.sidebar.collapsed", String(next));
+      return next;
+    });
+  }, []);
 
   // Shared navigation for related resources and palette search results:
   // switch kind/namespace, then select the row once its list page arrives.
   const openResource = useCallback((target: { group: string; version: string; resource: string; name: string; namespace?: string }) => {
-    const match = resourceGroups
-      .flatMap((group) => group.items)
+    const match = flattenResourceGroups(resourceGroups)
       .find((item) => item.group === target.group && item.version === target.version && item.resource === target.resource && item.enabled !== false);
     if (!match) return;
     const { icon: _icon, label: _label, enabled: _enabled, pinned: _pinned, ...nextKind } = match;
@@ -135,6 +148,7 @@ export default function App() {
     contexts.setContextChoice(target.id);
     contexts.setContextId(target.id);
     contexts.setView("workbench");
+    localStorage.setItem("aster.lastContext", target.id);
   }, [contexts, core.state, namespaces]);
 
   const showContextPicker = useCallback(() => {
@@ -155,6 +169,11 @@ export default function App() {
         if (contexts.view === "workbench") setPaletteOpen((open) => !open);
         return;
       }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        if (contexts.view === "workbench") toggleSidebarCollapsed();
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         if (!paletteOpen) searchRef.current?.focus();
@@ -171,7 +190,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detail, paletteOpen, contexts.view]);
+  }, [detail, paletteOpen, contexts.view, toggleSidebarCollapsed]);
 
   const paletteItems = useMemo(() => buildCommandItems({
     coreReady: core.state === "ready",
@@ -236,8 +255,13 @@ export default function App() {
 
   const searchItems = useMemo(() => searchResultItems(searchResults, paletteQuery), [searchResults, paletteQuery]);
 
+  useEffect(() => {
+    void window.aster.settings.get().then(setSettings).catch(() => setSettings({ kubeconfigSources: [] }));
+  }, []);
+
   if (contexts.view === "contexts") {
     return (
+      <>
       <ContextPicker
         core={core}
         contexts={contexts.visibleContexts}
@@ -247,24 +271,42 @@ export default function App() {
         layout={contexts.contextLayout}
         loading={contexts.contextsLoading}
         error={contexts.contextsError}
-        theme={effectiveTheme}
+        theme={theme}
         onQueryChange={contexts.setContextQuery}
         onLayoutChange={contexts.setContextLayout}
         onSelect={contexts.setContextChoice}
         onRefresh={() => void contexts.loadContexts()}
         onConnect={connectContext}
-        onToggleTheme={toggleEffectiveTheme}
+        onToggleTheme={cycleTheme}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        settings={settings}
+        onApply={async (sources) => {
+          await window.aster.settings.applyKubeconfigSources(sources);
+          setSettings({ kubeconfigSources: sources });
+        }}
+        onPickFile={() => window.aster.settings.pickKubeconfigFile()}
+        onPickFolder={() => window.aster.settings.pickKubeconfigFolder()}
+      />
+      {updateCard && <UpdateNotice card={updateCard} />}
+      </>
     );
   }
 
   return (
     <WorkbenchShell
+      className={sidebarCollapsed ? "sidebar-rail" : undefined}
       sidebar={(
         <Sidebar
           context={contexts.activeContext}
+          coreState={core.state}
           resourceGroups={resourceGroups}
           activeKind={kind}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={toggleSidebarCollapsed}
           onSelectKind={(next) => {
             if (next.id === kind.id) {
               detail.clear();
@@ -371,6 +413,7 @@ export default function App() {
             </Suspense>
           )}
       </div>
+      {updateCard && <UpdateNotice card={updateCard} />}
       <CommandPalette
         open={paletteOpen}
         onOpenChange={(open) => {
@@ -398,6 +441,17 @@ export default function App() {
           />
         </Suspense>
       )}
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        settings={settings}
+        onApply={async (sources) => {
+          await window.aster.settings.applyKubeconfigSources(sources);
+          setSettings({ kubeconfigSources: sources });
+        }}
+        onPickFile={() => window.aster.settings.pickKubeconfigFile()}
+        onPickFolder={() => window.aster.settings.pickKubeconfigFolder()}
+      />
     </WorkbenchShell>
   );
 }

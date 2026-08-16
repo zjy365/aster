@@ -31,7 +31,8 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/80 transition-opacity duration-100 supports-backdrop-filter:backdrop-blur-xs data-closed:opacity-0 data-open:opacity-100",
+        // macOS-native light dimming, not the web's heavy dark scrim + blur
+        "fixed inset-0 isolate z-50 bg-black/25 transition-opacity duration-100 dark:bg-black/50 data-closed:opacity-0 data-open:opacity-100",
         className
       )}
       {...props}

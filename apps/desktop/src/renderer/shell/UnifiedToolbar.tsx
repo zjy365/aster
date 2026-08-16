@@ -1,8 +1,12 @@
 import type { Ref } from "react";
+import { useMemo, useState } from "react";
+import { Combobox } from "@base-ui/react/combobox";
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   CheckCircle2,
+  ChevronsUpDown,
   Command,
   LockKeyhole,
   Moon,
@@ -24,13 +28,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Tooltip,
   TooltipContent,
@@ -65,6 +62,13 @@ export interface UnifiedToolbarProps {
 }
 
 const ALL_NAMESPACES_VALUE = "__aster_all_namespaces__";
+/** Cap rendered matches so a 10k-namespace cluster never mounts 10k rows. */
+const NAMESPACE_MATCH_LIMIT = 100;
+
+interface NamespaceItem {
+  value: string | null;
+  label: string;
+}
 
 export function UnifiedToolbar({
   namespaces,
@@ -89,6 +93,17 @@ export function UnifiedToolbar({
   className,
 }: UnifiedToolbarProps) {
   const ThemeIcon = theme === "dark" ? Moon : theme === "light" ? Sun : SunMoon;
+  // A null-valued first item is the "All namespaces" choice; the label map
+  // keeps the raw value out of the trigger (Base UI renders values by default).
+  const namespaceItems = useMemo<NamespaceItem[]>(() => [
+    { value: null, label: "All namespaces" },
+    ...namespaces.map((item) => ({ value: item.name as string | null, label: item.name })),
+  ], [namespaces]);
+  const selectedNamespace = namespaceItems.find((item) => item.value === (namespace || null)) ?? null;
+  const [namespaceQuery, setNamespaceQuery] = useState("");
+  const namespaceMatches = namespaceQuery.trim()
+    ? namespaceItems.filter((item) => item.label.toLowerCase().includes(namespaceQuery.trim().toLowerCase())).length
+    : namespaceItems.length;
 
   return (
     <header
@@ -118,30 +133,65 @@ export function UnifiedToolbar({
       </div>
 
       <div className="toolbar-namespace">
-        <Select
+        <Combobox.Root
+          autoHighlight
           disabled={namespaceDisabled}
-          onValueChange={(value) => {
-            if (typeof value !== "string") return;
-            onNamespaceChange(value === ALL_NAMESPACES_VALUE ? "" : value);
+          items={namespaceItems}
+          limit={NAMESPACE_MATCH_LIMIT}
+          onInputValueChange={(inputValue) => setNamespaceQuery(inputValue)}
+          onOpenChange={(open) => {
+            if (!open) setNamespaceQuery("");
           }}
-          value={namespace || ALL_NAMESPACES_VALUE}
+          onValueChange={(item) => onNamespaceChange(item?.value ?? "")}
+          value={selectedNamespace}
         >
-          <SelectTrigger
+          <Combobox.Trigger
             aria-label="Namespace"
             className="namespace-select"
             data-testid="namespace-select"
           >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent align="start">
-            <SelectItem value={ALL_NAMESPACES_VALUE}>All namespaces</SelectItem>
-            {namespaces.map((item) => (
-              <SelectItem key={item.name} value={item.name}>
-                {item.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            <span className="namespace-select-value">
+              <Combobox.Value placeholder="All namespaces" />
+            </span>
+            <Combobox.Icon className="namespace-select-icon">
+              <ChevronsUpDown aria-hidden="true" />
+            </Combobox.Icon>
+          </Combobox.Trigger>
+          <Combobox.Portal>
+            <Combobox.Positioner align="start" sideOffset={4}>
+              <Combobox.Popup aria-label="Select namespace" className="namespace-combobox-popup">
+                <div className="namespace-combobox-search">
+                  <Search aria-hidden="true" />
+                  <Combobox.Input placeholder="Filter namespaces" data-testid="namespace-filter" />
+                </div>
+                <Combobox.Empty className="namespace-combobox-empty">
+                  No matching namespaces
+                </Combobox.Empty>
+                <Combobox.List className="namespace-combobox-list">
+                  {(item: NamespaceItem) => (
+                    <Combobox.Item
+                      key={item.value ?? ALL_NAMESPACES_VALUE}
+                      value={item}
+                      className="namespace-combobox-item"
+                    >
+                      <span className="namespace-combobox-check">
+                        <Combobox.ItemIndicator>
+                          <Check aria-hidden="true" />
+                        </Combobox.ItemIndicator>
+                      </span>
+                      <span className="min-w-0 truncate">{item.label}</span>
+                    </Combobox.Item>
+                  )}
+                </Combobox.List>
+                {namespaceMatches > NAMESPACE_MATCH_LIMIT ? (
+                  <div className="namespace-combobox-footer">
+                    Showing {NAMESPACE_MATCH_LIMIT} of {namespaceMatches.toLocaleString()} — keep typing to narrow
+                  </div>
+                ) : null}
+              </Combobox.Popup>
+            </Combobox.Positioner>
+          </Combobox.Portal>
+        </Combobox.Root>
       </div>
 
       <label className="toolbar-search">
@@ -161,18 +211,26 @@ export function UnifiedToolbar({
       </label>
 
       <div className="toolbar-actions">
-        <Button
-          aria-label={readOnly ? "Read-only" : "Writes on"}
-          aria-pressed={!readOnly}
-          className="read-only-toggle"
-          data-testid="read-only-toggle"
-          disabled={readOnlyDisabled}
-          onClick={onToggleReadOnly}
-          variant={readOnly ? "outline" : "destructive"}
-        >
-          {readOnly ? <LockKeyhole aria-hidden="true" /> : <UnlockKeyhole aria-hidden="true" />}
-          {readOnly ? "Read-only" : "Writes on"}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-label={readOnly ? "Read-only" : "Writes on"}
+                aria-pressed={!readOnly}
+                className="read-only-toggle"
+                data-testid="read-only-toggle"
+                data-writes={!readOnly || undefined}
+                disabled={readOnlyDisabled}
+                onClick={onToggleReadOnly}
+                variant="outline"
+              />
+            }
+          >
+            {readOnly ? <LockKeyhole aria-hidden="true" /> : <UnlockKeyhole aria-hidden="true" />}
+            {readOnly ? "Read-only" : "Writes on"}
+          </TooltipTrigger>
+          <TooltipContent>{readOnly ? "Turn writes on" : "Turn writes off"}</TooltipContent>
+        </Tooltip>
 
         <ToolbarIconButton
           disabled={refreshing}
