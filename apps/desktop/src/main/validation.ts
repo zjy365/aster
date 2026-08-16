@@ -230,6 +230,33 @@ export function themeSourceValue(input: unknown): "system" | "light" | "dark" {
   return input;
 }
 
+const ENTITY_PATTERN = /&(amp|lt|gt|quot|apos|#39|nbsp);/g;
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: "\"",
+  apos: "'",
+  "#39": "'",
+  nbsp: " ",
+};
+
+/** Turns a GitHub release body into safe plain text; the renderer never renders update notes as HTML. */
+export function releaseNotesText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const withoutMarkup = value
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<[^>]+>/g, " ");
+  const text = withoutMarkup
+    .replace(ENTITY_PATTERN, (_, entity: string) => ENTITIES[entity] ?? " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`#>]+/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return text ? text.slice(0, 4_000) : undefined;
+}
+
 export function readOnlyFlagValue(input: unknown): boolean {
   if (typeof input !== "boolean") throw new Error("readOnly must be a boolean");
   return input;

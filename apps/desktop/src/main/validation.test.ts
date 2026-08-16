@@ -6,6 +6,7 @@ import {
   normalizeRow,
   podExecRequest,
   podLogsRequest,
+  releaseNotesText,
   readOnlyFlagValue,
   resourceGetRequest,
   resourceKey,
@@ -143,5 +144,14 @@ describe("environment value guards", () => {
     expect(isSafeExternalUrl("https://kubernetes.io")).toBe(true);
     expect(isSafeExternalUrl("file:///etc/passwd")).toBe(false);
     expect(isSafeExternalUrl("not a url")).toBe(false);
+  });
+
+  it("releaseNotesText strips markup into safe plain text", () => {
+    expect(releaseNotesText("## Fixed\n- <b>Crash</b> on start &amp; connect")).toBe("Fixed\n- Crash on start & connect");
+    expect(releaseNotesText("See [the changelog](https://example.com) for details.")).toBe("See the changelog for details.");
+    expect(releaseNotesText("<!-- hidden comment --><script>alert(1)</script>ok")).toBe("alert(1) ok");
+    expect(releaseNotesText(42)).toBeUndefined();
+    expect(releaseNotesText("   ")).toBeUndefined();
+    expect(releaseNotesText("x".repeat(5_000))?.length).toBe(4_000);
   });
 });

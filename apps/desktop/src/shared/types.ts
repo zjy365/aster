@@ -16,7 +16,12 @@ export interface ContextInfo {
   user: string;
   namespace: string;
   current: boolean;
+  source?: string;
   error?: string;
+}
+
+export interface AsterSettings {
+  kubeconfigSources: string[];
 }
 
 export interface NamespaceInfo {
@@ -224,17 +229,44 @@ export interface ResourceSearchRequest {
   namespace?: string;
 }
 
+export type UpdaterState =
+  | "disabled"
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+export interface UpdaterSnapshot {
+  state: UpdaterState;
+  currentVersion: string;
+  version?: string;
+  releaseNotes?: string;
+  releaseUrl?: string;
+  progressPercent?: number;
+  message?: string;
+}
+
 export interface DesktopApi {
   platform: NodeJS.Platform;
   app: {
     version(): Promise<string>;
     onCommand(listener: (command: AppCommand) => void): () => void;
   };
+  updater: {
+    state(): Promise<UpdaterSnapshot>;
+    check(): Promise<void>;
+    download(): Promise<void>;
+    install(): Promise<void>;
+    onState(listener: (snapshot: UpdaterSnapshot) => void): () => void;
+  };
   appearance: {
     setThemeSource(theme: AppearanceTheme): Promise<void>;
   };
   core: {
-    status(): CoreStatus;
+    status(): Promise<CoreStatus>;
     onStatus(listener: (status: CoreStatus) => void): () => void;
   };
   safety: {
@@ -242,6 +274,13 @@ export interface DesktopApi {
   };
   contexts: {
     list(): Promise<ContextInfo[]>;
+  };
+  settings: {
+    get(): Promise<AsterSettings>;
+    setKubeconfigSources(sources: string[]): Promise<AsterSettings>;
+    pickKubeconfigFile(): Promise<string | null>;
+    pickKubeconfigFolder(): Promise<string | null>;
+    applyKubeconfigSources(sources: string[]): Promise<void>;
   };
   discovery: {
     list(contextId: string): Promise<DiscoveredResource[]>;

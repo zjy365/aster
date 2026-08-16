@@ -1,4 +1,4 @@
-import { ipcMain, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import type {
   AppearanceTheme,
   ContextInfo,
@@ -36,6 +36,12 @@ import {
   type CoreListResponse,
 } from "./validation";
 import type { WriteSafetyPolicy } from "./write-safety";
+import type { SettingsFile } from "./settings";
+import { normalizeSources } from "./settings";
+import type { AppUpdater } from "./updater";
+import type { AsterSettings, UpdaterSnapshot } from "../shared/types";
+
+const updaterStateChannel = "updater:state-changed";
 
 export interface IpcDeps {
   getWindow(): BrowserWindow | undefined;
@@ -46,6 +52,12 @@ export interface IpcDeps {
   writeSafety: WriteSafetyPolicy;
   setThemeSource(theme: AppearanceTheme): void;
   appVersion(): string;
+  updater?: AppUpdater;
+  /** Settings persistence + apply (restarts the core with new sources). */
+  settingsFile: SettingsFile;
+  applySettings(settings: AsterSettings): void;
+  pickFile(window: BrowserWindow | undefined): Promise<string | null>;
+  pickFolder(window: BrowserWindow | undefined): Promise<string | null>;
 }
 
 /**
@@ -54,7 +66,7 @@ export interface IpcDeps {
  * going through this module — keep it that way when adding channels.
  */
 export function registerIpc(deps: IpcDeps): void {
-  const { sidecar, transport, watches, logsFollow, writeSafety } = deps;
+  const { sidecar, transport, watches, logsFollow, writeSafety, settingsFile, applySettings, pickFile, pickFolder } = deps;
 
   function validateSender(event: IpcMainEvent | IpcMainInvokeEvent): void {
     const window = deps.getWindow();
@@ -81,11 +93,23 @@ export function registerIpc(deps: IpcDeps): void {
     });
   }
 
-  on("core:status", (event) => {
-    event.returnValue = sidecar.status;
-  });
+  handle("core:status", () => sidecar.status);
 
   handle("app:version", () => deps.appVersion());
+
+  if (deps.updater) {
+    const updater = deps.updater;
+    const forwardState = (snapshot: UpdaterSnapshot) => {
+      const contents = deps.getWindow()?.webContents;
+      if (contents && !contents.isDestroyed()) contents.send(updaterStateChannel, snapshot);
+    };
+    updater.on("state-changed", forwardState);
+
+    handle("updater:state", () => updater.currentState());
+    handle("updater:check", () => updater.check());
+    handle("updater:download", () => updater.download());
+    handle("updater:install", () => updater.install());
+  }
 
   handle("appearance:set-theme-source", (_event, rawTheme: unknown) => {
     deps.setThemeSource(themeSourceValue(rawTheme));
@@ -101,10 +125,44 @@ export function registerIpc(deps: IpcDeps): void {
     return value.contexts;
   });
 
+  handle("settings:get", async (): Promise<AsterSettings> => settingsFile.read());
+
+  handle("settings:set-kubeconfig-sources", async (_event, input: unknown): Promise<AsterSettings> => {
+    const settings = { kubeconfigSources: normalizeSources(input) };
+    settingsFile.write(settings);
+    return settings;
+  });
+
+  handle("settings:apply-kubeconfig-sources", async (_event, input: unknown): Promise<void> => {
+    const settings = { kubeconfigSources: normalizeSources(input) };
+    settingsFile.write(settings);
+    applySettings(settings);
+  });
+
+  handle("settings:pick-kubeconfig-file", async (event): Promise<string | null> => {
+    const window = getWindowForPicker(event);
+    return pickFile(window);
+  });
+
+  handle("settings:pick-kubeconfig-folder", async (event): Promise<string | null> => {
+    const window = getWindowForPicker(event);
+    return pickFolder(window);
+  });
+
   handle("namespaces:list", async (_event, contextId: unknown): Promise<NamespaceInfo[]> => {
     const validContext = requiredContextId(contextId);
-    const value = await transport.request<CoreListResponse>(`/v1/namespaces?contextId=${encodeURIComponent(validContext)}&limit=500`);
-    return value.items.map((item) => ({ name: item.name, ...(item.status ? { status: item.status } : {}) }));
+    // Follow continueToken until the list is complete: clusters can have far
+    // more than one page (500) of namespaces, and the picker must see them all.
+    const namespaces: NamespaceInfo[] = [];
+    let continueToken = "";
+    for (let page = 0; page < 40; page++) {
+      const query = `contextId=${encodeURIComponent(validContext)}&limit=500${continueToken ? `&continueToken=${encodeURIComponent(continueToken)}` : ""}`;
+      const value = await transport.request<CoreListResponse>(`/v1/namespaces?${query}`);
+      namespaces.push(...value.items.map((item) => ({ name: item.name, ...(item.status ? { status: item.status } : {}) })));
+      if (!value.continueToken) return namespaces;
+      continueToken = value.continueToken;
+    }
+    return namespaces;
   });
 
   handle("discovery:list", async (_event, contextId: unknown): Promise<DiscoveredResource[]> => {
@@ -251,6 +309,13 @@ export function registerIpc(deps: IpcDeps): void {
     const id = portForwardStopRequest(input);
     await transport.request<unknown>("/v1/pods/portforward/stop", { id });
   });
+}
+
+function getWindowForPicker(event: IpcMainInvokeEvent): BrowserWindow | undefined {
+  const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  // Only attach the sheet to a window we already trust; the sender check in
+  // the handle() wrapper already proved this frame is the main window.
+  return window && !window.isDestroyed() ? window : undefined;
 }
 
 function requiredContextId(value: unknown): string {

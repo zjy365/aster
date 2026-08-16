@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppCommand,
+  AsterSettings,
   ContextInfo,
   CoreStatus,
   DesktopApi,
@@ -24,16 +25,27 @@ import type {
   ResourceMutationResponse,
   ResourceSearchRequest,
   ResourceWatchBatch,
+  UpdaterSnapshot,
 } from "../shared/types";
 
 const channels = {
   appVersion: "app:version",
   appCommand: "app:command",
+  updaterState: "updater:state",
+  updaterCheck: "updater:check",
+  updaterDownload: "updater:download",
+  updaterInstall: "updater:install",
+  updaterStateChanged: "updater:state-changed",
   setThemeSource: "appearance:set-theme-source",
   coreStatus: "core:status",
   coreStatusChanged: "core:status-changed",
   setReadOnly: "safety:set-read-only",
   contextsList: "contexts:list",
+  settingsGet: "settings:get",
+  settingsSetSources: "settings:set-kubeconfig-sources",
+  settingsApplySources: "settings:apply-kubeconfig-sources",
+  settingsPickFile: "settings:pick-kubeconfig-file",
+  settingsPickFolder: "settings:pick-kubeconfig-folder",
   discoveryList: "discovery:list",
   namespacesList: "namespaces:list",
   metricsPods: "metrics:pods",
@@ -114,11 +126,18 @@ const api: DesktopApi = {
     version: () => invoke<string>(channels.appVersion),
     onCommand: (listener) => listen<AppCommand>(channels.appCommand, listener),
   },
+  updater: {
+    state: () => invoke<UpdaterSnapshot>(channels.updaterState),
+    check: () => invoke<void>(channels.updaterCheck),
+    download: () => invoke<void>(channels.updaterDownload),
+    install: () => invoke<void>(channels.updaterInstall),
+    onState: (listener) => listen<UpdaterSnapshot>(channels.updaterStateChanged, listener),
+  },
   appearance: {
     setThemeSource: (theme) => invoke<void>(channels.setThemeSource, theme),
   },
   core: {
-    status: () => ipcRenderer.sendSync(channels.coreStatus) as CoreStatus,
+    status: () => invoke<CoreStatus>(channels.coreStatus),
     onStatus: (listener) => listen<CoreStatus>(channels.coreStatusChanged, listener),
   },
   safety: {
@@ -126,6 +145,13 @@ const api: DesktopApi = {
   },
   contexts: {
     list: () => invoke<ContextInfo[]>(channels.contextsList),
+  },
+  settings: {
+    get: () => invoke<AsterSettings>(channels.settingsGet),
+    setKubeconfigSources: (sources) => invoke<AsterSettings>(channels.settingsSetSources, sources),
+    applyKubeconfigSources: (sources) => invoke<void>(channels.settingsApplySources, sources),
+    pickKubeconfigFile: () => invoke<string | null>(channels.settingsPickFile),
+    pickKubeconfigFolder: () => invoke<string | null>(channels.settingsPickFolder),
   },
   discovery: {
     list: (contextId) => invoke<DiscoveredResource[]>(channels.discoveryList, contextId),

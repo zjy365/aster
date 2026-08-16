@@ -39,6 +39,8 @@ function executableName(platform: NodeJS.Platform): string {
 export interface SidecarOptions {
   executablePath: () => string;
   spawnProcess?: (executable: string, env: NodeJS.ProcessEnv) => ChildProcessWithoutNullStreams;
+  /** Extra environment for the core process (extra kubeconfig sources). */
+  extraEnv?: () => NodeJS.ProcessEnv;
   readyTimeoutMs?: number;
   version?: () => string;
 }
@@ -93,7 +95,7 @@ export class Sidecar {
     const readyTimeoutMs = this.options.readyTimeoutMs ?? 10_000;
 
     await new Promise<void>((resolve, reject) => {
-      const child = spawnProcess(executable, { ...process.env, ASTER_BOOTSTRAP_TOKEN: this.token });
+      const child = spawnProcess(executable, { ...process.env, ...this.options.extraEnv?.(), ASTER_BOOTSTRAP_TOKEN: this.token });
       child.stdin.end();
       this.child = child;
       let stdout = "";
