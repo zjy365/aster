@@ -22,7 +22,7 @@ export default defineConfig(
     },
     platform: "node",
     format: [bundle.format],
-    external: ["electron"],
+    external: ["electron", "electron-updater"],
     outDir: "dist-electron",
     outExtension: () => ({ js: bundle.extension }),
     sourcemap: true,
