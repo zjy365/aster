@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,7 +33,16 @@ func main() {
 
 func run() error {
 	token := os.Getenv("ASTER_BOOTSTRAP_TOKEN")
-	loader := session.NewLoader()
+	var sources []string
+	if value := os.Getenv("ASTER_KUBECONFIG_SOURCES"); value != "" {
+		sources = strings.Split(value, string(os.PathListSeparator))
+	}
+	var loader *session.Loader
+	if len(sources) == 0 {
+		loader = session.NewLoader()
+	} else {
+		loader = session.NewLoaderWithSources(sources)
+	}
 	sessions := session.NewManager(loader)
 	resourceService := resources.NewService(sessions)
 	rpcServer, err := rpc.NewServer(token, sessions, resourceService)
