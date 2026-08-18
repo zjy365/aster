@@ -14,7 +14,7 @@ The current v0.1 milestone includes:
 - A virtualized resource table, resource inspector, and sanitized YAML view.
 - Native scoped Kubernetes watch with bookmark handling, reconnect, and expired-resource-version reset.
 - Safe Phase 2 mutations for Deployment, StatefulSet, and DaemonSet scale/image/restart, including server-side dry-run and resource-version conflict checks.
-- A renderer-side read-only switch, dry-run confirmation, and a persisted per-context operation journal containing summaries only.
+- Dry-run confirmation for every mutation, and a persisted per-context operation journal containing summaries only.
 - Event projection and a related-object Events view for the selected namespaced resource.
 - Bounded Pod Logs retrieval (tail-lines request, 4 MiB response cap, and no follow stream).
 - One-shot Pod Terminal execution with argv validation and a 1 MiB output cap; no persistent shell and no command contents in the journal.

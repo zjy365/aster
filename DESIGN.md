@@ -204,7 +204,7 @@ The palette is a cool macOS-like neutral field with clearly separated jobs for i
 ### Neutral
 
 - **Window and Sidebar Neutrals:** Separate the desktop frame and persistent source region through tonal contrast.
-- **Surface, Muted Surface, and Hover Surface:** Build the workspace hierarchy without cards or resting shadows.
+- **Surface, Muted Surface, and Hover Surface:** Build the workspace hierarchy through tonal layering and border-defined cards, never resting shadows.
 - **Primary, Secondary, and Faint Text:** Support dense information with a deliberate three-step emphasis ladder; secondary and microcopy pairings must be contrast-tested on their actual light and dark surfaces.
 - **Hairline Borders:** Divide toolbars, tables, sections, and inputs with low-contrast system-like strokes.
 
@@ -270,7 +270,7 @@ The desktop shell is a two-column grid: a persistent Source List at 236px and a 
 
 On macOS, the titlebar is 52px high and reserves at least 76px at the leading edge for native traffic lights and drag space. Product branding belongs in the Context Picker content or Source List, never beside the traffic lights. Interactive controls inside a draggable titlebar are explicitly non-draggable. The chosen appearance is synchronized with Electron's native window theme.
 
-Resource browsing uses a 64px pane heading, a 34px table header, 38px virtualized rows, and a 34px footer. Detail replaces the list in the same workspace rather than opening a card or side inspector. Detail sections use 24px horizontal gutters, a maximum readable section width of 1040px, and four metadata columns that collapse to three below 1120px and two below 960px. Short viewports below 720px reduce vertical ceremony without changing the information model.
+Resource browsing uses a 64px pane heading, a 34px table header, 38px virtualized rows, and a 34px footer. Detail replaces the list in the same workspace rather than opening a side inspector. Detail and cluster Overview share one summary language: border-defined cards (one-pixel hairline, 10px radius, surface fill) spaced by 12px gaps on a 16px page margin — grouping comes from the card edge and whitespace, not from nested hairlines or shadows. The detail readable column keeps its 1040px ceiling; on workspaces wider than 920px Overview adds a 288px card rail beside that column, for a combined ceiling of 1328px, so common window widths already gain the two-column density instead of stacking into one long column. Metadata grids run four columns, collapsing to three and then two as their own column narrows — measured with container queries against the main column, since the main column is narrower than the workspace whenever the aside is present. Short viewports below 720px reduce vertical ceremony without changing the information model.
 
 Spacing follows a compact 4/8/12/16/24px rhythm. One-pixel gaps and hairlines are structural separators, not decorative texture. Long Kubernetes identifiers truncate in navigation and headers but wrap where the full value is the content.
 
@@ -331,7 +331,7 @@ The Source List is persistent, scrollable, and grouped with quiet 10px labels. I
 
 ### Toolbar
 
-The unified 52px toolbar uses stable semantic zones: navigation and scope at the leading edge, view context and search in the flexible center, and current-page actions at the trailing edge. Frequent actions remain visible; lower-frequency actions move into one More menu as the window narrows. Toolbar icons use labels or tooltips when meaning is not universal, and every command is also discoverable from the native menu or contextual command surface.
+The unified 52px toolbar uses stable semantic zones: navigation and scope at the leading edge, view context and search in the flexible center, and workspace-wide actions at the trailing edge. The trailing zone carries only actions that mean the same thing on every screen — refresh, appearance, settings — so the toolbar does not reshuffle as the user moves between list and detail. Object-scoped actions belong to the surface that names their target, not to the toolbar; see Full Resource Detail. Frequent actions remain visible; lower-frequency actions move into one More menu as the window narrows. Toolbar icons use labels or tooltips when meaning is not universal, and every command is also discoverable from the native menu or contextual command surface.
 
 ### Resource Table
 
@@ -340,6 +340,10 @@ The resource table is a dense, virtualized work surface rather than a collection
 ### Full Resource Detail
 
 Resource detail occupies the full workspace and keeps the Source List and unified toolbar intact. A 72px identity header leads into line-style tabs and border-separated sections. Metadata uses responsive definition grids; YAML, diffs, logs, terminal output, and operation history switch to the mono role. Mutation flows culminate in an explicit dry-run review dialog before apply.
+
+**Object-scoped actions live in the identity header's trailing edge**, beside the name and namespace they operate on, and they never scroll away or disappear when the user changes tabs. Safe operations use the outline treatment; a single hairline divider separates them from the destructive action, which uses a tonal destructive fill with destructive text rather than a saturated red button — solid destructive fill is reserved for the confirm control inside the dry-run review dialog, where the commitment actually happens. Below the narrow breakpoint the safe operations collapse into one More menu while the destructive action stays visible; a menu is never the only route to a destructive action, and a destructive action is never the only visible one. Write feedback — dry-run state, failures, and permission reasons — renders in a live status line directly beneath the header so cause and effect stay adjacent.
+
+Overview answers "is this healthy and what is it connected to" without tab-hopping. Kinds that expose replica counters lead with a stat-card row — one card per fact, a large tabular value over a quiet label, echoing the cluster Overview's cards; the status card carries a semantic dot, and the Desired card is itself the scale affordance when writes are allowed, reacting as a whole on hover; kinds without counters omit the row rather than render placeholder dashes. Workload overviews lead the main column with Conditions and a compact pod preview drawn from a selector-scoped, server-paginated pod list that also backs the dedicated Pods tab; selectors built on matchExpressions degrade to an explicit note instead of a wrong list. Container images render as name + mono reference rows with a copy affordance and the update-image action on the section. Where the workspace is wide enough, Overview splits into a main column of cards for conditions, pods, identity, and configuration and a card rail for recent events (tinted circular type icons, as on the cluster Overview), kind-grouped related objects, labels, annotations, and session write history, each previewing a few entries and deferring to its dedicated tab. Section and rail counts render as quiet pills. Detail layout breakpoints are measured against the workspace container, not the window, because the Source List occupies a fixed leading column.
 
 ### Commands and Context Menus
 
@@ -371,11 +375,11 @@ Motion explains causality rather than decorating routine work, and the default a
 
 ### Don't:
 
-- **Don't** turn resource lists or detail sections into a card-heavy web dashboard.
+- **Don't** turn resource lists into cards; lists stay dense virtualized tables. Summary surfaces (cluster Overview, detail Overview) use the shared border-defined card language — hairline edge, no shadows, no nested card-in-card.
 - **Don't** add decorative chrome, ornamental borders, side stripes, or resting shadows to the core workspace.
 - **Don't** borrow Aptakube's visual skin; only its approved workbench topology is part of Aster's system.
 - **Don't** use Aster orange as the general interaction color or system blue as decorative branding.
-- **Don't** hide mutation safety: dry-run state, exact Diff, read-only mode, and the final Apply action must remain explicit.
+- **Don't** hide mutation safety: dry-run state, exact Diff, and the final Apply action must remain explicit.
 - **Don't** place the product mark or name beside macOS traffic lights, fake native window controls, or consume the titlebar drag region with controls.
 - **Don't** draw a second focus outline on the input inside a bordered search or select container.
 - **Don't** create separate command behavior for the toolbar, right-click menu, and keyboard path.

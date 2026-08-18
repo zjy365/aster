@@ -25,7 +25,7 @@ Aster combines a native desktop workbench with a narrow, loopback-only Go sideca
 - Users move from kubeconfig context selection to namespace-scoped resource lists, then into resource details, YAML, Events, Related objects, Logs, Terminal, and safe mutation review.
 - The application is used primarily on desktop systems and should feel at home on macOS while retaining solid, accessible Windows and Linux fallbacks.
 - Users may inspect large clusters, rapidly switch contexts, and depend on server pagination, scoped watches, and virtual rendering.
-- Read-only mode is the default safety posture for a context unless the user explicitly changes it.
+- The product is read-write: mutations go through server-side dry-run and explicit Apply, with no read-only lock.
 
 ## Capabilities and Constraints
 
@@ -57,7 +57,7 @@ Aster combines a native desktop workbench with a narrow, loopback-only Go sideca
 
 1. Preserve context: list state, scope, selection, and scroll position survive detail work.
 2. Make complexity available, not mandatory: the default path is calm and direct while advanced Kubernetes detail remains close.
-3. Keep safety visible: read-only state, dry-run results, diffs, and destructive actions are explicit.
+3. Keep safety visible: dry-run results, diffs, and destructive actions are explicit.
 4. Stay fast at cluster scale: lazy clients, server pagination, scoped watches, and virtual rendering are product behavior.
 5. Feel native through structure and behavior: system typography, desktop shortcuts, clear focus, and restrained motion matter more than decorative chrome.
 

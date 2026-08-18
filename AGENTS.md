@@ -5,12 +5,12 @@ Aster is a Tauri (Rust shell) + React desktop application with a Go Kubernetes s
 ## Boundaries
 
 - Renderer code never uses Node, Rust, or shell APIs directly; use the typed `DesktopApi` from `src/renderer/lib/desktop.ts`.
-- The Tauri Rust side owns the sidecar token, base URL, process lifecycle, filesystem, write-safety policy, and native dialogs. The token and loopback URL never cross into the renderer.
+- The Tauri Rust side owns the sidecar token, base URL, process lifecycle, filesystem, and native dialogs. The token and loopback URL never cross into the renderer.
 - Go core only listens on random loopback ports and requires bearer authentication, and re-validates every input cap the shell enforces (core/internal/rpc/validate.go).
 - Kubernetes clients are lazy and scoped to explicit views. Never add global informer caches or startup cache sync.
 - Never return kubeconfig contents, credentials, Secret data, or the sidecar token to the renderer.
 - Never create ServiceAccounts, Roles, ClusterRoles, RoleBindings, or ClusterRoleBindings as a convenience for terminal or other features.
-- Keep server pagination and virtual rendering. Do not add an `All` page size.
+- Keep server pagination and virtual rendering for resource tables. Do not add an `All` page size. Log streams (and any future terminal surface) render through xterm.js instead — its own scrollback buffer is the cap, not a virtualized list.
 - New code is Apache-2.0. Do not copy implementation code from external reference projects.
 
 ## Verification
