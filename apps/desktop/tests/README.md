@@ -10,8 +10,7 @@ The fixture serves two contexts and 10,000 Deployments across 100-item pages. It
 
 - the context picker and workbench render with no horizontal overflow at 1280×800 and 900×640;
 - the virtual table renders a small DOM slice (~100 loaded rows) out of 10,000 resources;
-- selecting a Deployment opens the detail view with the Overview and YAML projections;
-- write operations are blocked by default read-only mode;
+- selecting a Deployment opens the detail view with the Overview and YAML projections, with write operations available;
 - the renderer produces no page errors or console errors.
 
 Screenshots are written to `output/playwright/renderer-*.png`.
