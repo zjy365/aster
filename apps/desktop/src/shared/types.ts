@@ -22,6 +22,37 @@ export interface ContextInfo {
 
 export interface AsterSettings {
   kubeconfigSources: string[];
+  /**
+   * The standard chain ($KUBECONFIG + ~/.kube/config) is a default, not a
+   * privilege: it participates unless the user turns it off. With it off and
+   * no configured sources the app simply has no clusters.
+   */
+  includeStandardChain: boolean;
+}
+
+/**
+ * Per-source kubeconfig load report from the core: paths and counts only —
+ * file contents and credentials never cross into the renderer. A directory
+ * source lists the files its content sniff admitted.
+ */
+export interface SourceReport {
+  path: string;
+  kind: "file" | "directory";
+  files: number;
+  contexts: number;
+  /** True for the standard ~/.kube/config entry of the chain. */
+  default?: boolean;
+  /** True when a configured source is already covered by the chain. */
+  inChain?: boolean;
+  error?: string;
+  entries?: SourceReport[];
+}
+
+export interface SourcesReport {
+  /** Default location + $KUBECONFIG chain; empty when the user turned it off. */
+  chain: SourceReport[];
+  /** User-configured sources from settings; removable. */
+  configured: SourceReport[];
 }
 
 export interface NamespaceInfo {
@@ -107,11 +138,38 @@ export interface PodLogsRequest {
   name: string;
   container?: string;
   tailLines?: number;
+  previous?: boolean;
+  timestamps?: boolean;
 }
 
 export interface PodLogsResponse {
   text: string;
   truncated: boolean;
+  containers?: string[];
+}
+
+export type WorkloadKind = "Deployment" | "StatefulSet" | "DaemonSet" | "Job";
+
+export interface WorkloadLogsRequest {
+  contextId: string;
+  namespace: string;
+  kind: WorkloadKind;
+  name: string;
+  container?: string;
+  tailLines?: number;
+}
+
+export interface WorkloadLogLine {
+  pod: string;
+  text: string;
+}
+
+export interface WorkloadLogsResponse {
+  lines: WorkloadLogLine[];
+  pods?: string[];
+  containers?: string[];
+  truncated: boolean;
+  note?: string;
 }
 
 export interface PodExecRequest {
@@ -128,8 +186,9 @@ export interface PodExecResponse {
 }
 
 export type LogStreamBatch =
-  | { subscriptionId: string; type: "line"; text?: string }
-  | { subscriptionId: string; type: "error"; message?: string };
+  | { subscriptionId: string; type: "line"; text?: string; pod?: string }
+  | { subscriptionId: string; type: "error"; message?: string; pod?: string }
+  | { subscriptionId: string; type: "note"; message?: string };
 
 export interface ContainerMetric {
   name: string;
@@ -229,6 +288,92 @@ export interface ResourceSearchRequest {
   namespace?: string;
 }
 
+/** Row of the Helm releases table; never carries values or manifests. */
+export interface HelmReleaseSummary {
+  name: string;
+  namespace: string;
+  version: number;
+  status: string;
+  chart: string;
+  chartVersion: string;
+  appVersion: string;
+  updatedAt?: string;
+  description?: string;
+}
+
+/**
+ * Full release read. Values are user-authored chart input and travel
+ * unredacted; rendered manifests have Secret data masked by the core.
+ */
+export interface HelmReleaseDetail extends HelmReleaseSummary {
+  notes?: string;
+  values?: string;
+  manifest?: string;
+  /** True when the core truncated values or manifest to the size cap. */
+  truncated?: boolean;
+  history: HelmReleaseSummary[];
+}
+
+export interface HelmGetRequest {
+  contextId: string;
+  namespace: string;
+  name: string;
+}
+
+export interface HelmUninstallRequest {
+  contextId: string;
+  namespace: string;
+  name: string;
+}
+
+export interface HelmRollbackRequest {
+  contextId: string;
+  namespace: string;
+  name: string;
+  /** Target revision; zero rolls back to the previous revision. */
+  revision?: number;
+}
+
+export interface OverviewCount {
+  total: number;
+  ready: number;
+}
+
+export interface OverviewUsage {
+  requested: number;
+  limited: number;
+  allocatable: number;
+}
+
+export interface OverviewResource {
+  cpu: OverviewUsage;
+  memory: OverviewUsage;
+}
+
+export interface OverviewEvent {
+  namespace: string;
+  name: string;
+  reason?: string;
+  message?: string;
+  type?: string;
+  count?: number;
+  lastTimestamp?: string;
+}
+
+/**
+ * Cluster-wide dashboard snapshot computed by the core: counts are paged to
+ * a bounded maximum, resource usage aggregates node allocatable capacity
+ * versus pod requests/limits, and events are the newest twenty.
+ */
+export interface Overview {
+  nodes: OverviewCount;
+  pods: OverviewCount;
+  namespaces: number;
+  services: number;
+  resource: OverviewResource;
+  events: OverviewEvent[];
+}
+
 export type UpdaterState =
   | "disabled"
   | "idle"
@@ -254,6 +399,8 @@ export interface DesktopApi {
   app: {
     version(): Promise<string>;
     onCommand(listener: (command: AppCommand) => void): () => void;
+    /** Opens an https URL in the system browser; the shell rejects other schemes. */
+    openExternal(url: string): Promise<void>;
   };
   updater: {
     state(): Promise<UpdaterSnapshot>;
@@ -265,22 +412,24 @@ export interface DesktopApi {
   appearance: {
     setThemeSource(theme: AppearanceTheme): Promise<void>;
   };
+  files: {
+    /** Saves text via a native save dialog; resolves to the path or null when cancelled. */
+    saveTextFile(defaultName: string, content: string): Promise<string | null>;
+  };
   core: {
     status(): Promise<CoreStatus>;
     onStatus(listener: (status: CoreStatus) => void): () => void;
   };
-  safety: {
-    setReadOnly(contextId: string, readOnly: boolean): Promise<void>;
-  };
   contexts: {
     list(): Promise<ContextInfo[]>;
+    sourcesReport(): Promise<SourcesReport>;
   };
   settings: {
     get(): Promise<AsterSettings>;
-    setKubeconfigSources(sources: string[]): Promise<AsterSettings>;
+    setKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<AsterSettings>;
     pickKubeconfigFile(): Promise<string | null>;
     pickKubeconfigFolder(): Promise<string | null>;
-    applyKubeconfigSources(sources: string[]): Promise<void>;
+    applyKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<void>;
   };
   discovery: {
     list(contextId: string): Promise<DiscoveredResource[]>;
@@ -291,6 +440,15 @@ export interface DesktopApi {
   metrics: {
     pods(contextId: string, namespace?: string): Promise<PodMetric[]>;
   };
+  overview: {
+    get(contextId: string): Promise<Overview>;
+  };
+  helm: {
+    list(contextId: string, namespace: string): Promise<HelmReleaseSummary[]>;
+    get(request: HelmGetRequest): Promise<HelmReleaseDetail>;
+    uninstall(request: HelmUninstallRequest): Promise<void>;
+    rollback(request: HelmRollbackRequest): Promise<void>;
+  };
   resources: {
     list(request: ResourceListRequest): Promise<ResourceListResponse>;
     get(request: ResourceGetRequest): Promise<ResourceGetResponse>;
@@ -299,6 +457,8 @@ export interface DesktopApi {
     search(request: ResourceSearchRequest): Promise<RelatedResource[]>;
     logs(request: PodLogsRequest): Promise<PodLogsResponse>;
     followLogs(request: PodLogsRequest, listener: (batch: LogStreamBatch) => void): () => void;
+    workloadLogs(request: WorkloadLogsRequest): Promise<WorkloadLogsResponse>;
+    followWorkloadLogs(request: WorkloadLogsRequest, listener: (batch: LogStreamBatch) => void): () => void;
     portForwardStart(request: PortForwardStartRequest): Promise<PodPortForward>;
     portForwardStop(id: string): Promise<void>;
     exec(request: PodExecRequest): Promise<PodExecResponse>;

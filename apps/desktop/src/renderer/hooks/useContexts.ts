@@ -4,10 +4,12 @@ import { filterContexts, retainedContextChoice, type ContextLayout } from "../li
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
-export type AppView = "contexts" | "workbench";
+export type AppView = "contexts" | "workbench" | "settings";
 
 export interface ContextsState {
   view: AppView;
+  /** The view settings was opened from; the page's back button returns there. */
+  settingsFrom: AppView;
   contexts: ContextInfo[];
   contextId: string;
   contextChoice: string;
@@ -19,6 +21,7 @@ export interface ContextsState {
   chosenContext?: ContextInfo;
   visibleContexts: ContextInfo[];
   setView(view: AppView): void;
+  setSettingsFrom(view: AppView): void;
   setContextId(id: string): void;
   setContextChoice(id: string): void;
   setContextQuery(query: string): void;
@@ -33,6 +36,10 @@ export interface ContextsState {
  */
 export function useContexts(core: CoreStatus): ContextsState {
   const [view, setView] = useState<AppView>("contexts");
+  // Where settings was opened from, so its back button returns there. Only
+  // the contexts view opens settings today; recording the origin keeps a
+  // future workbench entry correct for free.
+  const [settingsFrom, setSettingsFrom] = useState<AppView>("contexts");
   const [contexts, setContexts] = useState<ContextInfo[]>([]);
   const [contextId, setContextId] = useState("");
   const [contextChoice, setContextChoice] = useState(() => localStorage.getItem("aster.lastContext") || "");
@@ -74,6 +81,7 @@ export function useContexts(core: CoreStatus): ContextsState {
 
   return {
     view,
+    settingsFrom,
     contexts,
     contextId,
     contextChoice,
@@ -85,6 +93,7 @@ export function useContexts(core: CoreStatus): ContextsState {
     chosenContext,
     visibleContexts,
     setView,
+    setSettingsFrom,
     setContextId,
     setContextChoice,
     setContextQuery,

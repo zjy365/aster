@@ -8,13 +8,12 @@ import {
   CheckCircle2,
   ChevronsUpDown,
   Command,
-  LockKeyhole,
   Moon,
   RefreshCw,
   Search,
+  Settings,
   Sun,
   SunMoon,
-  UnlockKeyhole,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -47,13 +46,11 @@ export interface UnifiedToolbarProps {
   onQueryChange(query: string): void;
   queryInputRef?: Ref<HTMLInputElement>;
   searchPlaceholder?: string;
-  readOnly: boolean;
-  onToggleReadOnly(): void;
-  readOnlyDisabled?: boolean;
   refreshing?: boolean;
   onRefresh(): void;
   theme: AppearanceTheme;
   onThemeChange(theme: AppearanceTheme): void;
+  onOpenSettings?(): void;
   canGoBack?: boolean;
   canGoForward?: boolean;
   onBack?(): void;
@@ -79,13 +76,11 @@ export function UnifiedToolbar({
   onQueryChange,
   queryInputRef,
   searchPlaceholder = "Filter current resources",
-  readOnly,
-  onToggleReadOnly,
-  readOnlyDisabled = false,
   refreshing = false,
   onRefresh,
   theme,
   onThemeChange,
+  onOpenSettings,
   canGoBack = false,
   canGoForward = false,
   onBack,
@@ -111,7 +106,7 @@ export function UnifiedToolbar({
       className={cn("unified-toolbar", className)}
       data-testid="unified-toolbar"
     >
-      <div aria-hidden="true" className="unified-toolbar-drag-region" />
+      <div aria-hidden="true" className="unified-toolbar-drag-region" data-tauri-drag-region />
 
       <div className="toolbar-history">
         <ToolbarIconButton
@@ -211,27 +206,6 @@ export function UnifiedToolbar({
       </label>
 
       <div className="toolbar-actions">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                aria-label={readOnly ? "Read-only" : "Writes on"}
-                aria-pressed={!readOnly}
-                className="read-only-toggle"
-                data-testid="read-only-toggle"
-                data-writes={!readOnly || undefined}
-                disabled={readOnlyDisabled}
-                onClick={onToggleReadOnly}
-                variant="outline"
-              />
-            }
-          >
-            {readOnly ? <LockKeyhole aria-hidden="true" /> : <UnlockKeyhole aria-hidden="true" />}
-            {readOnly ? "Read-only" : "Writes on"}
-          </TooltipTrigger>
-          <TooltipContent>{readOnly ? "Turn writes on" : "Turn writes off"}</TooltipContent>
-        </Tooltip>
-
         <ToolbarIconButton
           disabled={refreshing}
           label="Refresh resources"
@@ -272,6 +246,16 @@ export function UnifiedToolbar({
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {onOpenSettings && (
+          <ToolbarIconButton
+            label="Settings"
+            onClick={onOpenSettings}
+            testId="open-settings"
+          >
+            <Settings aria-hidden="true" />
+          </ToolbarIconButton>
+        )}
       </div>
     </header>
   );

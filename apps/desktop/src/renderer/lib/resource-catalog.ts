@@ -47,19 +47,12 @@ function resource(
 
 export const RESOURCE_GROUPS: ResourceGroup[] = [
   {
-    label: "Pinned",
-    items: [
-      resource("pods", "", "v1", "pods", "Pod", true, "Pinned", Container),
-      resource("nodes", "", "v1", "nodes", "Node", false, "Pinned", Server),
-    ],
-  },
-  {
     label: "Workloads",
     items: [
       resource("deployments", "apps", "v1", "deployments", "Deployment", true, "Workloads", Boxes),
       resource("statefulsets", "apps", "v1", "statefulsets", "StatefulSet", true, "Workloads", Database),
       resource("daemonsets", "apps", "v1", "daemonsets", "DaemonSet", true, "Workloads", Layers3),
-      resource("pods-workloads", "", "v1", "pods", "Pod", true, "Workloads", Container),
+      resource("pods", "", "v1", "pods", "Pod", true, "Workloads", Container),
       resource("jobs", "batch", "v1", "jobs", "Job", true, "Workloads", Workflow),
       resource("cronjobs", "batch", "v1", "cronjobs", "CronJob", true, "Workloads", Activity),
     ],
@@ -86,6 +79,7 @@ export const RESOURCE_GROUPS: ResourceGroup[] = [
       resource("configmaps", "", "v1", "configmaps", "ConfigMap", true, "Config", Braces),
       resource("secrets", "", "v1", "secrets", "Secret", true, "Config", FileKey),
       resource("namespaces", "", "v1", "namespaces", "Namespace", false, "Config", Boxes),
+      resource("nodes", "", "v1", "nodes", "Node", false, "Config", Server),
     ],
   },
   {
@@ -112,11 +106,19 @@ export const SIDEBAR_RESOURCE_GROUPS: SidebarResourceGroup[] = RESOURCE_GROUPS.m
   items: group.items.map((item) => ({
     ...item,
     enabled: ENABLED_RESOURCES.has(item.resource),
-    pinned: group.label === "Pinned",
   })),
 }));
 
-export const DEFAULT_KIND: ResourceKind = toResourceKind(RESOURCE_GROUPS[1].items[0]);
+export const DEFAULT_KIND: ResourceKind = toResourceKind(RESOURCE_GROUPS[0].items[0]);
+
+/** Kind glyph for the detail header; matches on kind + resolved apiVersion. */
+export function findCatalogIcon(kind: string, apiVersion: string): ResourceIcon | undefined {
+  for (const item of RESOURCE_GROUPS.flatMap((group) => group.items)) {
+    const itemApiVersion = item.group ? `${item.group}/${item.version}` : item.version;
+    if (item.kind === kind && itemApiVersion === apiVersion) return item.icon;
+  }
+  return undefined;
+}
 
 export function toResourceKind(value: ResourceKind & { icon?: ResourceIcon }): ResourceKind {
   const { icon: _icon, ...resourceKind } = value;
@@ -130,7 +132,7 @@ export function findEnabledResourceKind(id: string): ResourceKind | undefined {
 export function findKindInGroups(groups: SidebarResourceGroup[], id: string): ResourceKind | undefined {
   for (const item of flattenResourceGroups(groups)) {
     if (item.id === id && item.enabled !== false) {
-      const { icon: _icon, label: _label, enabled: _enabled, pinned: _pinned, ...kind } = item;
+      const { icon: _icon, label: _label, enabled: _enabled, ...kind } = item;
       return kind;
     }
   }

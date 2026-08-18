@@ -9,6 +9,10 @@ export interface ResourceListOptions {
   namespace: string;
   coreReady: boolean;
   setError(message: string): void;
+  /** Server-side selector pinning the list, e.g. a workload's pod selector. */
+  labelSelector?: string;
+  /** False keeps the hook idle: no watch, no fetch, empty list. */
+  enabled?: boolean;
 }
 
 export interface ResourceListState {
@@ -31,7 +35,7 @@ export interface ResourceListState {
  * the filter query, and the visible error. Selection resets triggered by
  * list scope changes live in useResourceDetail via `generation`.
  */
-export function useResourceList({ contextId, kind, namespace, coreReady, setError }: ResourceListOptions): ResourceListState {
+export function useResourceList({ contextId, kind, namespace, coreReady, setError, labelSelector, enabled = true }: ResourceListOptions): ResourceListState {
   const [list, setList] = useState<ResourceListResponse>({ items: [] });
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -43,7 +47,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
   const watchFlushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const loadMore = useCallback(async () => {
-    if (!contextId || !coreReady || !list.continueToken) return;
+    if (!contextId || !coreReady || !enabled || !list.continueToken) return;
     const request = ++listRequest.current;
     setLoadingMore(true);
     setError("");
@@ -52,6 +56,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
         contextId,
         resourceKind: kind,
         ...(kind.namespaced && namespace ? { namespace } : {}),
+        ...(labelSelector ? { labelSelector } : {}),
         limit: 100,
         continueToken: list.continueToken,
       });
@@ -60,15 +65,15 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     } catch {
       // Keep the loaded page; the footer button retries with the same token.
     } finally {
-      if (request === listRequest.current) {
+      if (request !== listRequest.current) {
         setLoading(false);
         setLoadingMore(false);
       }
     }
-  }, [contextId, coreReady, kind, list.continueToken, namespace, setError]);
+  }, [contextId, coreReady, enabled, kind, labelSelector, list.continueToken, namespace, setError]);
 
   useEffect(() => {
-    if (!contextId || !coreReady) return;
+    if (!contextId || !coreReady || !enabled) return;
     ++listRequest.current;
     setLoading(true);
     setError("");
@@ -80,6 +85,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
       contextId,
       resourceKind: kind,
       ...(kind.namespaced && namespace ? { namespace } : {}),
+      ...(labelSelector ? { labelSelector } : {}),
       limit: 100,
     }, (batch) => {
       if (batch.kind === "error") {
@@ -107,7 +113,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
         watchFlushTimer.current = undefined;
       }
     };
-  }, [contextId, namespace, kind, coreReady, generation, setError]);
+  }, [contextId, namespace, kind, coreReady, enabled, labelSelector, generation, setError]);
 
   const visibleRows = useMemo(() => {
     const needle = query.trim().toLowerCase();

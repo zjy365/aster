@@ -6,21 +6,29 @@ import type {
   ContextInfo,
   CoreStatus,
   DesktopApi,
+  HelmGetRequest,
+  HelmReleaseDetail,
+  HelmReleaseSummary,
+  HelmRollbackRequest,
+  HelmUninstallRequest,
   LogStreamBatch,
+  Overview,
   PodLogsRequest,
   ResourceGetRequest,
   ResourceListRequest,
   ResourceWatchBatch,
+  SourcesReport,
   UpdaterSnapshot,
 } from "../../shared/types";
 import {
+  type CoreListResponse,
+  type CoreOverview,
+  type CoreResourceRow,
   discoveredResourceList,
   normalizeRow,
   podMetricList,
   relatedResourceList,
   resourceEventList,
-  type CoreListResponse,
-  type CoreResourceRow,
 } from "../../shared/normalize";
 
 /**
@@ -70,6 +78,7 @@ export function createTauriDesktopApi(): DesktopApi {
     app: {
       version: () => invoke<string>("app_version"),
       onCommand: (listener) => listenEvent<AppCommand>("app:command", listener),
+      openExternal: (url) => invoke<void>("app_open_external", { url }),
     },
     updater: {
       state: () => invoke<UpdaterSnapshot>("updater_state"),
@@ -81,23 +90,26 @@ export function createTauriDesktopApi(): DesktopApi {
     appearance: {
       setThemeSource: (theme) => invoke<void>("appearance_set_theme_source", { theme }),
     },
+    files: {
+      saveTextFile: (defaultName, content) => invoke<string | null>("save_text_file", { defaultName, content }),
+    },
     core: {
       status: () => invoke<CoreStatus>("core_status"),
       onStatus: (listener) => listenEvent<CoreStatus>("core:status-changed", listener),
-    },
-    safety: {
-      setReadOnly: (contextId, readOnly) => invoke<void>("safety_set_read_only", { contextId, readOnly }),
     },
     contexts: {
       list: async () => {
         const value = await invoke<{ contexts: ContextInfo[] }>("contexts_list");
         return value.contexts;
       },
+      sourcesReport: () => invoke<SourcesReport>("sources_report"),
     },
     settings: {
       get: () => invoke<AsterSettings>("settings_get"),
-      setKubeconfigSources: (sources) => invoke<AsterSettings>("settings_set_kubeconfig_sources", { sources }),
-      applyKubeconfigSources: (sources) => invoke<void>("settings_apply_kubeconfig_sources", { sources }),
+      setKubeconfigSources: (sources, includeStandardChain) =>
+        invoke<AsterSettings>("settings_set_kubeconfig_sources", { sources, includeStandardChain }),
+      applyKubeconfigSources: (sources, includeStandardChain) =>
+        invoke<void>("settings_apply_kubeconfig_sources", { sources, includeStandardChain }),
       pickKubeconfigFile: () => invoke<string | null>("settings_pick_kubeconfig_file"),
       pickKubeconfigFolder: () => invoke<string | null>("settings_pick_kubeconfig_folder"),
     },
@@ -109,6 +121,35 @@ export function createTauriDesktopApi(): DesktopApi {
     },
     metrics: {
       pods: async (contextId, namespace) => podMetricList(await invoke("metrics_pods", { request: { contextId, namespace } })),
+    },
+    overview: {
+      get: async (contextId): Promise<Overview> => {
+        const value = await invoke<CoreOverview>("overview_get", { contextId });
+        return {
+          nodes: value.nodes,
+          pods: value.pods,
+          namespaces: value.namespaces,
+          services: value.services,
+          resource: value.resource,
+          events: (value.events || []).map((event) => ({ ...event, namespace: event.namespace || "" })),
+        };
+      },
+    },
+    helm: {
+      list: async (contextId, namespace): Promise<HelmReleaseSummary[]> => {
+        const value = await invoke<{ releases: HelmReleaseSummary[] }>("helm_releases_list", { contextId, namespace });
+        return value.releases;
+      },
+      get: async (request: HelmGetRequest): Promise<HelmReleaseDetail> => {
+        const value = await invoke<{ release: HelmReleaseDetail }>("helm_releases_get", { request });
+        return value.release;
+      },
+      uninstall: async (request: HelmUninstallRequest): Promise<void> => {
+        await invoke("helm_releases_uninstall", { request });
+      },
+      rollback: async (request: HelmRollbackRequest): Promise<void> => {
+        await invoke("helm_releases_rollback", { request });
+      },
     },
     resources: {
       list: async (request: ResourceListRequest) => {
@@ -164,6 +205,14 @@ export function createTauriDesktopApi(): DesktopApi {
         request: { contextId: request.contextId, query: request.query, namespace: request.namespace },
       })),
       logs: (request: PodLogsRequest) => invoke("pods_logs", { request }),
+      workloadLogs: (request) => invoke("workloads_logs", { request }),
+      followWorkloadLogs: (request, listener) => {
+        const id = `logs-follow-${++subscriptionSequence}`;
+        const channel = new Channel<LogStreamBatch>();
+        channel.onmessage = listener;
+        void invoke("workloads_logs_follow_start", { id, request, channel });
+        return () => void invoke("workloads_logs_follow_stop", { id });
+      },
       followLogs: (request: PodLogsRequest, listener: (batch: LogStreamBatch) => void) => {
         const id = `logs-follow-${++subscriptionSequence}`;
         const channel = new Channel<LogStreamBatch>();

@@ -1,26 +1,8 @@
-import {
-  AlertCircle,
-  ArrowLeft,
-  ArrowLeftRight,
-  Box,
-  CheckCircle2,
-  Clock3,
-  Container,
-  FileCode2,
-  LoaderCircle,
-  Play,
-  Radio,
-  RotateCw,
-  Scale3d,
-  TerminalSquare,
-  Trash2,
-} from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { AlertCircle, ArrowLeft, Box, Clock3, FileCode2, LoaderCircle } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type {
-  PodExecResponse,
-  PodLogsResponse,
-  PodMetric,
-  PodPortForward,
+  ResourceKind,
+  WorkloadKind,
   RelatedResource,
   ResourceEvent,
   ResourceGetResponse,
@@ -48,23 +30,45 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { useResourceList } from "../hooks/useResourceList";
+import { findEnabledResourceKind } from "../lib/resource-catalog";
 import { semanticDiff } from "../lib/semantic-diff";
+import { DetailHeader } from "./DetailHeader";
+import { LogViewer } from "./LogViewer";
+import { OverviewTab, type PodsPreview } from "./OverviewTab";
+import { resourceActionsFor, type ResourceActionId } from "./resource-actions";
+import { formatTimestamp } from "./resource-format";
 import { HighlightedYaml } from "./yaml-highlight";
+import { parseWorkloadDetails, podSelector } from "./workload-detail";
+import { WorkloadPodsPanel } from "./WorkloadPodsPanel";
 
 type MutationDraft = Omit<
   ResourceMutationRequest,
   "contextId" | "resourceKind" | "namespace" | "name"
 >;
 
-type DetailTab = "overview" | "yaml" | "events" | "related" | "logs";
+type DetailTab = "overview" | "pods" | "yaml" | "events" | "related" | "logs";
 type OperationDialog = "scale" | "image" | null;
 
+/** Static catalog entry; module-level so the pods hook sees a stable reference. */
+const POD_KIND: ResourceKind = findEnabledResourceKind("pods") ?? {
+  id: "pods",
+  group: "",
+  version: "v1",
+  resource: "pods",
+  kind: "Pod",
+  namespaced: true,
+  category: "Workloads",
+};
+
 export interface ResourceDetailViewProps {
+  contextId: string;
+  /** True when the local core is ready; gates the scoped pods watch. */
+  coreReady: boolean;
   row?: ResourceRow;
   detail?: ResourceGetResponse;
   detailError: string;
   canMutate: boolean;
-  canExec: boolean;
   mutationBusy: boolean;
   mutationMessage: string;
   mutationPreview: string;
@@ -72,17 +76,6 @@ export interface ResourceDetailViewProps {
   journal: string[];
   events: ResourceEvent[];
   related: RelatedResource[];
-  logs?: PodLogsResponse;
-  following: boolean;
-  followLines: string[];
-  podMetric?: PodMetric;
-  portForward?: PodPortForward;
-  portForwardMessage: string;
-  execResult?: PodExecResponse;
-  onToggleFollow(): void;
-  onStartPortForward(podPort: number): Promise<void>;
-  onStopPortForward(): Promise<void>;
-  onExec(command: string[]): Promise<void>;
   onMutate(request: MutationDraft): Promise<void>;
   onApplyMutation(): Promise<void>;
   onCancelMutation(): void;
@@ -91,11 +84,12 @@ export interface ResourceDetailViewProps {
 }
 
 export function ResourceDetailView({
+  contextId,
+  coreReady,
   row,
   detail,
   detailError,
   canMutate,
-  canExec,
   mutationBusy,
   mutationMessage,
   mutationPreview,
@@ -103,17 +97,6 @@ export function ResourceDetailView({
   journal,
   events,
   related,
-  logs,
-  following,
-  followLines,
-  podMetric,
-  portForward,
-  portForwardMessage,
-  execResult,
-  onToggleFollow,
-  onStartPortForward,
-  onStopPortForward,
-  onExec,
   onMutate,
   onApplyMutation,
   onCancelMutation,
@@ -123,11 +106,30 @@ export function ResourceDetailView({
   const [tab, setTab] = useState<DetailTab>("overview");
   const [operationDialog, setOperationDialog] = useState<OperationDialog>(null);
   const [operationValue, setOperationValue] = useState("");
+  const [podsError, setPodsError] = useState("");
 
   useEffect(() => {
     setTab("overview");
     setOperationDialog(null);
   }, [row?.uid]);
+
+  // Workload facts parsed from the live YAML the core already shipped; powers
+  // the conditions/strategy/selector rows, annotations, and the pods list.
+  const workload = Boolean(row && isWorkloadLogKind(row.kind));
+  const details = useMemo(
+    () => (detail ? parseWorkloadDetails(detail.yaml) : undefined),
+    [detail],
+  );
+  const selector = workload ? podSelector(details) : undefined;
+  const pods = useResourceList({
+    contextId,
+    kind: POD_KIND,
+    namespace: row?.namespace ?? "",
+    coreReady,
+    setError: setPodsError,
+    labelSelector: selector,
+    enabled: Boolean(workload && selector),
+  });
 
   if (!row) {
     return (
@@ -144,8 +146,32 @@ export function ResourceDetailView({
   }
 
   const currentRow = row;
-  const supportsOperations = ["Deployment", "StatefulSet", "DaemonSet"].includes(currentRow.kind);
-  const showLogs = currentRow.kind === "Pod";
+  // Called after the early return above, so it must stay a plain call — not a hook.
+  const actions = resourceActionsFor(currentRow.kind);
+  const actionIds = new Set(actions.map((action) => action.id));
+  const showLogs = currentRow.kind === "Pod" || isWorkloadLogKind(currentRow.kind);
+  const podsLoading = (!detail && !detailError) || pods.loading;
+  const podsFailure = detailError || podsError;
+  const podsPreview: PodsPreview | undefined = !workload ? undefined : {
+    rows: pods.visibleRows,
+    loading: podsLoading,
+    hasMore: Boolean(pods.list.continueToken),
+    partial: Boolean(details?.selectorPartial),
+    error: podsFailure || undefined,
+  };
+  const podCount = pods.visibleRows.length;
+
+  function openPod(pod: ResourceRow) {
+    onNavigateRelated({
+      group: "",
+      version: "v1",
+      resource: "pods",
+      kind: "Pod",
+      namespace: pod.namespace,
+      name: pod.name,
+      relation: "owned",
+    });
+  }
   const reviewOpen = Boolean(pendingMutation && (detail || pendingMutation?.operation === "delete"));
   const diff = !detail
     ? mutationPreview
@@ -156,6 +182,14 @@ export function ResourceDetailView({
   function openOperation(kind: Exclude<OperationDialog, null>) {
     setOperationValue(kind === "scale" ? String(currentRow.desired ?? 1) : currentRow.images?.[0] || "");
     setOperationDialog(kind);
+  }
+
+  function runAction(id: ResourceActionId) {
+    if (id === "scale" || id === "image") {
+      openOperation(id);
+      return;
+    }
+    void onMutate({ operation: id });
   }
 
   async function prepareOperation(event: FormEvent<HTMLFormElement>) {
@@ -176,34 +210,28 @@ export function ResourceDetailView({
 
   return (
     <section className="resource-detail-view" data-testid="resource-detail-view">
-      <header className="resource-detail-header">
-        <Button
-          aria-label="Back to resource list"
-          data-testid="resource-detail-back"
-          size="icon"
-          variant="ghost"
-          onClick={onBack}
-        >
-          <ArrowLeft />
-        </Button>
-        <div className="resource-detail-identity">
-          <span className="resource-detail-breadcrumb">
-            {row.namespace || "Cluster scoped"} · {row.kind}
-          </span>
-          <div className="resource-detail-title-row">
-            <h1>{row.name}</h1>
-            <StatusBadge status={row.status} deleting={row.deleting} />
-          </div>
-        </div>
-      </header>
+      <DetailHeader
+        row={currentRow}
+        actions={actions}
+        canMutate={canMutate}
+        mutationBusy={mutationBusy}
+        statusMessage={mutationMessage}
+        onAction={runAction}
+        onBack={onBack}
+      />
 
       <Tabs
         className="resource-detail-tabs"
         value={tab}
         onValueChange={(value) => setTab(value as DetailTab)}
       >
-        <TabsList className="resource-detail-tab-list" variant="line" aria-label="Resource details">
+        <TabsList className="resource-detail-tab-list" aria-label="Resource details">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          {workload && (
+            <TabsTrigger value="pods">
+              Pods{podCount ? ` (${podCount}${pods.list.continueToken ? "+" : ""})` : ""}
+            </TabsTrigger>
+          )}
           <TabsTrigger value="yaml">YAML</TabsTrigger>
           <TabsTrigger value="events">
             Events{events.length ? ` (${events.length})` : ""}
@@ -217,17 +245,43 @@ export function ResourceDetailView({
         <div className="resource-detail-scroll">
           <TabsContent value="overview">
             <OverviewTab
-              row={row}
-              supportsOperations={supportsOperations}
-              canMutate={canMutate}
-              mutationBusy={mutationBusy}
-              mutationMessage={mutationMessage}
+              row={currentRow}
+              details={details}
               journal={journal}
-              onOpenOperation={openOperation}
-              onRestart={() => void onMutate({ operation: "restart" })}
-              onDelete={() => void onMutate({ operation: "delete" })}
+              events={events}
+              related={related}
+              pods={podsPreview}
+              onOpenEvents={() => setTab("events")}
+              onOpenRelated={() => setTab("related")}
+              onOpenPods={workload ? () => setTab("pods") : undefined}
+              onOpenPod={openPod}
+              onNavigateRelated={onNavigateRelated}
+              onScale={canMutate && actionIds.has("scale") ? () => openOperation("scale") : undefined}
+              onUpdateImage={canMutate && actionIds.has("image") ? () => openOperation("image") : undefined}
             />
           </TabsContent>
+
+          {workload && (
+            <TabsContent value="pods">
+              {details?.selectorPartial ? (
+                <EmptyTab
+                  icon={<Box />}
+                  title="Pods can't be listed"
+                  detail="This workload's selector uses matchExpressions, which this view cannot translate into a pod query. The owning ReplicaSet's pods are listed under Related instead."
+                />
+              ) : (
+                <WorkloadPodsPanel
+                  rows={pods.visibleRows}
+                  loading={podsLoading}
+                  loadingMore={pods.loadingMore}
+                  hasMore={Boolean(pods.list.continueToken)}
+                  error={podsFailure}
+                  onLoadMore={() => void pods.loadMore()}
+                  onOpen={openPod}
+                />
+              )}
+            </TabsContent>
+          )}
 
           <TabsContent value="yaml">
             <ResourceYamlTab
@@ -252,20 +306,14 @@ export function ResourceDetailView({
 
           {showLogs && (
             <TabsContent value="logs">
-              <PodLogsAndTerminal
-                logs={logs}
-                following={following}
-                followLines={followLines}
-                onToggleFollow={onToggleFollow}
-                podMetric={podMetric}
-                portForward={portForward}
-                portForwardMessage={portForwardMessage}
-                onStartPortForward={onStartPortForward}
-                onStopPortForward={onStopPortForward}
-                canExec={canExec}
-                execResult={execResult}
-                onExec={onExec}
-              />
+              <section className="resource-detail-section log-viewer-section">
+                <LogViewer
+                  contextId={contextId}
+                  namespace={row.namespace}
+                  name={row.name}
+                  workload={currentRow.kind === "Pod" ? undefined : (currentRow.kind as WorkloadKind)}
+                />
+              </section>
             </TabsContent>
           )}
         </div>
@@ -324,129 +372,8 @@ export function ResourceDetailView({
   );
 }
 
-function StatusBadge({ status, deleting }: { status?: string; deleting?: boolean }) {
-  const normalized = (deleting ? "Terminating" : status || "Unknown").toLowerCase();
-  const destructive = /(fail|error|crash|backoff|unavailable|terminat)/.test(normalized);
-  const healthy = /(ready|running|active|bound|succeeded|available)/.test(normalized);
-  return (
-    <Badge
-      className="resource-status-badge"
-      variant={destructive ? "destructive" : healthy ? "secondary" : "outline"}
-    >
-      {healthy ? <CheckCircle2 aria-hidden="true" /> : destructive ? <AlertCircle aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
-      {deleting ? "Terminating" : status || "Unknown"}
-    </Badge>
-  );
-}
-
-function OverviewTab({
-  row,
-  supportsOperations,
-  canMutate,
-  mutationBusy,
-  mutationMessage,
-  journal,
-  onOpenOperation,
-  onRestart,
-  onDelete,
-}: {
-  row: ResourceRow;
-  supportsOperations: boolean;
-  canMutate: boolean;
-  mutationBusy: boolean;
-  mutationMessage: string;
-  journal: string[];
-  onOpenOperation(kind: "scale" | "image"): void;
-  onRestart(): void;
-  onDelete(): void;
-}) {
-  return (
-    <div className="resource-overview" data-testid="resource-overview">
-      <section className="resource-detail-section">
-        <div className="resource-section-heading">
-          <h2>Resource information</h2>
-        </div>
-        <dl className="resource-definition-list">
-          <Definition label="Kind" value={row.kind} />
-          <Definition label="Namespace" value={row.namespace || "Cluster scoped"} />
-          <Definition label="Created" value={formatTimestamp(row.createdAt)} />
-          <Definition label="Resource version" value={row.resourceVersion || "—"} mono />
-          {row.desired !== undefined && <Definition label="Desired" value={String(row.desired)} />}
-          {row.ready !== undefined && <Definition label="Ready" value={String(row.ready)} />}
-          {row.available !== undefined && <Definition label="Available" value={String(row.available)} />}
-          {row.updated !== undefined && <Definition label="Updated" value={String(row.updated)} />}
-        </dl>
-      </section>
-
-      {row.images?.length ? (
-        <section className="resource-detail-section">
-          <div className="resource-section-heading"><h2>Container images</h2></div>
-          <div className="resource-code-list">
-            {row.images.map((image) => <code key={image}>{image}</code>)}
-          </div>
-        </section>
-      ) : null}
-
-      {row.labels && Object.keys(row.labels).length ? (
-        <section className="resource-detail-section">
-          <div className="resource-section-heading"><h2>Labels</h2></div>
-          <dl className="resource-label-list">
-            {Object.entries(row.labels).map(([key, value]) => (
-              <div key={key}><dt>{key}</dt><dd>{value}</dd></div>
-            ))}
-          </dl>
-        </section>
-      ) : null}
-
-      <section className="resource-detail-section resource-operations">
-        <div className="resource-section-heading">
-          <div>
-            <h2>Operations</h2>
-            <p aria-live="polite">{canMutate ? mutationMessage || "Changes are previewed before apply." : "Blocked by read-only mode."}</p>
-          </div>
-        </div>
-        <div className="resource-operation-actions">
-          {supportsOperations && row.kind !== "DaemonSet" && (
-            <Button variant="outline" disabled={!canMutate || mutationBusy} onClick={() => onOpenOperation("scale")}>
-              <Scale3d data-icon="inline-start" />
-              Scale
-            </Button>
-          )}
-          {supportsOperations && (
-            <Button variant="outline" disabled={!canMutate || mutationBusy} onClick={() => onOpenOperation("image")}>
-              <Container data-icon="inline-start" />
-              Update image
-            </Button>
-          )}
-          {supportsOperations && (
-            <Button variant="outline" disabled={!canMutate || mutationBusy} onClick={onRestart}>
-              <RotateCw data-icon="inline-start" />
-              Restart
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            disabled={!canMutate || mutationBusy}
-            data-testid="delete-resource"
-            onClick={onDelete}
-          >
-            <Trash2 data-icon="inline-start" />
-            Delete
-          </Button>
-        </div>
-        {journal.length > 0 && (
-          <div className="resource-operation-journal">
-            <h3>Recent operations</h3>
-            {journal.map((entry, index) => <code key={`${entry}-${index}`}>{entry}</code>)}
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function Definition({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return <div><dt>{label}</dt><dd className={mono ? "resource-mono-value" : undefined}>{value}</dd></div>;
+function isWorkloadLogKind(kind: string): kind is WorkloadKind {
+  return kind === "Deployment" || kind === "StatefulSet" || kind === "DaemonSet" || kind === "Job";
 }
 
 function YamlViewer({ detail, detailError }: { detail?: ResourceGetResponse; detailError: string }) {
@@ -545,7 +472,7 @@ function YamlResourceEditor({
       <div className="resource-section-heading">
         <div>
           <h2>{kind} YAML</h2>
-          <p aria-live="polite">{canMutate ? mutationMessage || "Edits are dry-run before apply." : "Read-only mode — editing is disabled."}</p>
+          <p aria-live="polite">{canMutate ? mutationMessage || "Edits are dry-run before apply." : "Secrets can't be edited — their data never leaves the cluster."}</p>
         </div>
         {dirty && <Badge variant="outline">Unsaved edits</Badge>}
       </div>
@@ -620,136 +547,6 @@ function RelatedView({ related, onNavigate }: { related: RelatedResource[]; onNa
   );
 }
 
-function PodLogsAndTerminal({
-  logs,
-  following,
-  followLines,
-  onToggleFollow,
-  podMetric,
-  portForward,
-  portForwardMessage,
-  onStartPortForward,
-  onStopPortForward,
-  canExec,
-  execResult,
-  onExec,
-}: {
-  logs?: PodLogsResponse;
-  following: boolean;
-  followLines: string[];
-  onToggleFollow(): void;
-  podMetric?: PodMetric;
-  portForward?: PodPortForward;
-  portForwardMessage: string;
-  onStartPortForward(podPort: number): Promise<void>;
-  onStopPortForward(): Promise<void>;
-  canExec: boolean;
-  execResult?: PodExecResponse;
-  onExec(command: string[]): Promise<void>;
-}) {
-  const [command, setCommand] = useState("/bin/echo Aster terminal");
-  const [podPort, setPodPort] = useState("8080");
-  const argv = useMemo(() => command.trim().split(/\s+/).filter(Boolean), [command]);
-  const parsedPodPort = Number(podPort);
-  const portForwardValid = Number.isInteger(parsedPodPort) && parsedPodPort >= 1 && parsedPodPort <= 65535;
-  const logsViewRef = useRef<HTMLPreElement>(null);
-
-  // While following, the stream's own tail replaces the one-shot snapshot.
-  const logText = following
-    ? (followLines.length ? followLines.join("\n") : logs?.text || "")
-    : logs?.text || "";
-
-  useEffect(() => {
-    if (following && logsViewRef.current) {
-      logsViewRef.current.scrollTop = logsViewRef.current.scrollHeight;
-    }
-  }, [followLines, following]);
-
-  return (
-    <div className="pod-tools">
-      <section className="resource-detail-section">
-        <div className="resource-section-heading">
-          <div><h2>Logs</h2><p>{following ? `Following · ${followLines.length} new lines` : `Last 2,000 lines${logs?.truncated ? " · truncated" : ""}`}</p></div>
-          <Button
-            variant={following ? "secondary" : "outline"}
-            data-testid="logs-follow-toggle"
-            onClick={onToggleFollow}
-          >
-            <Radio aria-hidden="true" data-icon="inline-start" />
-            {following ? "Following" : "Follow"}
-          </Button>
-        </div>
-        {logs ? <pre ref={logsViewRef} className="resource-logs-view" data-testid="pod-logs">{logText || "No log output"}</pre> : <div className="resource-inline-state"><LoaderCircle className="spin" />Loading logs…</div>}
-      </section>
-      {podMetric && podMetric.containers.length > 0 && (
-        <section className="resource-detail-section">
-          <div className="resource-section-heading">
-            <div><h2>Metrics</h2><p>Live usage from metrics.k8s.io.</p></div>
-          </div>
-          <div className="resource-code-list" data-testid="pod-metrics">
-            {podMetric.containers.map((container) => (
-              <code key={container.name}>{container.name} · {container.cpu || "0"} CPU · {container.memory || "0"}</code>
-            ))}
-          </div>
-        </section>
-      )}
-      <section className="resource-detail-section">
-        <div className="resource-section-heading">
-          <div><h2>Port forward</h2><p>{canExec ? "A random loopback port, reclaimed when stopped or the view changes." : "Blocked by read-only mode."}</p></div>
-        </div>
-        {portForward ? (
-          <div className="resource-operation-actions">
-            <code data-testid="portforward-result">http://127.0.0.1:{portForward.localPort} → pod :{podPort}</code>
-            <Button variant="outline" data-testid="portforward-stop" onClick={() => void onStopPortForward()}>
-              Stop
-            </Button>
-          </div>
-        ) : (
-          <form
-            className="pod-terminal-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (canExec && portForwardValid) void onStartPortForward(parsedPodPort);
-            }}
-          >
-            <ArrowLeftRight aria-hidden="true" />
-            <input value={podPort} onChange={(event) => setPodPort(event.target.value)} aria-label="Pod port" />
-            <Button type="submit" disabled={!canExec || !portForwardValid} data-testid="portforward-start">
-              <Play data-icon="inline-start" />
-              Forward
-            </Button>
-          </form>
-        )}
-        {portForwardMessage && <p className="resource-inline-error" data-testid="portforward-error">{portForwardMessage}</p>}
-      </section>
-      <section className="resource-detail-section">
-        <div className="resource-section-heading">
-          <div><h2>One-shot terminal</h2><p>{canExec ? "Runs an argv command without creating Kubernetes RBAC." : "Blocked by read-only mode."}</p></div>
-        </div>
-        <form
-          className="pod-terminal-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (canExec && argv.length) void onExec(argv);
-          }}
-        >
-          <TerminalSquare aria-hidden="true" />
-          <input value={command} onChange={(event) => setCommand(event.target.value)} aria-label="Pod command" />
-          <Button type="submit" disabled={!canExec || !argv.length}>
-            <Play data-icon="inline-start" />
-            Run
-          </Button>
-        </form>
-        {execResult && (
-          <pre className="resource-terminal-result" data-testid="pod-exec-result">
-            {execResult.stdout}{execResult.stderr ? `\n[stderr]\n${execResult.stderr}` : ""}
-          </pre>
-        )}
-      </section>
-    </div>
-  );
-}
-
 function EmptyTab({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
   return <div className="resource-tab-empty">{icon}<h2>{title}</h2><p>{detail}</p></div>;
 }
@@ -809,10 +606,4 @@ function OperationInputDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function formatTimestamp(value: string): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }

@@ -1,5 +1,7 @@
 import type {
   DiscoveredResource,
+  OverviewCount,
+  OverviewResource,
   PodMetric,
   RelatedResource,
   ResourceEvent,
@@ -17,6 +19,25 @@ export interface CoreListResponse {
   items: CoreResourceRow[];
   continueToken?: string;
   resourceVersion?: string;
+}
+
+export interface CoreOverview {
+  nodes: OverviewCount;
+  pods: OverviewCount;
+  namespaces: number;
+  services: number;
+  resource: OverviewResource;
+  events: CoreOverviewEvent[];
+}
+
+export interface CoreOverviewEvent {
+  namespace?: string;
+  name: string;
+  reason?: string;
+  message?: string;
+  type?: string;
+  count?: number;
+  lastTimestamp?: string;
 }
 
 export interface CoreResourceRow extends Omit<ResourceRow, "createdAt" | "namespace" | "resourceVersion"> {

@@ -1,28 +1,42 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
-import type { AsterSettings, RelatedResource, ResourceKind } from "../shared/types";
+import { LoaderCircle, Ship } from "lucide-react";
+import type { AsterSettings, RelatedResource, ResourceKind, ResourceRow, SourcesReport } from "../shared/types";
 import { CommandPalette } from "./components/CommandPalette";
-import { SettingsDialog } from "./components/SettingsDialog";
 import { UpdateNotice } from "./components/UpdateNotice";
-import { ResourceTable, TableState } from "./components/ResourceTable";
+import { ResourceTable, rowKey, TableState } from "./components/ResourceTable";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useContexts } from "./hooks/useContexts";
 import { useCoreStatus } from "./hooks/useCoreStatus";
 import { useDiagnostics } from "./hooks/useDiagnostics";
 import { useDiscovery } from "./hooks/useDiscovery";
+import { useHelm } from "./hooks/useHelm";
 import { useMutation } from "./hooks/useMutation";
 import { useNamespaces } from "./hooks/useNamespaces";
+import { useOverview } from "./hooks/useOverview";
 import { useResourceDetail } from "./hooks/useResourceDetail";
 import { useResourceList } from "./hooks/useResourceList";
 import { useTheme } from "./hooks/useTheme";
 import { useUpdater } from "./hooks/useUpdater";
-import { useWritePolicy } from "./hooks/useWritePolicy";
 import { buildCommandItems, searchResultItems, type CommandAction } from "./lib/command-palette";
-import { pluralize } from "./lib/format";
+import { messageOf, pluralize } from "./lib/format";
 import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
-import { Sidebar } from "./shell/Sidebar";
+import { Sidebar, type SidebarToolGroup } from "./shell/Sidebar";
 import { UnifiedToolbar } from "./shell/UnifiedToolbar";
 import { WorkbenchShell } from "./shell/WorkbenchShell";
 import { ContextPicker } from "./views/ContextPicker";
+import { HelmView } from "./views/HelmView";
+import { OverviewView } from "./views/OverviewView";
+import { SettingsPage } from "./views/SettingsPage";
 import { desktop } from "./lib/desktop";
 
 const ResourceDetailView = lazy(() => import("./detail/ResourceDetailView").then((module) => ({
@@ -40,13 +54,12 @@ const CreateResourceDialog = lazy(() => import("./detail/CreateResourceDialog").
 export default function App() {
   const core = useCoreStatus();
   const updateCard = useUpdater();
-  const { theme, setTheme, cycleTheme } = useTheme();
+  const { theme, effectiveTheme, palette, setTheme, setPalette } = useTheme();
   const contexts = useContexts(core);
   const { contextId } = contexts;
   const [error, setError] = useState("");
   const [kind, setKind] = useState<ResourceKind>(DEFAULT_KIND);
   const namespaces = useNamespaces(contextId, contexts.contexts, setError);
-  const policy = useWritePolicy(contextId, setError);
   const resources = useResourceList({
     contextId,
     kind,
@@ -65,21 +78,46 @@ export default function App() {
     contextId,
     kind,
     selected: detail.selected,
-    execAllowed: !policy.readOnly && policy.writePolicySynced,
   });
   const mutation = useMutation({
     contextId,
     kind,
     namespace: namespaces.namespace,
     selected: detail.selected,
-    readOnly: policy.readOnly,
-    writePolicySynced: policy.writePolicySynced,
   });
+  const [overviewActive, setOverviewActive] = useState(false);
+  const overview = useOverview({
+    contextId,
+    coreReady: core.state === "ready",
+    enabled: overviewActive,
+  });
+  const helm = useHelm({
+    contextId,
+    namespace: namespaces.namespace,
+    coreReady: core.state === "ready",
+  });
+  const [helmActive, setHelmActive] = useState(false);
+  const helmToolGroups: SidebarToolGroup[] = useMemo(() => [{
+    label: "Helm",
+    items: [{ id: "helm", label: "Releases", icon: Ship }],
+  }], []);
   const searchRef = useRef<HTMLInputElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState<AsterSettings>({ kubeconfigSources: [] });
+  const [settings, setSettings] = useState<AsterSettings>({ kubeconfigSources: [], includeStandardChain: true });
+  const [sourcesReport, setSourcesReport] = useState<SourcesReport>({ chain: [], configured: [] });
+  const [appVersion, setAppVersion] = useState("");
+  const reloadSources = useCallback(async () => {
+    try {
+      setSourcesReport(await desktop.contexts.sourcesReport());
+    } catch {
+      // Keep the last report; the settings dialog degrades to paths only.
+    }
+  }, []);
+  const checkForUpdates = useCallback(async () => {
+    await desktop.updater.check();
+    return desktop.updater.state();
+  }, []);
   const discovered = useDiscovery(contextId, core.state === "ready");
   const resourceGroups = useMemo(() => {
     const custom = customResourceGroups(discovered);
@@ -87,15 +125,86 @@ export default function App() {
   }, [discovered]);
   const [pendingSelect, setPendingSelect] = useState<{ name: string; namespace: string }>();
   const [paletteQuery, setPaletteQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<RelatedResource[]>([]);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("aster.sidebar.collapsed") === "true");
-  const toggleSidebarCollapsed = useCallback(() => {
-    setSidebarCollapsed((value) => {
-      const next = !value;
-      localStorage.setItem("aster.sidebar.collapsed", String(next));
+
+  // Checkbox multi-select over the currently loaded rows (uids). Resets
+  // whenever the list's scope changes so stale uids can never linger.
+  const [checkedKeys, setCheckedKeys] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    setCheckedKeys(new Set());
+  }, [contextId, kind.id, namespaces.namespace]);
+  const checkedRows = useMemo(
+    () => resources.visibleRows.filter((row) => checkedKeys.has(rowKey(row))),
+    [resources.visibleRows, checkedKeys],
+  );
+  const toggleRowChecked = useCallback((row: ResourceRow) => {
+    setCheckedKeys((prev) => {
+      const next = new Set(prev);
+      const key = rowKey(row);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }, []);
+  const toggleAllChecked = useCallback(() => {
+    setCheckedKeys((prev) => {
+      const rows = resources.visibleRows;
+      const allChecked = rows.length > 0 && rows.every((row) => prev.has(rowKey(row)));
+      return allChecked ? new Set<string>() : new Set(rows.map(rowKey));
+    });
+  }, [resources.visibleRows]);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const deleteCheckedRows = useCallback(async () => {
+    if (!contextId || !checkedRows.length) return;
+    setBulkBusy(true);
+    try {
+      for (const row of checkedRows) {
+        await desktop.resources.mutate({
+          contextId,
+          resourceKind: kind,
+          namespace: row.namespace || undefined,
+          name: row.name,
+          resourceVersion: row.resourceVersion,
+          operation: "delete",
+          dryRun: false,
+        });
+      }
+      setCheckedKeys(new Set());
+      setBulkDeleteOpen(false);
+      resources.refresh();
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [contextId, checkedRows, kind, resources]);
+
+  const [searchResults, setSearchResults] = useState<RelatedResource[]>([]);
+
+  // Selecting a resource kind always leaves the overview and the Helm pane;
+  // the kind switches only when it differs, otherwise the row selection resets.
+  const selectKind = useCallback((next: ResourceKind) => {
+    setOverviewActive(false);
+    setHelmActive(false);
+    if (next.id === kind.id) {
+      detail.clear();
+      return;
+    }
+    setKind(next);
+  }, [kind.id, detail]);
+
+  const showOverview = useCallback(() => {
+    detail.clear();
+    helm.clear();
+    setHelmActive(false);
+    setOverviewActive(true);
+  }, [detail, helm]);
+
+  const showHelm = useCallback(() => {
+    detail.clear();
+    setOverviewActive(false);
+    setHelmActive(true);
+  }, [detail]);
 
   // Shared navigation for related resources and palette search results:
   // switch kind/namespace, then select the row once its list page arrives.
@@ -103,12 +212,12 @@ export default function App() {
     const match = flattenResourceGroups(resourceGroups)
       .find((item) => item.group === target.group && item.version === target.version && item.resource === target.resource && item.enabled !== false);
     if (!match) return;
-    const { icon: _icon, label: _label, enabled: _enabled, pinned: _pinned, ...nextKind } = match;
+    const { icon: _icon, label: _label, enabled: _enabled, ...nextKind } = match;
     const namespace = target.namespace || "";
     if (namespace !== namespaces.namespace) namespaces.setNamespace(namespace);
     setPendingSelect({ name: target.name, namespace });
-    if (nextKind.id !== kind.id) setKind(nextKind);
-  }, [resourceGroups, namespaces, kind.id]);
+    selectKind(nextKind);
+  }, [resourceGroups, namespaces, selectKind]);
 
   useEffect(() => {
     if (!pendingSelect) return;
@@ -160,19 +269,17 @@ export default function App() {
     resources.setQuery("");
     detail.clear();
     resources.reset();
+    helm.clear();
+    setOverviewActive(false);
+    setHelmActive(false);
     contexts.setView("contexts");
-  }, [contexts, contextId, namespaces, resources, detail]);
+  }, [contexts, contextId, namespaces, resources, detail, helm]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         if (contexts.view === "workbench") setPaletteOpen((open) => !open);
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
-        event.preventDefault();
-        if (contexts.view === "workbench") toggleSidebarCollapsed();
         return;
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
@@ -191,7 +298,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detail, paletteOpen, contexts.view, toggleSidebarCollapsed]);
+  }, [detail, paletteOpen, contexts.view]);
 
   const paletteItems = useMemo(() => buildCommandItems({
     coreReady: core.state === "ready",
@@ -207,7 +314,9 @@ export default function App() {
   const executePaletteCommand = useCallback((action: CommandAction) => {
     switch (action.type) {
       case "refresh":
-        resources.refresh();
+        if (helmActive) helm.refresh();
+        else if (overviewActive) overview.refresh();
+        else resources.refresh();
         return;
       case "show-contexts":
         showContextPicker();
@@ -224,17 +333,13 @@ export default function App() {
       case "select-kind": {
         const next = findKindInGroups(resourceGroups, action.kindId);
         if (!next) return;
-        if (next.id === kind.id) {
-          detail.clear();
-          return;
-        }
-        setKind(next);
+        selectKind(next);
         return;
       }
       case "open-resource":
         openResource(action);
     }
-  }, [resources, showContextPicker, connectContext, namespaces, setTheme, resourceGroups, kind.id, detail, openResource]);
+  }, [overview, overviewActive, helm, helmActive, resources, showContextPicker, connectContext, namespaces, setTheme, resourceGroups, selectKind, openResource]);
 
   useEffect(() => desktop.app.onCommand((command) => {
     if (command === "show-contexts") {
@@ -242,23 +347,57 @@ export default function App() {
       return;
     }
     if (command === "focus-filter") {
-      searchRef.current?.focus();
+      if (!overviewActive && !helmActive) searchRef.current?.focus();
       return;
     }
     if (command === "refresh" && contexts.view === "workbench") {
-      resources.refresh();
+      if (helmActive) helm.refresh();
+      else if (overviewActive) overview.refresh();
+      else resources.refresh();
       return;
     }
-    if (command === "go-back" && detail.selected) {
-      detail.clear();
+    if (command === "go-back") {
+      if (helmActive && helm.selected) helm.clear();
+      else if (detail.selected) detail.clear();
     }
-  }), [detail, showContextPicker, contexts.view, resources]);
+  }), [detail, showContextPicker, contexts.view, resources, overview, overviewActive, helm, helmActive]);
 
   const searchItems = useMemo(() => searchResultItems(searchResults, paletteQuery), [searchResults, paletteQuery]);
 
   useEffect(() => {
-    void desktop.settings.get().then(setSettings).catch(() => setSettings({ kubeconfigSources: [] }));
+    void desktop.settings.get().then(setSettings).catch(() => setSettings({ kubeconfigSources: [], includeStandardChain: true }));
+    void desktop.app.version().then(setAppVersion).catch(() => undefined);
   }, []);
+
+  if (contexts.view === "settings") {
+    return (
+      <>
+      <SettingsPage
+        settings={settings}
+        theme={theme}
+        effectiveTheme={effectiveTheme}
+        palette={palette}
+        onThemeChange={setTheme}
+        onPaletteChange={setPalette}
+        appVersion={appVersion}
+        core={core}
+        sources={sourcesReport}
+        onRefreshSources={reloadSources}
+        onApply={async (sources, includeStandardChain) => {
+          await desktop.settings.applyKubeconfigSources(sources, includeStandardChain);
+          setSettings({ kubeconfigSources: sources, includeStandardChain });
+          await reloadSources();
+        }}
+        onPickFile={() => desktop.settings.pickKubeconfigFile()}
+        onPickFolder={() => desktop.settings.pickKubeconfigFolder()}
+        onCheckUpdates={checkForUpdates}
+        onOpenExternal={(url) => void desktop.app.openExternal(url)}
+        onBack={() => contexts.setView(contexts.settingsFrom)}
+      />
+      {updateCard && <UpdateNotice card={updateCard} />}
+      </>
+    );
+  }
 
   if (contexts.view === "contexts") {
     return (
@@ -272,25 +411,15 @@ export default function App() {
         layout={contexts.contextLayout}
         loading={contexts.contextsLoading}
         error={contexts.contextsError}
-        theme={theme}
         onQueryChange={contexts.setContextQuery}
         onLayoutChange={contexts.setContextLayout}
         onSelect={contexts.setContextChoice}
         onRefresh={() => void contexts.loadContexts()}
         onConnect={connectContext}
-        onToggleTheme={cycleTheme}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        settings={settings}
-        onApply={async (sources) => {
-          await desktop.settings.applyKubeconfigSources(sources);
-          setSettings({ kubeconfigSources: sources });
+        onOpenSettings={() => {
+          contexts.setSettingsFrom(contexts.view);
+          contexts.setView("settings");
         }}
-        onPickFile={() => desktop.settings.pickKubeconfigFile()}
-        onPickFolder={() => desktop.settings.pickKubeconfigFolder()}
       />
       {updateCard && <UpdateNotice card={updateCard} />}
       </>
@@ -299,21 +428,18 @@ export default function App() {
 
   return (
     <WorkbenchShell
-      className={sidebarCollapsed ? "sidebar-rail" : undefined}
       sidebar={(
         <Sidebar
           context={contexts.activeContext}
-          coreState={core.state}
           resourceGroups={resourceGroups}
           activeKind={kind}
-          collapsed={sidebarCollapsed}
-          onToggleCollapsed={toggleSidebarCollapsed}
-          onSelectKind={(next) => {
-            if (next.id === kind.id) {
-              detail.clear();
-              return;
-            }
-            setKind(next);
+          onSelectKind={selectKind}
+          overviewActive={overviewActive}
+          onSelectOverview={showOverview}
+          toolGroups={helmToolGroups}
+          activeToolId={helmActive ? "helm" : undefined}
+          onSelectTool={(toolId) => {
+            if (toolId === "helm") showHelm();
           }}
           onShowContexts={showContextPicker}
         />
@@ -323,65 +449,134 @@ export default function App() {
           namespaces={namespaces.namespaces}
           namespace={namespaces.namespace}
           onNamespaceChange={namespaces.setNamespace}
-          namespaceDisabled={!kind.namespaced || !namespaces.namespaces.length}
-          query={resources.query}
-          onQueryChange={resources.setQuery}
+          namespaceDisabled={overviewActive || (!helmActive && !kind.namespaced) || !namespaces.namespaces.length}
+          query={helmActive || overviewActive ? "" : resources.query}
+          onQueryChange={helmActive || overviewActive ? () => undefined : resources.setQuery}
           queryInputRef={searchRef}
-          readOnly={policy.readOnly}
-          onToggleReadOnly={policy.toggleReadOnly}
-          readOnlyDisabled={!policy.writePolicySynced}
-          refreshing={resources.loading}
-          onRefresh={resources.refresh}
+          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : resources.loading}
+          onRefresh={helmActive ? helm.refresh : overviewActive ? overview.refresh : resources.refresh}
           theme={theme}
           onThemeChange={setTheme}
-          canGoBack={Boolean(detail.selected)}
-          onBack={detail.clear}
+          onOpenSettings={() => {
+            contexts.setSettingsFrom("workbench");
+            contexts.setView("settings");
+          }}
+          canGoBack={helmActive ? Boolean(helm.selected) : Boolean(detail.selected)}
+          onBack={helmActive ? helm.clear : detail.clear}
         />
       )}
     >
       <div className="workbench">
-          <section className="resource-pane" aria-label={`${kind.kind} resources`} hidden={Boolean(detail.selected)}>
+          {overviewActive && (
+            <OverviewView
+              overview={overview.overview}
+              loading={overview.loading}
+              error={overview.error}
+              contextName={contexts.activeContext?.name}
+              onRefresh={overview.refresh}
+              onNavigate={(kindId) => {
+                const next = findKindInGroups(resourceGroups, kindId);
+                if (next) selectKind(next);
+              }}
+            />
+          )}
+          {helmActive && (
+            <HelmView
+              contextName={contexts.activeContext?.name}
+              namespace={namespaces.namespace}
+              releases={helm.releases}
+              loading={helm.loading}
+              error={helm.error}
+              selected={helm.selected}
+              detailLoading={helm.detailLoading}
+              detailError={helm.detailError}
+              busy={helm.busy}
+              message={helm.message}
+              onRefresh={helm.refresh}
+              onSelect={(name) => void helm.select(name)}
+              onBack={helm.clear}
+              onUninstall={(name) => void helm.uninstall(name)}
+              onRollback={(name, revision) => void helm.rollback(name, revision)}
+            />
+          )}
+          <section className="resource-pane" aria-label={`${kind.kind} resources`} hidden={overviewActive || helmActive || Boolean(detail.selected)}>
             <div className="pane-heading">
               <div>
                 <h1>{pluralize(kind.kind)}</h1>
                 <p>{kind.category} · {contexts.activeContext?.name || "Kubernetes"}</p>
               </div>
               <div className="resource-summary">
+                {checkedRows.length > 0 && (
+                  <>
+                    <span className="selection-count" data-testid="selection-count">{checkedRows.length} selected</span>
+                    <button className="load-more" data-testid="clear-selection" onClick={() => setCheckedKeys(new Set())}>
+                      Clear
+                    </button>
+                    {mutation.canCreate && (
+                      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+                        <AlertDialogTrigger render={<Button variant="destructive" size="sm" data-testid="delete-selected" />}>
+                          Delete
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete {checkedRows.length} {pluralize(kind.kind)}?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This permanently deletes the selected resources from {contexts.activeContext?.name || "the cluster"}. This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel render={<Button variant="outline" size="sm" />}>
+                              Cancel
+                            </AlertDialogCancel>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={bulkBusy}
+                              onClick={() => void deleteCheckedRows()}
+                              data-testid="confirm-delete-selected"
+                            >
+                              {bulkBusy ? "Deleting…" : "Delete"}
+                            </Button>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                  </>
+                )}
                 <span>{resources.visibleRows.length} loaded</span>
                 {contexts.activeContext && <span className="cluster-name">{contexts.activeContext.cluster}</span>}
-                <button
-                  className="load-more new-resource"
+                <Button
+                  variant="default"
+                  size="default"
                   data-testid="new-resource"
                   disabled={!mutation.canCreate}
                   onClick={() => setCreateOpen(true)}
                 >
                   New
-                </button>
+                </Button>
               </div>
             </div>
 
             <ResourceTable
               rows={resources.visibleRows}
               selected={detail.selected}
+              checkedRows={checkedKeys}
+              onToggleRow={toggleRowChecked}
+              onToggleAll={toggleAllChecked}
+              hasMore={Boolean(resources.list.continueToken)}
+              loadingMore={resources.loadingMore}
+              onLoadMore={() => void resources.loadMore()}
               loading={resources.loading}
               error={error}
               onSelect={detail.select}
             />
-
-            <footer className="table-footer">
-              <span>{resources.list.resourceVersion ? `Resource version ${resources.list.resourceVersion}` : "Direct Kubernetes API"}</span>
-              {resources.list.continueToken && (
-                <button className="load-more" onClick={() => void resources.loadMore()} disabled={resources.loadingMore}>
-                  {resources.loadingMore && <LoaderCircle className="spin" size={14} />}
-                  Load next 100
-                </button>
-              )}
-            </footer>
           </section>
 
-          {detail.selected && (
+          {detail.selected && !overviewActive && !helmActive && (
             <Suspense fallback={<TableState icon={LoaderCircle} title="Opening resource" detail="Loading the resource workspace." spinning />}>
               <ResourceDetailView
+              contextId={contextId}
+              coreReady={core.state === "ready"}
               row={detail.selected}
               detail={detail.detail}
               detailError={detail.detailError}
@@ -393,22 +588,10 @@ export default function App() {
               journal={mutation.journal}
               events={diagnostics.events}
               related={diagnostics.related}
-              logs={diagnostics.logs}
-              following={diagnostics.following}
-              followLines={diagnostics.followLines}
-              podMetric={diagnostics.podMetric}
-              portForward={diagnostics.portForward}
-              portForwardMessage={diagnostics.portForwardMessage}
-              execResult={diagnostics.execResult}
-              onToggleFollow={diagnostics.toggleFollow}
-              onStartPortForward={diagnostics.startPortForward}
-              onStopPortForward={diagnostics.stopPortForward}
-              onExec={diagnostics.runExec}
               onMutate={mutation.mutate}
               onApplyMutation={mutation.applyPendingMutation}
               onCancelMutation={mutation.cancelMutation}
               onNavigateRelated={openResource}
-              canExec={!policy.readOnly && policy.writePolicySynced}
               onBack={detail.clear}
               />
             </Suspense>
@@ -442,17 +625,6 @@ export default function App() {
           />
         </Suspense>
       )}
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        settings={settings}
-        onApply={async (sources) => {
-          await desktop.settings.applyKubeconfigSources(sources);
-          setSettings({ kubeconfigSources: sources });
-        }}
-        onPickFile={() => desktop.settings.pickKubeconfigFile()}
-        onPickFolder={() => desktop.settings.pickKubeconfigFolder()}
-      />
     </WorkbenchShell>
   );
 }

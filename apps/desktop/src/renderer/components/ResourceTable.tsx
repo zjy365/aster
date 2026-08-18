@@ -1,27 +1,42 @@
 import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
-import { AlertCircle, Boxes, LoaderCircle, type LucideProps } from "lucide-react";
+import { AlertCircle, Boxes, Check, LoaderCircle, Minus, type LucideProps } from "lucide-react";
+import { Checkbox } from "@base-ui/react/checkbox";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ResourceRow } from "../../shared/types";
 import { formatAge, formatReady } from "../lib/format";
 
 type Icon = ComponentType<LucideProps>;
 
-const ROW_HEIGHT = 32;
+const ROW_HEIGHT = 40;
 
-export function ResourceTable({ rows, selected, loading, error, onSelect }: {
+export function rowKey(row: ResourceRow): string {
+  return row.uid || `${row.namespace}/${row.name}`;
+}
+
+export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect }: {
   rows: ResourceRow[];
   selected?: ResourceRow;
+  checkedRows: ReadonlySet<string>;
+  onToggleRow(row: ResourceRow): void;
+  onToggleAll(): void;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore(): void;
   loading: boolean;
   error: string;
   onSelect(row: ResourceRow): void;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
-  const virtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => viewport.current, estimateSize: () => ROW_HEIGHT, overscan: 8 });
+  // A trailing "load more" row keeps server pagination reachable without a
+  // permanent footer bar.
+  const virtualizer = useVirtualizer({ count: rows.length + (hasMore ? 1 : 0), getScrollElement: () => viewport.current, estimateSize: () => ROW_HEIGHT, overscan: 8 });
   // Roving tabindex: one row owns tab stop; arrows move it, Enter opens.
   const [focusIndex, setFocusIndex] = useState(0);
   const pendingFocus = useRef<number | null>(null);
 
   const clampedFocus = rows.length ? Math.min(focusIndex, rows.length - 1) : 0;
+  const allChecked = rows.length > 0 && rows.every((row) => checkedRows.has(rowKey(row)));
+  const someChecked = !allChecked && rows.some((row) => checkedRows.has(rowKey(row)));
 
   useEffect(() => {
     if (pendingFocus.current === null) return;
@@ -42,6 +57,8 @@ export function ResourceTable({ rows, selected, loading, error, onSelect }: {
   };
 
   const onGridKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // A focused checkbox owns Space itself; the grid only borrows it on rows.
+    const onCheckbox = (event.target as HTMLElement).getAttribute("role") === "checkbox";
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -59,6 +76,11 @@ export function ResourceTable({ rows, selected, loading, error, onSelect }: {
         event.preventDefault();
         moveFocus(rows.length - 1);
         break;
+      case " ":
+        if (onCheckbox) return;
+        event.preventDefault();
+        if (rows[clampedFocus]) onToggleRow(rows[clampedFocus]);
+        break;
       case "Enter":
         event.preventDefault();
         onSelect(rows[clampedFocus]);
@@ -75,6 +97,20 @@ export function ResourceTable({ rows, selected, loading, error, onSelect }: {
       onKeyDown={onGridKeyDown}
     >
       <div className="table-header resource-grid" role="row" aria-rowindex={1}>
+        <span role="columnheader" className="checkbox-cell">
+          <Checkbox.Root
+            aria-label="Select all loaded resources"
+            checked={allChecked}
+            indeterminate={someChecked}
+            onCheckedChange={() => onToggleAll()}
+            className="row-checkbox"
+            data-testid="select-all-rows"
+          >
+            <Checkbox.Indicator className="row-checkbox-indicator">
+              {someChecked ? <Minus aria-hidden="true" /> : <Check aria-hidden="true" />}
+            </Checkbox.Indicator>
+          </Checkbox.Root>
+        </span>
         <span role="columnheader">Name</span>
         <span role="columnheader">Namespace</span>
         <span role="columnheader">Status</span>
@@ -84,8 +120,25 @@ export function ResourceTable({ rows, selected, loading, error, onSelect }: {
       <div ref={viewport} className="table-viewport">
         <div className="virtual-space" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
+            if (virtualRow.index >= rows.length) {
+              return (
+                <div
+                  role="row"
+                  aria-rowindex={virtualRow.index + 2}
+                  className="table-row table-load-more"
+                  key="__load-more__"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <button className="load-more" data-testid="load-more" disabled={loadingMore} onClick={() => onLoadMore()}>
+                    {loadingMore && <LoaderCircle className="spin" size={14} />}
+                    Load next 100
+                  </button>
+                </div>
+              );
+            }
             const row = rows[virtualRow.index];
             const active = selected?.uid === row.uid;
+            const checked = checkedRows.has(rowKey(row));
             return (
               <div
                 role="row"
@@ -93,8 +146,8 @@ export function ResourceTable({ rows, selected, loading, error, onSelect }: {
                 aria-selected={active}
                 data-row-index={virtualRow.index}
                 tabIndex={virtualRow.index === clampedFocus ? 0 : -1}
-                className={`table-row resource-grid ${active ? "selected" : ""}`}
-                key={row.uid || `${row.namespace}/${row.name}`}
+                className={`table-row resource-grid ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
+                key={rowKey(row)}
                 onClick={() => {
                   setFocusIndex(virtualRow.index);
                   onSelect(row);
@@ -102,7 +155,21 @@ export function ResourceTable({ rows, selected, loading, error, onSelect }: {
                 onFocus={() => setFocusIndex(virtualRow.index)}
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >
-                <span role="gridcell" className="primary-cell"><ResourceStatus status={row.status} />{row.name}</span>
+                <span role="gridcell" className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
+                  <Checkbox.Root
+                    aria-label={`Select ${row.name}`}
+                    checked={checked}
+                    onCheckedChange={() => onToggleRow(row)}
+                    className="row-checkbox"
+                    tabIndex={-1}
+                    data-testid={`select-row-${row.name}`}
+                  >
+                    <Checkbox.Indicator className="row-checkbox-indicator">
+                      <Check aria-hidden="true" />
+                    </Checkbox.Indicator>
+                  </Checkbox.Root>
+                </span>
+                <span role="gridcell" className="primary-cell"><StatusDot status={row.status} />{row.name}</span>
                 <span role="gridcell">{row.namespace || "Cluster-scoped"}</span>
                 <span role="gridcell">{row.status || "Unknown"}</span>
                 <span role="gridcell" className="tabular">{formatReady(row)}</span>
@@ -120,7 +187,7 @@ export function TableState({ icon: StateIcon, title, detail, tone, spinning }: {
   return <div className={`table-state ${tone || ""}`}><StateIcon className={spinning ? "spin" : ""} size={22} /><strong>{title}</strong><p>{detail}</p></div>;
 }
 
-function ResourceStatus({ status }: { status?: string }) {
+export function StatusDot({ status }: { status?: string }) {
   const normalized = status?.toLowerCase() || "unknown";
   const tone = /ready|running|active|bound|complete|available|healthy/.test(normalized)
     ? "healthy"

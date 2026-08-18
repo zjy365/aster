@@ -6,6 +6,24 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="description" content="Aster Kubernetes desktop workbench" />
     <title>Aster</title>
+    <script>
+      // First-paint theme guard: resolves the stored color scheme before the
+      // stylesheet loads so dark-mode users never see a white flash. The
+      // background colors mirror the neutral --window values in styles.css
+      // (palettes currently only re-tint accents, not the window).
+      (function () {
+        try {
+          var stored = localStorage.getItem("aster.theme");
+          var dark = stored === "dark" || (stored !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var root = document.documentElement;
+          root.classList.toggle("dark", dark);
+          root.dataset.theme = dark ? "dark" : "light";
+          root.style.background = dark ? "#1c1c1e" : "#f5f5f7";
+        } catch (error) {
+          // Fall through to the stylesheet defaults.
+        }
+      })();
+    </script>
   </head>
   <body>
     <!--

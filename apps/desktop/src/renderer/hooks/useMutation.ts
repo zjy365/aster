@@ -15,8 +15,6 @@ export interface MutationOptions {
   kind: ResourceKind;
   namespace: string;
   selected?: ResourceRow;
-  readOnly: boolean;
-  writePolicySynced: boolean;
 }
 
 export interface MutationState {
@@ -36,10 +34,9 @@ export interface MutationState {
 /**
  * Owns the dry-run → review → apply mutation flow plus the per-context
  * operation journal. Every write — scale, image, restart, full YAML,
- * create, delete — passes this gate, and the main process re-checks the
- * read-only policy at the IPC boundary.
+ * create, delete — passes this gate.
  */
-export function useMutation({ contextId, kind, namespace, selected, readOnly, writePolicySynced }: MutationOptions): MutationState {
+export function useMutation({ contextId, kind, namespace, selected }: MutationOptions): MutationState {
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationMessage, setMutationMessage] = useState("");
   const [mutationPreview, setMutationPreview] = useState("");
@@ -53,8 +50,8 @@ export function useMutation({ contextId, kind, namespace, selected, readOnly, wr
   });
 
   const journal = journalByContext[contextId] || [];
-  const canMutate = !readOnly && writePolicySynced && Boolean(selected) && writable(kind);
-  const canCreate = !readOnly && writePolicySynced && writable(kind);
+  const canMutate = Boolean(selected) && writable(kind);
+  const canCreate = writable(kind);
 
   useEffect(() => {
     localStorage.setItem("aster.operationJournal", JSON.stringify(journalByContext));
@@ -67,7 +64,7 @@ export function useMutation({ contextId, kind, namespace, selected, readOnly, wr
   }, [contextId, kind.id, selected?.uid]);
 
   const mutate = useCallback(async (request: MutationDraft) => {
-    if (!contextId || readOnly) return;
+    if (!contextId) return;
     const isCreate = request.operation === "create";
     if (!isCreate && !selected) return;
     setMutationBusy(true);
@@ -85,10 +82,10 @@ export function useMutation({ contextId, kind, namespace, selected, readOnly, wr
     } finally {
       setMutationBusy(false);
     }
-  }, [contextId, kind, namespace, readOnly, selected]);
+  }, [contextId, kind, namespace, selected]);
 
   const applyPendingMutation = useCallback(async () => {
-    if (!pendingMutation || readOnly || !writePolicySynced) return;
+    if (!pendingMutation) return;
     setMutationBusy(true);
     setMutationMessage("Applying…");
     try {
@@ -103,7 +100,7 @@ export function useMutation({ contextId, kind, namespace, selected, readOnly, wr
     } finally {
       setMutationBusy(false);
     }
-  }, [pendingMutation, readOnly, writePolicySynced]);
+  }, [pendingMutation]);
 
   const cancelMutation = useCallback(() => {
     setPendingMutation(undefined);
