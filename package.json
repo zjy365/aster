@@ -12,6 +12,8 @@
     "check": "pnpm typecheck && pnpm test && go -C core test -race ./... && go -C core vet ./... && pnpm --dir apps/desktop test:rust && pnpm build",
     "dev": "pnpm --dir apps/desktop dev",
     "dist": "pnpm --dir apps/desktop dist",
+    "landing:dev": "pnpm --dir apps/landing dev",
+    "landing:build": "pnpm --dir apps/landing build",
     "test": "pnpm --dir apps/desktop test",
     "typecheck": "pnpm --dir apps/desktop typecheck"
   },

@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* Design tokens — keep in sync with DESIGN.md (§ colors). */
+  --color-canvas: #f7f6f3;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f6f6f7;
+  --color-ink: #1d1d1f;
+  --color-ink-2: #66666b;
+  --color-ink-3: #68686d; /* DESIGN.md faint; #8a8a90 failed AA at 3.18:1 */
+  --color-brand: #c65f2d; /* aster-orange */
+  --color-brand-deep: #88401f; /* aster-orange-text */
+  --color-primary: #007aff; /* system blue: interaction / focus only */
+  --color-positive: #18753a;
+  --color-caution: #9a6700;
+  --color-destructive: #d70015;
+
+  /* Structural colors for the landing-page visual language. */
+  --color-hairline: rgb(60 60 67 / 14%);
+  --color-hairline-soft: rgb(60 60 67 / 8%);
+  --color-brand-soft: rgb(198 95 45 / 9%);
+  --color-dark: #1d1d1f;
+  --color-dark-2: #2c2c2e;
+  --color-dark-ink: #f5f5f7;
+  --color-dark-ink-2: #a1a1a6;
+
+  --font-display: ui-serif, "New York", var(--font-instrument), Georgia, serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Keep anchor targets clear of the fixed nav. */
+    scroll-padding-top: 96px;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* A landing page never scrolls sideways, whatever a child does. */
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-deep);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  kbd {
+    font-family: var(--font-mono);
+    font-size: 0.78em;
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-hairline);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 1px 6px;
+    white-space: nowrap;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(60 60 67 / 22%);
+    border-radius: 5px;
+    border: 3px solid var(--color-canvas);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/*
+ * Scroll reveal, with zero JavaScript.
+ *
+ * Content is visible by default and only opts into the animation where the
+ * browser supports scroll-driven timelines. A browser that does not support
+ * them (or a user who prefers reduced motion) simply sees the finished state.
+ *
+ * The keyframes move the element but never fade it below full opacity. A
+ * viewport-driven animation sits at its `from` frame for anything below the
+ * fold, so animating opacity from 0 renders the page blank to anything that
+ * does not scroll — full-page screenshots, print, preview crawlers. That is
+ * the bug the previous IntersectionObserver version shipped. A pure rise
+ * keeps the motion and makes a blank render impossible.
+ */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal {
+      animation: reveal-in linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 26%;
+    }
+  }
+}
+
+@keyframes reveal-in {
+  from {
+    transform: translateY(20px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}

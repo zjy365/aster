@@ -1,0 +1,82 @@
+name: Landing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/landing/**"
+      - ".github/workflows/landing.yml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  pull_request:
+    paths:
+      - "apps/landing/**"
+      - ".github/workflows/landing.yml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: landing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build landing site
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.2
+          run_install: false
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Restore JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --dir apps/landing typecheck
+
+      - name: Build static export
+        run: NEXT_PUBLIC_BASE_PATH=/aster pnpm --dir apps/landing build
+
+      # Next emits `_next/`, and Jekyll drops underscore-prefixed paths.
+      - name: Disable Jekyll on the Pages artifact
+        run: touch apps/landing/out/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/landing/out
+
+  deploy:
+    name: Deploy to GitHub Pages
+    # Pull requests build and upload the artifact, but never publish.
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
