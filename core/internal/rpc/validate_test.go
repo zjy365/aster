@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
 )
 
@@ -119,7 +120,7 @@ func TestValidatePortForwardRequests(t *testing.T) {
 
 func TestInvalidInputReturns400(t *testing.T) {
 	service := resources.NewService(rpcClientProvider{client: nil})
-	server, err := NewServer("token", fakeContexts{}, service)
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
 	if err != nil {
 		t.Fatal(err)
 	}

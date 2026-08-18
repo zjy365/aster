@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
@@ -24,9 +25,13 @@ func writeError(writer http.ResponseWriter, status int, code string, err error) 
 
 func writeServiceError(writer http.ResponseWriter, err error) {
 	var validationError *resources.ValidationError
+	var helmValidationError *helm.ValidationError
+	var helmNotFoundError *helm.NotFoundError
 	switch {
-	case errors.As(err, &validationError):
+	case errors.As(err, &validationError), errors.As(err, &helmValidationError):
 		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+	case errors.As(err, &helmNotFoundError):
+		writeError(writer, http.StatusNotFound, "not_found", err)
 	case apierrors.IsNotFound(err):
 		writeError(writer, http.StatusNotFound, "not_found", err)
 	case apierrors.IsForbidden(err):

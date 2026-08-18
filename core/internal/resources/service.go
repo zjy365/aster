@@ -26,7 +26,13 @@ type ClientProvider interface {
 }
 
 type LogsProvider interface {
-	PodLogs(ctx context.Context, contextID, namespace, name, container string, tailLines int64) (io.ReadCloser, error)
+	PodLogs(ctx context.Context, contextID, namespace, name, container string, tailLines int64, previous, timestamps bool) (io.ReadCloser, error)
+}
+
+// PodContainersProvider lists a pod's container names so the log viewer can
+// offer a container picker without parsing the pod manifest client-side.
+type PodContainersProvider interface {
+	PodContainers(ctx context.Context, contextID, namespace, name string) ([]string, error)
 }
 
 type ExecProvider interface {
@@ -148,7 +154,7 @@ func (s *Service) Logs(ctx context.Context, request LogsRequest) (LogsResponse, 
 	if tail <= 0 || tail > 100_000 {
 		tail = 2_000
 	}
-	reader, err := provider.PodLogs(ctx, request.ContextID, request.Namespace, request.Name, request.Container, tail)
+	reader, err := provider.PodLogs(ctx, request.ContextID, request.Namespace, request.Name, request.Container, tail, request.Previous, request.Timestamps)
 	if err != nil {
 		return LogsResponse{}, fmt.Errorf("read pod logs: %w", err)
 	}
@@ -164,7 +170,15 @@ func (s *Service) Logs(ctx context.Context, request LogsRequest) (LogsResponse, 
 	if truncated {
 		value = value[:maxBytes]
 	}
-	return LogsResponse{Text: string(value), Truncated: truncated}, nil
+	response := LogsResponse{Text: string(value), Truncated: truncated}
+	// The container list is a convenience for the picker; never fail the log
+	// read because a secondary pod lookup did.
+	if containers, ok := s.clients.(PodContainersProvider); ok {
+		if names, err := containers.PodContainers(ctx, request.ContextID, request.Namespace, request.Name); err == nil {
+			response.Containers = names
+		}
+	}
+	return response, nil
 }
 
 func (s *Service) Exec(ctx context.Context, request ExecRequest) (ExecResponse, error) {

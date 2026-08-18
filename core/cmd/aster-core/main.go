@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
 	"github.com/zjy365/aster/core/internal/rpc"
 	"github.com/zjy365/aster/core/internal/session"
@@ -37,15 +38,14 @@ func run() error {
 	if value := os.Getenv("ASTER_KUBECONFIG_SOURCES"); value != "" {
 		sources = strings.Split(value, string(os.PathListSeparator))
 	}
-	var loader *session.Loader
-	if len(sources) == 0 {
-		loader = session.NewLoader()
-	} else {
-		loader = session.NewLoaderWithSources(sources)
-	}
+	// The standard chain is a default, not a mandate: the shell passes
+	// "false" when the user has turned it off in settings.
+	includeChain := os.Getenv("ASTER_INCLUDE_STANDARD_CHAIN") != "false"
+	loader := session.NewLoaderWithSources(sources, includeChain)
 	sessions := session.NewManager(loader)
 	resourceService := resources.NewService(sessions)
-	rpcServer, err := rpc.NewServer(token, sessions, resourceService)
+	helmService := helm.NewService(sessions)
+	rpcServer, err := rpc.NewServer(token, sessions, resourceService, helmService)
 	if err != nil {
 		return err
 	}

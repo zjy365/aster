@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
 	"github.com/zjy365/aster/core/internal/session"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
@@ -28,6 +30,10 @@ func (f fakeContexts) Contexts() ([]session.ContextInfo, error) {
 	return f.values, nil
 }
 
+func (fakeContexts) SourceReports() session.SourcesReport {
+	return session.SourcesReport{}
+}
+
 type rpcClientProvider struct {
 	client dynamic.Interface
 }
@@ -38,7 +44,7 @@ func (p rpcClientProvider) Client(string) (dynamic.Interface, error) {
 
 func TestServerRequiresTokenAndServesHealthAndContexts(t *testing.T) {
 	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
-	server, err := NewServer("token", fakeContexts{values: []session.ContextInfo{{ID: "dev", Name: "dev", Current: true}}}, service)
+	server, err := NewServer("token", fakeContexts{values: []session.ContextInfo{{ID: "dev", Name: "dev", Current: true}}}, service, helm.NewService(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +77,7 @@ func TestServerListsNamespaces(t *testing.T) {
 		"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": "default"},
 	}}
 	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme(), namespace)})
-	server, err := NewServer("token", fakeContexts{}, service)
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +89,7 @@ func TestServerListsNamespaces(t *testing.T) {
 
 func TestServerRejectsInvalidResourceRequest(t *testing.T) {
 	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
-	server, err := NewServer("token", fakeContexts{}, service)
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,6 +105,44 @@ func TestServerRejectsInvalidResourceRequest(t *testing.T) {
 	}
 }
 
+func TestServerServesOverviewAndValidatesContext(t *testing.T) {
+	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		{Version: "v1", Resource: "nodes"}:      "NodeList",
+		{Version: "v1", Resource: "pods"}:       "PodList",
+		{Version: "v1", Resource: "namespaces"}: "NamespaceList",
+		{Version: "v1", Resource: "services"}:   "ServiceList",
+		{Version: "v1", Resource: "events"}:     "EventList",
+	})})
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missing := performRequest(t, server, http.MethodGet, "/v1/overview")
+	if missing.Code != http.StatusBadRequest || !contains(missing.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	response := performRequest(t, server, http.MethodGet, "/v1/overview?contextId=dev")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var value struct {
+		Nodes      struct{ Total, Ready int64 } `json:"nodes"`
+		Namespaces int64                        `json:"namespaces"`
+		Events     []map[string]any             `json:"events"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value.Nodes.Total != 0 || value.Namespaces != 0 {
+		t.Fatalf("overview = %#v", value)
+	}
+	if value.Events == nil {
+		t.Fatal("events must decode as an empty array")
+	}
+}
+
 func TestServerStreamsWatchAsNDJSONAndStopsOnCancel(t *testing.T) {
 	watcher := watch.NewRaceFreeFake()
 	client := fake.NewSimpleDynamicClient(runtime.NewScheme())
@@ -106,7 +150,7 @@ func TestServerStreamsWatchAsNDJSONAndStopsOnCancel(t *testing.T) {
 		return true, watcher, nil
 	})
 	service := resources.NewService(rpcClientProvider{client: client})
-	server, err := NewServer("token", fakeContexts{}, service)
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +189,43 @@ func TestServerStreamsWatchAsNDJSONAndStopsOnCancel(t *testing.T) {
 	}
 	if !watcher.IsStopped() {
 		t.Fatal("watcher was not stopped")
+	}
+}
+
+func TestServerValidatesHelmRequests(t *testing.T) {
+	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missingNamespace := performRequest(t, server, http.MethodGet, "/v1/helm/releases?contextId=dev")
+	if missingNamespace.Code != http.StatusBadRequest || !contains(missingNamespace.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", missingNamespace.Code, missingNamespace.Body.String())
+	}
+
+	missingName := httptest.NewRequest(http.MethodPost, "/v1/helm/releases/get", bytes.NewBufferString(`{
+		"contextId":"dev",
+		"namespace":"apps"
+	}`))
+	missingName.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, missingName)
+	if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	badRevision := httptest.NewRequest(http.MethodPost, "/v1/helm/releases/rollback", bytes.NewBufferString(`{
+		"contextId":"dev",
+		"namespace":"apps",
+		"name":"web",
+		"revision":-3
+	}`))
+	badRevision.Header.Set("Authorization", "Bearer token")
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, badRevision)
+	if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

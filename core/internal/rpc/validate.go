@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
 )
 
@@ -169,6 +170,35 @@ func validateLogsRequest(value resources.LogsRequest) error {
 	return nil
 }
 
+var workloadLogKinds = map[string]bool{
+	"Deployment":  true,
+	"StatefulSet": true,
+	"DaemonSet":   true,
+	"Job":         true,
+}
+
+func validateWorkloadLogsRequest(value resources.WorkloadLogsRequest) error {
+	if err := validateContextID(value.ContextID); err != nil {
+		return err
+	}
+	if err := checkLength("namespace", value.Namespace, maxNamespace); err != nil {
+		return err
+	}
+	if !workloadLogKinds[value.Kind] {
+		return fmt.Errorf("kind must be one of Deployment, StatefulSet, DaemonSet, Job")
+	}
+	if err := checkLength("name", value.Name, maxName); err != nil {
+		return err
+	}
+	if err := checkLength("container", value.Container, maxContainer); err != nil {
+		return err
+	}
+	if value.TailLines < 0 || value.TailLines > maxTailLines {
+		return fmt.Errorf("tailLines must be between 1 and %d", maxTailLines)
+	}
+	return nil
+}
+
 func validateExecRequest(value resources.ExecRequest) error {
 	if err := validateContextID(value.ContextID); err != nil {
 		return err
@@ -233,6 +263,61 @@ func validateWatchRequest(value resources.WatchRequest) error {
 		return err
 	}
 	return checkLength("fieldSelector", value.FieldSelector, maxSelector)
+}
+
+func validateHelmListRequest(value helm.ListRequest) error {
+	if err := validateContextID(value.ContextID); err != nil {
+		return err
+	}
+	if value.Namespace == "" {
+		return fmt.Errorf("namespace is required")
+	}
+	return checkLength("namespace", value.Namespace, maxNamespace)
+}
+
+func validateHelmGetRequest(value helm.GetRequest) error {
+	if err := validateContextID(value.ContextID); err != nil {
+		return err
+	}
+	if err := checkLength("namespace", value.Namespace, maxNamespace); err != nil {
+		return err
+	}
+	if value.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	return checkLength("name", value.Name, maxName)
+}
+
+func validateHelmUninstallRequest(value helm.UninstallRequest) error {
+	if err := validateContextID(value.ContextID); err != nil {
+		return err
+	}
+	if err := checkLength("namespace", value.Namespace, maxNamespace); err != nil {
+		return err
+	}
+	if value.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	return checkLength("name", value.Name, maxName)
+}
+
+func validateHelmRollbackRequest(value helm.RollbackRequest) error {
+	if err := validateContextID(value.ContextID); err != nil {
+		return err
+	}
+	if err := checkLength("namespace", value.Namespace, maxNamespace); err != nil {
+		return err
+	}
+	if value.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if err := checkLength("name", value.Name, maxName); err != nil {
+		return err
+	}
+	if value.Revision < 0 || value.Revision > maxReplicas {
+		return fmt.Errorf("revision must be between 0 and %d", maxReplicas)
+	}
+	return nil
 }
 
 func checkLength(label, value string, max int) error {

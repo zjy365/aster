@@ -3,6 +3,7 @@ package resources
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -34,6 +35,41 @@ func TestStreamLogsDeliversLinesAndCloses(t *testing.T) {
 	if _, err := service.StreamLogs(context.Background(), LogsRequest{ContextID: "context", Namespace: "apps"}); err == nil {
 		t.Fatal("missing pod name was accepted")
 	}
+}
+
+func TestLogsAttachContainersAndPassOptions(t *testing.T) {
+	provider := &recordingLogsProvider{fakeProvider: fakeProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme()), logs: "line\n"}}
+	service := NewService(provider)
+	result, err := service.Logs(context.Background(), LogsRequest{
+		ContextID: "context", Namespace: "apps", Name: "web", Container: "app",
+		TailLines: 100, Previous: true, Timestamps: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Containers) != 2 || result.Containers[0] != "app" || result.Containers[1] != "init" {
+		t.Fatalf("containers=%v", result.Containers)
+	}
+	if !provider.previous || !provider.timestamps || provider.container != "app" || provider.tail != 100 {
+		t.Fatalf("forwarded options container=%q tail=%d previous=%v timestamps=%v", provider.container, provider.tail, provider.previous, provider.timestamps)
+	}
+}
+
+type recordingLogsProvider struct {
+	fakeProvider
+	container  string
+	tail       int64
+	previous   bool
+	timestamps bool
+}
+
+func (f *recordingLogsProvider) PodLogs(_ context.Context, _, _, _, container string, tailLines int64, previous, timestamps bool) (io.ReadCloser, error) {
+	f.container, f.tail, f.previous, f.timestamps = container, tailLines, previous, timestamps
+	return io.NopCloser(strings.NewReader(f.logs)), nil
+}
+
+func (f *recordingLogsProvider) PodContainers(context.Context, string, string, string) ([]string, error) {
+	return []string{"app", "init"}, nil
 }
 
 func TestPodMetrics(t *testing.T) {

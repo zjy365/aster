@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
 	"github.com/zjy365/aster/core/internal/session"
 )
@@ -16,25 +17,33 @@ const maxRequestBody = 1 << 20
 
 type contextService interface {
 	Contexts() ([]session.ContextInfo, error)
+	SourceReports() session.SourcesReport
 }
 
 type Server struct {
 	token     string
 	contexts  contextService
 	resources *resources.Service
+	helm      *helm.Service
 	handler   http.Handler
 }
 
-func NewServer(token string, contexts contextService, resourceService *resources.Service) (*Server, error) {
+func NewServer(token string, contexts contextService, resourceService *resources.Service, helmService *helm.Service) (*Server, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, fmt.Errorf("bootstrap token is required")
 	}
-	server := &Server{token: token, contexts: contexts, resources: resourceService}
+	server := &Server{token: token, contexts: contexts, resources: resourceService, helm: helmService}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("GET /v1/contexts", server.listContexts)
+	mux.HandleFunc("GET /v1/sources", server.listSources)
 	mux.HandleFunc("GET /v1/namespaces", server.listNamespaces)
 	mux.HandleFunc("GET /v1/discovery", server.listDiscovery)
+	mux.HandleFunc("GET /v1/overview", server.overview)
+	mux.HandleFunc("GET /v1/helm/releases", server.listHelmReleases)
+	mux.HandleFunc("POST /v1/helm/releases/get", server.getHelmRelease)
+	mux.HandleFunc("POST /v1/helm/releases/uninstall", server.uninstallHelmRelease)
+	mux.HandleFunc("POST /v1/helm/releases/rollback", server.rollbackHelmRelease)
 	mux.HandleFunc("POST /v1/resources/list", server.listResources)
 	mux.HandleFunc("POST /v1/resources/get", server.getResource)
 	mux.HandleFunc("POST /v1/resources/mutate", server.mutateResource)
@@ -42,6 +51,8 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("POST /v1/resources/search", server.searchResources)
 	mux.HandleFunc("POST /v1/pods/logs", server.podLogs)
 	mux.HandleFunc("POST /v1/pods/logs/stream", server.streamPodLogs)
+	mux.HandleFunc("POST /v1/workloads/logs", server.workloadLogs)
+	mux.HandleFunc("POST /v1/workloads/logs/stream", server.streamWorkloadLogs)
 	mux.HandleFunc("POST /v1/metrics/pods", server.podMetrics)
 	mux.HandleFunc("POST /v1/pods/exec", server.podExec)
 	mux.HandleFunc("POST /v1/pods/portforward", server.startPortForward)
@@ -77,6 +88,10 @@ func (s *Server) listContexts(writer http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"contexts": contexts})
+}
+
+func (s *Server) listSources(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, s.contexts.SourceReports())
 }
 
 func (s *Server) listNamespaces(writer http.ResponseWriter, request *http.Request) {
@@ -133,6 +148,85 @@ func (s *Server) listDiscovery(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	writeJSON(writer, http.StatusOK, resources.DiscoveryResponse{Resources: discovered})
+}
+
+func (s *Server) overview(writer http.ResponseWriter, request *http.Request) {
+	contextID := request.URL.Query().Get("contextId")
+	if err := validateContextID(contextID); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	result, err := s.resources.Overview(request.Context(), resources.OverviewRequest{ContextID: contextID})
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+func (s *Server) listHelmReleases(writer http.ResponseWriter, request *http.Request) {
+	value := helm.ListRequest{
+		ContextID: request.URL.Query().Get("contextId"),
+		Namespace: request.URL.Query().Get("namespace"),
+	}
+	if err := validateHelmListRequest(value); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	result, err := s.helm.List(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+func (s *Server) getHelmRelease(writer http.ResponseWriter, request *http.Request) {
+	var value helm.GetRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateHelmGetRequest(value)) {
+		return
+	}
+	result, err := s.helm.Get(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+func (s *Server) uninstallHelmRelease(writer http.ResponseWriter, request *http.Request) {
+	var value helm.UninstallRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateHelmUninstallRequest(value)) {
+		return
+	}
+	result, err := s.helm.Uninstall(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+func (s *Server) rollbackHelmRelease(writer http.ResponseWriter, request *http.Request) {
+	var value helm.RollbackRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateHelmRollbackRequest(value)) {
+		return
+	}
+	result, err := s.helm.Rollback(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (s *Server) listResources(writer http.ResponseWriter, request *http.Request) {
@@ -223,17 +317,38 @@ func (s *Server) streamPodLogs(writer http.ResponseWriter, request *http.Request
 	if rejectInvalid(writer, validateLogsRequest(value)) {
 		return
 	}
-	flusher, ok := writer.(http.Flusher)
-	if !ok {
-		writeError(writer, http.StatusInternalServerError, "streaming_unsupported", fmt.Errorf("streaming unsupported"))
-		return
-	}
 	lines, err := s.resources.StreamLogs(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
 		return
 	}
+	streamLogLines(writer, request, lines)
+}
 
+func (s *Server) streamWorkloadLogs(writer http.ResponseWriter, request *http.Request) {
+	var value resources.WorkloadLogsRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateWorkloadLogsRequest(value)) {
+		return
+	}
+	lines, err := s.resources.StreamWorkloadLogs(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	streamLogLines(writer, request, lines)
+}
+
+// streamLogLines writes a log channel as ndjson until it closes or the client
+// disconnects, draining the producer on the way out.
+func streamLogLines(writer http.ResponseWriter, request *http.Request, lines <-chan resources.LogLine) {
+	flusher, ok := writer.(http.Flusher)
+	if !ok {
+		writeError(writer, http.StatusInternalServerError, "streaming_unsupported", fmt.Errorf("streaming unsupported"))
+		return
+	}
 	writer.Header().Set("Content-Type", "application/x-ndjson")
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
@@ -243,7 +358,6 @@ func (s *Server) streamPodLogs(writer http.ResponseWriter, request *http.Request
 	for {
 		select {
 		case <-request.Context().Done():
-			// Drain so the producer goroutine exits before the handler returns.
 			for range lines {
 			}
 			return
@@ -257,6 +371,22 @@ func (s *Server) streamPodLogs(writer http.ResponseWriter, request *http.Request
 			flusher.Flush()
 		}
 	}
+}
+
+func (s *Server) workloadLogs(writer http.ResponseWriter, request *http.Request) {
+	var value resources.WorkloadLogsRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateWorkloadLogsRequest(value)) {
+		return
+	}
+	result, err := s.resources.WorkloadLogs(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (s *Server) startPortForward(writer http.ResponseWriter, request *http.Request) {

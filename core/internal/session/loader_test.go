@@ -103,6 +103,7 @@ func writeTestFile(t *testing.T, path, contents string) {
 }
 
 func TestLoaderWithSourcesMergesAndAttributes(t *testing.T) {
+	isolateChain(t)
 	dir := t.TempDir()
 	first := filepath.Join(dir, "work.yaml")
 	second := filepath.Join(dir, "personal.yaml")
@@ -143,7 +144,7 @@ users:
 `)
 
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "empty"))
-	loader := NewLoaderWithSources([]string{first, second})
+	loader := NewLoaderWithSources([]string{first, second}, true)
 	contexts, err := loader.Contexts()
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +165,7 @@ users:
 }
 
 func TestLoaderWithSourcesExpandsDirectories(t *testing.T) {
+	isolateChain(t)
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "cluster-a.yaml"), `
 apiVersion: v1
@@ -187,7 +189,7 @@ users:
 	}
 
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "empty"))
-	loader := NewLoaderWithSources([]string{dir})
+	loader := NewLoaderWithSources([]string{dir}, true)
 	contexts, err := loader.Contexts()
 	if err != nil {
 		t.Fatal(err)
@@ -198,13 +200,237 @@ users:
 }
 
 func TestLoaderWithSourcesDegradesOnMissingFile(t *testing.T) {
+	isolateChain(t)
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "empty"))
-	loader := NewLoaderWithSources([]string{filepath.Join(t.TempDir(), "gone.yaml")})
+	loader := NewLoaderWithSources([]string{filepath.Join(t.TempDir(), "gone.yaml")}, true)
 	contexts, err := loader.Contexts()
 	if err != nil {
 		t.Fatalf("missing file must not fail the load: %v", err)
 	}
 	if len(contexts) != 0 {
 		t.Fatalf("contexts=%#v", contexts)
+	}
+}
+
+// isolateChain points HOME at a temp dir so the real ~/.kube/config can
+// never leak into tests, and clears KUBECONFIG unless a test overrides it.
+func isolateChain(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KUBECONFIG", "")
+}
+
+func writeDefaultConfig(t *testing.T, home string) string {
+	t.Helper()
+	path := filepath.Join(home, ".kube", "config")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, path, `
+apiVersion: v1
+kind: Config
+clusters:
+- name: default-cluster
+  cluster:
+    server: https://default.example
+contexts:
+- name: default-ctx
+  context:
+    cluster: default-cluster
+    user: default-user
+users:
+- name: default-user
+  user:
+    token: default-token
+`)
+	return path
+}
+
+func TestLoaderWithSourcesCanExcludeStandardChain(t *testing.T) {
+	isolateChain(t)
+	writeDefaultConfig(t, os.Getenv("HOME"))
+
+	loader := NewLoaderWithSources(nil, false)
+	contexts, err := loader.Contexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contexts) != 0 {
+		t.Fatalf("chain excluded, want no contexts: %#v", contexts)
+	}
+	if report := loader.SourceReports(); len(report.Chain) != 0 {
+		t.Fatalf("chain excluded, want empty chain report: %#v", report.Chain)
+	}
+
+	// With the chain included the same default file loads and reports.
+	included := NewLoaderWithSources(nil, true)
+	contexts, err = included.Contexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contexts) != 1 || contexts[0].Name != "default-ctx" {
+		t.Fatalf("contexts=%#v", contexts)
+	}
+	if chain := included.SourceReports().Chain; len(chain) != 1 || !chain[0].Default {
+		t.Fatalf("chain=%#v", chain)
+	}
+}
+
+func TestLoaderWithSourcesDedupesChainEntries(t *testing.T) {
+	isolateChain(t)
+	dup := filepath.Join(t.TempDir(), "staging")
+	writeTestFile(t, dup, `
+apiVersion: v1
+kind: Config
+clusters:
+- name: staging-cluster
+  cluster:
+    server: https://staging.example
+contexts:
+- name: staging-ctx
+  context:
+    cluster: staging-cluster
+    user: staging-user
+users:
+- name: staging-user
+  user:
+    token: staging-token
+`)
+	// The same file arrives via $KUBECONFIG and as a configured source.
+	t.Setenv("KUBECONFIG", dup)
+	loader := NewLoaderWithSources([]string{dup}, true)
+	if len(loader.rules.Precedence) != 1 {
+		t.Fatalf("precedence=%#v, want the file loaded once", loader.rules.Precedence)
+	}
+	report := loader.SourceReports()
+	if len(report.Configured) != 1 || !report.Configured[0].InChain {
+		t.Fatalf("configured=%#v, want the duplicate flagged", report.Configured)
+	}
+	contexts, err := loader.Contexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contexts) != 1 || contexts[0].Source != dup {
+		t.Fatalf("contexts=%#v", contexts)
+	}
+}
+
+func TestDefaultChainIncludesKubeconfigAndDefaultConfig(t *testing.T) {
+	isolateChain(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "staging"))
+
+	defaultConfig := filepath.Join(home, ".kube", "config")
+	if err := os.MkdirAll(filepath.Dir(defaultConfig), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, defaultConfig, `
+apiVersion: v1
+kind: Config
+clusters:
+- name: default-cluster
+  cluster:
+    server: https://default.example
+contexts:
+- name: default-ctx
+  context:
+    cluster: default-cluster
+    user: default-user
+users:
+- name: default-user
+  user:
+    token: default-token
+`)
+	writeTestFile(t, os.Getenv("KUBECONFIG"), `
+apiVersion: v1
+kind: Config
+clusters:
+- name: staging-cluster
+  cluster:
+    server: https://staging.example
+contexts:
+- name: staging-ctx
+  context:
+    cluster: staging-cluster
+    user: staging-user
+users:
+- name: staging-user
+  user:
+    token: staging-token
+`)
+
+	// A KUBECONFIG override must augment the default location, not replace
+	// it — the settings dialog always shows ~/.kube/config as a source.
+	contexts, err := NewLoader().Contexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contexts) != 2 {
+		t.Fatalf("contexts=%#v", contexts)
+	}
+	byName := map[string]ContextInfo{}
+	for _, info := range contexts {
+		byName[info.Name] = info
+	}
+	if byName["staging-ctx"].Source != os.Getenv("KUBECONFIG") {
+		t.Fatalf("staging source=%q", byName["staging-ctx"].Source)
+	}
+	if byName["default-ctx"].Source != defaultConfig {
+		t.Fatalf("default source=%q", byName["default-ctx"].Source)
+	}
+}
+
+func TestDefaultChainSkipsMissingDefaultConfig(t *testing.T) {
+	isolateChain(t)
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "empty"))
+	contexts, err := NewLoader().Contexts()
+	if err != nil {
+		t.Fatalf("missing default config must not fail the load: %v", err)
+	}
+	if len(contexts) != 0 {
+		t.Fatalf("contexts=%#v", contexts)
+	}
+}
+
+func TestDirectoryScanAdmitsUnSuffixedKubeconfigs(t *testing.T) {
+	isolateChain(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "devbox-review-189-kubeconfig"), `
+apiVersion: v1
+kind: Config
+clusters:
+- name: devbox
+  cluster:
+    server: https://devbox.example
+contexts:
+- name: devbox-ctx
+  context:
+    cluster: devbox
+    user: devbox
+users:
+- name: devbox
+  user:
+    token: devbox
+`)
+	if err := os.WriteFile(filepath.Join(dir, ".DS_Store"), []byte{0, 0, 0, 0, 1}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// YAML, but not a kubeconfig (kubecm's own config file): must be skipped
+	// by content, not by extension.
+	if err := os.WriteFile(filepath.Join(dir, "kubecm.config"), []byte("keys: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loader := NewLoaderWithSources([]string{dir}, true)
+	contexts, err := loader.Contexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contexts) != 1 || contexts[0].Name != "devbox-ctx" {
+		t.Fatalf("contexts=%#v", contexts)
+	}
+	if contexts[0].Source != filepath.Join(dir, "devbox-review-189-kubeconfig") {
+		t.Fatalf("source=%q", contexts[0].Source)
 	}
 }

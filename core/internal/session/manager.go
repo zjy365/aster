@@ -11,11 +11,13 @@ import (
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/transport/spdy"
@@ -74,23 +76,59 @@ func newManager(loader *Loader, factory dynamicFactory) *Manager {
 	}
 }
 
-func (m *Manager) PodLogs(ctx context.Context, contextID, namespace, name, container string, tailLines int64) (io.ReadCloser, error) {
-	return m.podLogs(ctx, contextID, namespace, name, container, tailLines, false)
+func (m *Manager) PodLogs(ctx context.Context, contextID, namespace, name, container string, tailLines int64, previous, timestamps bool) (io.ReadCloser, error) {
+	return m.podLogs(ctx, contextID, namespace, name, container, tailLines, false, previous, timestamps)
 }
 
-func (m *Manager) PodLogsFollow(ctx context.Context, contextID, namespace, name, container string, tailLines int64) (io.ReadCloser, error) {
-	return m.podLogs(ctx, contextID, namespace, name, container, tailLines, true)
+func (m *Manager) PodLogsFollow(ctx context.Context, contextID, namespace, name, container string, tailLines int64, previous, timestamps bool) (io.ReadCloser, error) {
+	return m.podLogs(ctx, contextID, namespace, name, container, tailLines, true, previous, timestamps)
 }
 
-func (m *Manager) podLogs(ctx context.Context, contextID, namespace, name, container string, tailLines int64, follow bool) (io.ReadCloser, error) {
+func (m *Manager) podLogs(ctx context.Context, contextID, namespace, name, container string, tailLines int64, follow, previous, timestamps bool) (io.ReadCloser, error) {
+	if namespace == "" || name == "" {
+		return nil, fmt.Errorf("contextId, namespace and name are required")
+	}
+	client, err := m.coreClient(contextID)
+	if err != nil {
+		return nil, err
+	}
+	options := &corev1.PodLogOptions{Container: container, TailLines: &tailLines, Follow: follow, Previous: previous, Timestamps: timestamps}
+	return client.CoreV1().Pods(namespace).GetLogs(name, options).Stream(ctx)
+}
+
+// PodContainers lists spec container names (app + init) so the log viewer can
+// populate its picker without a second manifest fetch client-side.
+func (m *Manager) PodContainers(ctx context.Context, contextID, namespace, name string) ([]string, error) {
 	if contextID == "" || namespace == "" || name == "" {
 		return nil, fmt.Errorf("contextId, namespace and name are required")
+	}
+	client, err := m.coreClient(contextID)
+	if err != nil {
+		return nil, err
+	}
+	pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get pod %q: %w", name, err)
+	}
+	names := make([]string, 0, len(pod.Spec.Containers)+len(pod.Spec.InitContainers))
+	for _, container := range pod.Spec.Containers {
+		names = append(names, container.Name)
+	}
+	for _, container := range pod.Spec.InitContainers {
+		names = append(names, container.Name)
+	}
+	return names, nil
+}
+
+func (m *Manager) coreClient(contextID string) (kubernetes.Interface, error) {
+	if contextID == "" {
+		return nil, fmt.Errorf("contextId is required")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	client, exists := m.coreClients[contextID]
 	if !exists {
-		config, err := m.loader.clientConfig(contextID).ClientConfig()
+		config, err := m.loader.ClientConfig(contextID).ClientConfig()
 		if err != nil {
 			return nil, fmt.Errorf("load context %q: %w", contextID, err)
 		}
@@ -101,15 +139,14 @@ func (m *Manager) podLogs(ctx context.Context, contextID, namespace, name, conta
 		}
 		m.coreClients[contextID] = client
 	}
-	options := &corev1.PodLogOptions{Container: container, TailLines: &tailLines, Follow: follow}
-	return client.CoreV1().Pods(namespace).GetLogs(name, options).Stream(ctx)
+	return client, nil
 }
 
 func (m *Manager) PodExec(ctx context.Context, contextID, namespace, name, container string, command []string) (string, string, error) {
 	if contextID == "" || namespace == "" || name == "" || len(command) == 0 {
 		return "", "", fmt.Errorf("contextId, namespace, name and command are required")
 	}
-	config, err := m.loader.clientConfig(contextID).ClientConfig()
+	config, err := m.loader.ClientConfig(contextID).ClientConfig()
 	if err != nil {
 		return "", "", fmt.Errorf("load context %q: %w", contextID, err)
 	}
@@ -133,6 +170,20 @@ func (m *Manager) Contexts() ([]ContextInfo, error) {
 	return m.loader.Contexts()
 }
 
+// ClientConfig exposes the context's client config to other domains (Helm).
+// It performs no connection and validates the context id like the lazy
+// clients do.
+func (m *Manager) ClientConfig(contextID string) (clientcmd.ClientConfig, error) {
+	if contextID == "" {
+		return nil, fmt.Errorf("contextId is required")
+	}
+	return m.loader.ClientConfig(contextID), nil
+}
+
+func (m *Manager) SourceReports() SourcesReport {
+	return m.loader.SourceReports()
+}
+
 func (m *Manager) Discovery(contextID string) (discovery.DiscoveryInterface, error) {
 	if contextID == "" {
 		return nil, fmt.Errorf("contextId is required")
@@ -142,7 +193,7 @@ func (m *Manager) Discovery(contextID string) (discovery.DiscoveryInterface, err
 	if client, exists := m.discoveryClients[contextID]; exists {
 		return client, nil
 	}
-	config, err := m.loader.clientConfig(contextID).ClientConfig()
+	config, err := m.loader.ClientConfig(contextID).ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextID, err)
 	}
@@ -166,7 +217,7 @@ func (m *Manager) Client(contextID string) (dynamic.Interface, error) {
 		return client, nil
 	}
 
-	config, err := m.loader.clientConfig(contextID).ClientConfig()
+	config, err := m.loader.ClientConfig(contextID).ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextID, err)
 	}
@@ -192,7 +243,7 @@ func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name st
 	if contextID == "" || namespace == "" || name == "" {
 		return nil, 0, fmt.Errorf("contextId, namespace and name are required")
 	}
-	config, err := m.loader.clientConfig(contextID).ClientConfig()
+	config, err := m.loader.ClientConfig(contextID).ClientConfig()
 	if err != nil {
 		return nil, 0, fmt.Errorf("load context %q: %w", contextID, err)
 	}

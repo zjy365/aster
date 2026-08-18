@@ -32,11 +32,11 @@ func (f fakeProvider) Client(contextID string) (dynamic.Interface, error) {
 	return f.client, nil
 }
 
-func (f fakeProvider) PodLogs(context.Context, string, string, string, string, int64) (io.ReadCloser, error) {
+func (f fakeProvider) PodLogs(context.Context, string, string, string, string, int64, bool, bool) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader(f.logs)), nil
 }
 
-func (f fakeProvider) PodLogsFollow(context.Context, string, string, string, string, int64) (io.ReadCloser, error) {
+func (f fakeProvider) PodLogsFollow(context.Context, string, string, string, string, int64, bool, bool) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader(f.logs)), nil
 }
 

@@ -72,16 +72,41 @@ type MutationResponse struct {
 }
 
 type LogsRequest struct {
+	ContextID  string `json:"contextId"`
+	Namespace  string `json:"namespace"`
+	Name       string `json:"name"`
+	Container  string `json:"container,omitempty"`
+	TailLines  int64  `json:"tailLines,omitempty"`
+	Previous   bool   `json:"previous,omitempty"`
+	Timestamps bool   `json:"timestamps,omitempty"`
+}
+
+type LogsResponse struct {
+	Text       string   `json:"text"`
+	Truncated  bool     `json:"truncated"`
+	Containers []string `json:"containers,omitempty"`
+}
+
+type WorkloadLogsRequest struct {
 	ContextID string `json:"contextId"`
 	Namespace string `json:"namespace"`
+	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	Container string `json:"container,omitempty"`
 	TailLines int64  `json:"tailLines,omitempty"`
 }
 
-type LogsResponse struct {
-	Text      string `json:"text"`
-	Truncated bool   `json:"truncated"`
+type WorkloadLogLine struct {
+	Pod  string `json:"pod"`
+	Text string `json:"text"`
+}
+
+type WorkloadLogsResponse struct {
+	Lines      []WorkloadLogLine `json:"lines"`
+	Pods       []string          `json:"pods,omitempty"`
+	Containers []string          `json:"containers,omitempty"`
+	Truncated  bool              `json:"truncated"`
+	Note       string            `json:"note,omitempty"`
 }
 
 type ExecRequest struct {
