@@ -11,10 +11,20 @@ use serde::Serialize;
 const MAX_SOURCES: usize = 64;
 const MAX_PATH_LENGTH: usize = 2048;
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AsterSettings {
     pub kubeconfig_sources: Vec<String>,
+    /// The standard chain ($KUBECONFIG + ~/.kube/config) participates unless
+    /// the user turns it off. It is a default, not a privilege: with it off
+    /// and no configured sources the app simply has no clusters.
+    pub include_standard_chain: bool,
+}
+
+impl Default for AsterSettings {
+    fn default() -> Self {
+        Self { kubeconfig_sources: Vec::new(), include_standard_chain: true }
+    }
 }
 
 pub struct SettingsFile {
@@ -59,10 +69,18 @@ impl SettingsFile {
 /// Parses the settings document; unknown keys are dropped, not merged.
 pub fn parse_settings(document: &str) -> AsterSettings {
     let mut sources: Vec<String> = Vec::new();
+    // Absent means true, so settings files written by older versions keep
+    // the chain.
+    let mut include_standard_chain = true;
     let mut in_list = false;
     for line in document.split('\n') {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("includeStandardChain:") {
+            include_standard_chain = rest.trim() != "false";
+            in_list = false;
             continue;
         }
         if let Some(rest) = trimmed.strip_prefix("kubeconfigSources:") {
@@ -92,14 +110,20 @@ pub fn parse_settings(document: &str) -> AsterSettings {
         in_list = false;
     }
     sources.truncate(MAX_SOURCES);
-    AsterSettings { kubeconfig_sources: sources }
+    AsterSettings { kubeconfig_sources: sources, include_standard_chain }
 }
 
 pub fn serialize_settings(settings: &AsterSettings) -> String {
-    if settings.kubeconfig_sources.is_empty() {
-        return "kubeconfigSources: []\n".to_string();
+    // The chain flag is only written when off; its absence parses as on.
+    let mut output = String::new();
+    if !settings.include_standard_chain {
+        output.push_str("includeStandardChain: false\n");
     }
-    let mut output = String::from("kubeconfigSources:\n");
+    if settings.kubeconfig_sources.is_empty() {
+        output.push_str("kubeconfigSources: []\n");
+        return output;
+    }
+    output.push_str("kubeconfigSources:\n");
     for source in &settings.kubeconfig_sources {
         let quoted = serde_json::to_string(source).unwrap_or_else(|_| format!("\"{source}\""));
         output.push_str(&format!("  - {quoted}\n"));
@@ -160,7 +184,7 @@ mod tests {
 
     #[test]
     fn serialize_round_trips_through_parse() {
-        let settings = AsterSettings { kubeconfig_sources: vec!["/a".into(), "/b c".into()] };
+        let settings = AsterSettings { kubeconfig_sources: vec!["/a".into(), "/b c".into()], include_standard_chain: true };
         assert_eq!(parse_settings(&serialize_settings(&settings)).kubeconfig_sources, settings.kubeconfig_sources);
         assert_eq!(serialize_settings(&AsterSettings::default()), "kubeconfigSources: []\n");
     }
@@ -170,5 +194,18 @@ mod tests {
         let long = "x".repeat(MAX_PATH_LENGTH + 1);
         let result = normalize_sources(vec![" /a ".into(), "/a".into(), long, "/b".into()]);
         assert_eq!(result, vec!["/a", "/b"]);
+    }
+
+    #[test]
+    fn chain_flag_defaults_on_and_round_trips() {
+        // Older files never mention the key and must keep the chain.
+        assert!(parse_settings("kubeconfigSources: []").include_standard_chain);
+        assert!(!parse_settings("includeStandardChain: false\nkubeconfigSources: []").include_standard_chain);
+        assert!(parse_settings("includeStandardChain: true\n").include_standard_chain);
+
+        let off = AsterSettings { kubeconfig_sources: vec![], include_standard_chain: false };
+        let parsed = parse_settings(&serialize_settings(&off));
+        assert!(!parsed.include_standard_chain);
+        assert_eq!(serialize_settings(&AsterSettings::default()), "kubeconfigSources: []\n");
     }
 }

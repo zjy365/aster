@@ -143,11 +143,15 @@ impl<R: Runtime> Sidecar<R> {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
-        // Configured sources ride the environment; the core appends them ahead
-        // of the standard ~/.kube/config chain.
-        let sources = self.settings.read().kubeconfig_sources;
-        if !sources.is_empty() {
-            command.env("ASTER_KUBECONFIG_SOURCES", sources.join(if cfg!(windows) { ";" } else { ":" }));
+        // Configured sources ride the environment; the core consults them
+        // ahead of the standard chain, which itself only participates when
+        // the user has not turned it off.
+        let settings = self.settings.read();
+        if !settings.kubeconfig_sources.is_empty() {
+            command.env("ASTER_KUBECONFIG_SOURCES", settings.kubeconfig_sources.join(if cfg!(windows) { ";" } else { ":" }));
+        }
+        if !settings.include_standard_chain {
+            command.env("ASTER_INCLUDE_STANDARD_CHAIN", "false");
         }
 
         let mut child = command.spawn().map_err(|error| format!("Failed to spawn Aster core: {error}"))?;
@@ -314,7 +318,7 @@ pub fn resolve_executable() -> PathBuf {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(directory) = exe.parent() {
-            for name in ["aster-core", &executable_name()] {
+            for name in ["aster-core", executable_name().as_str()] {
                 let bundled = directory.join(name);
                 if bundled.exists() {
                     return bundled;
@@ -322,7 +326,7 @@ pub fn resolve_executable() -> PathBuf {
             }
         }
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries").join(&executable_name())
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries").join(executable_name())
 }
 
 fn executable_name() -> String {

@@ -1,7 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Renderer capabilities: core defaults only (events for listen/emit). Dialog and updater run through Rust-side proxies, not the renderer.",
+  "description": "Renderer capabilities: core defaults plus window dragging from data-tauri-drag-region titlebars. Dialog and updater run through Rust-side proxies, not the renderer.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize"
+  ]
 }

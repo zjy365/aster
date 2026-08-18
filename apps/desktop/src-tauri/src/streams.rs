@@ -52,12 +52,12 @@ impl Streams {
         });
     }
 
-    pub fn start_logs(self: &Arc<Self>, id: String, request: Value, channel: Channel<Value>) {
+    pub fn start_logs(self: &Arc<Self>, id: String, request: Value, channel: Channel<Value>, path: &'static str) {
         let token = Self::replace_all(&self.logs, &id);
         let this = Arc::clone(self);
         let sink: BatchSink = Arc::new(move |batch| channel.send(batch).is_ok());
         tauri::async_runtime::spawn(async move {
-            this.run_logs(&id, request, &sink, token.clone()).await;
+            this.run_logs(&id, request, &sink, token.clone(), path).await;
             Self::finish(&this.logs, &id, &token);
         });
     }
@@ -216,9 +216,9 @@ impl Streams {
         }
     }
 
-    async fn run_logs(&self, id: &str, request: Value, sink: &BatchSink, token: CancellationToken) {
+    async fn run_logs(&self, id: &str, request: Value, sink: &BatchSink, token: CancellationToken, path: &str) {
         while !token.is_cancelled() {
-            let stream = match self.core.post_stream("/v1/pods/logs/stream", request.clone()).await {
+            let stream = match self.core.post_stream(path, request.clone()).await {
                 Ok(stream) => stream,
                 Err(error) => {
                     let _ = send(sink, json!({ "subscriptionId": id, "type": "error", "message": error }));
@@ -236,16 +236,19 @@ impl Streams {
                     }
                     NdjsonItem::Line(line) => {
                         let Ok(event) = serde_json::from_str::<Value>(&line) else { continue };
-                        let is_error = event.get("type").and_then(Value::as_str) == Some("error");
+                        let event_type = event.get("type").and_then(Value::as_str).unwrap_or("line");
                         let mut batch = json!({
                             "subscriptionId": id,
-                            "type": if is_error { "error" } else { "line" },
+                            "type": event_type,
                         });
                         if let Some(text) = event.get("text") {
                             batch["text"] = text.clone();
                         }
                         if let Some(message) = event.get("message") {
                             batch["message"] = message.clone();
+                        }
+                        if let Some(pod) = event.get("pod") {
+                            batch["pod"] = pod.clone();
                         }
                         if !send(sink, batch) {
                             return;
@@ -625,7 +628,7 @@ mod tests {
             let token = token.clone();
             tokio::spawn(async move {
                 streams
-                    .run_logs("log-1", json!({"contextId":"ctx","namespace":"default","name":"pod"}), &sink, token)
+                    .run_logs("log-1", json!({"contextId":"ctx","namespace":"default","name":"pod"}), &sink, token, "/v1/pods/logs/stream")
                     .await;
             })
         };

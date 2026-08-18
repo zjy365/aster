@@ -5,17 +5,17 @@ mod settings;
 mod sidecar;
 mod streams;
 mod updater;
-mod write_safety;
 
 use std::sync::Arc;
 
-use tauri::{Emitter, Manager, Position, TitleBarStyle, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    Emitter, LogicalPosition, Manager, Position, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
+};
 
 pub struct AppState {
     pub sidecar: Arc<sidecar::Sidecar<tauri::Wry>>,
     pub core: Arc<core_client::CoreClient>,
     pub settings: Arc<settings::SettingsFile>,
-    pub write_safety: Arc<write_safety::WriteSafety>,
     pub streams: Arc<streams::Streams>,
     pub updater: Arc<updater::Updater>,
 }
@@ -36,6 +36,7 @@ fn is_app_origin(url: &tauri::Url) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_menu_event(|app, event| {
             if let Some(command) = event.id().0.strip_prefix("cmd:") {
@@ -51,7 +52,6 @@ pub fn run() {
                 sidecar: sidecar.clone(),
                 core: core.clone(),
                 settings,
-                write_safety: Arc::new(write_safety::WriteSafety::default()),
                 streams: Arc::new(streams::Streams::new(core)),
                 updater: updater.clone(),
             });
@@ -65,7 +65,10 @@ pub fn run() {
                 .min_inner_size(900.0, 640.0)
                 .title_bar_style(TitleBarStyle::Overlay)
                 .hidden_title(true)
-                .traffic_light_position(Position::Physical(tauri::PhysicalPosition::new(17, 18)))
+                // Logical so the inset survives Retina scale factors; 20pt
+                // keeps the traffic lights off the corner and vertically
+                // centered in the 52px toolbar strip.
+                .traffic_light_position(Position::Logical(LogicalPosition::new(20.0, 20.0)))
                 .on_navigation(is_app_origin)
                 .build()?;
             updater.start();
@@ -89,30 +92,40 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::app_open_external,
             commands::core_status,
             commands::contexts_list,
+            commands::sources_report,
             commands::namespaces_list,
             commands::discovery_list,
+            commands::overview_get,
+            commands::helm_releases_list,
+            commands::helm_releases_get,
+            commands::helm_releases_uninstall,
+            commands::helm_releases_rollback,
             commands::resources_list,
             commands::resources_get,
             commands::resources_related,
             commands::resources_search,
             commands::metrics_pods,
             commands::pods_logs,
+            commands::workloads_logs,
             commands::pods_exec,
             commands::pods_portforward_start,
             commands::pods_portforward_stop,
             commands::resources_mutate,
-            commands::safety_set_read_only,
             commands::resources_watch_start,
             commands::resources_watch_stop,
             commands::pods_logs_follow_start,
             commands::pods_logs_follow_stop,
+            commands::workloads_logs_follow_start,
+            commands::workloads_logs_follow_stop,
             commands::settings_get,
             commands::settings_set_kubeconfig_sources,
             commands::settings_apply_kubeconfig_sources,
             commands::settings_pick_kubeconfig_file,
             commands::settings_pick_kubeconfig_folder,
+            commands::save_text_file,
             commands::appearance_set_theme_source,
             commands::updater_state,
             commands::updater_check,

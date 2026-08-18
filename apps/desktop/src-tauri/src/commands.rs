@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use tauri::{ipc::Channel, AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::core_client::url_encode;
 use crate::settings::{normalize_sources, AsterSettings};
@@ -10,17 +11,22 @@ use crate::AppState;
 /// Every command here mirrors one Electron IPC channel from src/main/ipc.ts.
 /// The Kubernetes-facing commands are thin authenticated proxies: the body
 /// arrives already shaped by the renderer adapter and is validated again by
-/// the Go core (core/internal/rpc/validate.go). Write operations additionally
-/// pass through the Rust-side write-safety policy — an accident guard the
-/// renderer opts out of per context, not a boundary against a compromised
-/// renderer (that is the CSP and navigation policy's job).
-fn context_id(body: &Value) -> Result<&str, String> {
-    body.get("contextId").and_then(Value::as_str).ok_or_else(|| "contextId is required".to_string())
-}
+/// the Go core (core/internal/rpc/validate.go).
 
 #[tauri::command]
 pub fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub fn app_open_external(app: AppHandle, url: String) -> Result<(), String> {
+    // External links leave the app via the system browser; https only, so a
+    // compromised or buggy caller cannot hand the OS a file:// or custom
+    // scheme. The renderer only ever sends its own hardcoded community URLs.
+    if !url.starts_with("https://") {
+        return Err("only https URLs may be opened externally".to_string());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -31,6 +37,11 @@ pub fn core_status(state: State<'_, AppState>) -> CoreStatus {
 #[tauri::command]
 pub async fn contexts_list(state: State<'_, AppState>) -> Result<Value, String> {
     state.core.get("/v1/contexts").await
+}
+
+#[tauri::command]
+pub async fn sources_report(state: State<'_, AppState>) -> Result<Value, String> {
+    state.core.get("/v1/sources").await
 }
 
 #[tauri::command]
@@ -68,6 +79,11 @@ pub async fn discovery_list(state: State<'_, AppState>, context_id: String) -> R
 }
 
 #[tauri::command]
+pub async fn overview_get(state: State<'_, AppState>, context_id: String) -> Result<Value, String> {
+    state.core.get(&format!("/v1/overview?contextId={}", url_encode(&context_id))).await
+}
+
+#[tauri::command]
 pub async fn resources_list(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
     state.core.post("/v1/resources/list", request).await
 }
@@ -98,21 +114,43 @@ pub async fn pods_logs(state: State<'_, AppState>, request: Value) -> Result<Val
 }
 
 #[tauri::command]
+pub async fn workloads_logs(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/workloads/logs", request).await
+}
+
+#[tauri::command]
 pub async fn pods_exec(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
-    state.write_safety.assert_write_allowed(context_id(&request)?, "Pod exec")?;
     state.core.post("/v1/pods/exec", request).await
 }
 
 #[tauri::command]
 pub async fn resources_mutate(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
-    let operation = request.get("operation").and_then(Value::as_str).unwrap_or("mutation");
-    state.write_safety.assert_write_allowed(context_id(&request)?, &format!("Resource {operation}"))?;
     state.core.post("/v1/resources/mutate", request).await
 }
 
 #[tauri::command]
+pub async fn helm_releases_list(state: State<'_, AppState>, context_id: String, namespace: String) -> Result<Value, String> {
+    let url = format!("/v1/helm/releases?contextId={}&namespace={}", url_encode(&context_id), url_encode(&namespace));
+    state.core.get(&url).await
+}
+
+#[tauri::command]
+pub async fn helm_releases_get(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/helm/releases/get", request).await
+}
+
+#[tauri::command]
+pub async fn helm_releases_uninstall(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/helm/releases/uninstall", request).await
+}
+
+#[tauri::command]
+pub async fn helm_releases_rollback(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/helm/releases/rollback", request).await
+}
+
+#[tauri::command]
 pub async fn pods_portforward_start(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
-    state.write_safety.assert_write_allowed(context_id(&request)?, "Pod port forward")?;
     state.core.post("/v1/pods/portforward", request).await
 }
 
@@ -122,29 +160,20 @@ pub async fn pods_portforward_stop(state: State<'_, AppState>, request: Value) -
 }
 
 #[tauri::command]
-pub fn safety_set_read_only(state: State<'_, AppState>, context_id: String, read_only: bool) -> Result<(), String> {
-    if context_id.is_empty() || context_id.len() > 512 {
-        return Err("contextId must be between 1 and 512 characters".to_string());
-    }
-    state.write_safety.set_read_only(context_id, read_only);
-    Ok(())
-}
-
-#[tauri::command]
 pub fn settings_get(state: State<'_, AppState>) -> AsterSettings {
     state.settings.read()
 }
 
 #[tauri::command]
-pub fn settings_set_kubeconfig_sources(state: State<'_, AppState>, sources: Vec<String>) -> AsterSettings {
-    let settings = AsterSettings { kubeconfig_sources: normalize_sources(sources) };
+pub fn settings_set_kubeconfig_sources(state: State<'_, AppState>, sources: Vec<String>, include_standard_chain: bool) -> AsterSettings {
+    let settings = AsterSettings { kubeconfig_sources: normalize_sources(sources), include_standard_chain };
     state.settings.write(&settings);
     settings
 }
 
 #[tauri::command]
-pub async fn settings_apply_kubeconfig_sources(state: State<'_, AppState>, sources: Vec<String>) -> Result<(), String> {
-    let settings = AsterSettings { kubeconfig_sources: normalize_sources(sources) };
+pub async fn settings_apply_kubeconfig_sources(state: State<'_, AppState>, sources: Vec<String>, include_standard_chain: bool) -> Result<(), String> {
+    let settings = AsterSettings { kubeconfig_sources: normalize_sources(sources), include_standard_chain };
     state.settings.write(&settings);
     // Restarting the core invalidates every live stream.
     state.streams.cancel_all();
@@ -163,7 +192,7 @@ pub fn resources_watch_stop(state: State<'_, AppState>, id: String) {
 
 #[tauri::command]
 pub fn pods_logs_follow_start(state: State<'_, AppState>, id: String, request: Value, channel: Channel<Value>) {
-    state.streams.start_logs(id, request, channel);
+    state.streams.start_logs(id, request, channel, "/v1/pods/logs/stream");
 }
 
 #[tauri::command]
@@ -172,13 +201,23 @@ pub fn pods_logs_follow_stop(state: State<'_, AppState>, id: String) {
 }
 
 #[tauri::command]
+pub fn workloads_logs_follow_start(state: State<'_, AppState>, id: String, request: Value, channel: Channel<Value>) {
+    state.streams.start_logs(id, request, channel, "/v1/workloads/logs/stream");
+}
+
+#[tauri::command]
+pub fn workloads_logs_follow_stop(state: State<'_, AppState>, id: String) {
+    state.streams.stop_logs(&id);
+}
+
+#[tauri::command]
 pub async fn settings_pick_kubeconfig_file(app: AppHandle) -> Result<Option<String>, String> {
+    // No extension filter: kubeconfigs routinely have no suffix (the common
+    // ~/.kube/name-admin layout) and macOS disables unfiltered files, so any
+    // filter would hide exactly the files this dialog exists to select. The
+    // core sniffs contents and drops non-kubeconfig picks.
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("Add a kubeconfig file")
-            .add_filter("Kubeconfig", &["yaml", "yml", "json", "config"])
-            .blocking_pick_file()
+        app.dialog().file().set_title("Add a kubeconfig file").blocking_pick_file()
     })
     .await
     .map_err(|error| error.to_string())?;
@@ -193,6 +232,25 @@ pub async fn settings_pick_kubeconfig_folder(app: AppHandle) -> Result<Option<St
     .await
     .map_err(|error| error.to_string())?;
     Ok(picked.and_then(|path| path.into_path().ok()).map(|path| path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+pub async fn save_text_file(app: AppHandle, default_name: String, content: String) -> Result<Option<String>, String> {
+    // Log exports are the only caller today; cap defensively so a renderer bug
+    // cannot turn this into an arbitrary large-file writer.
+    if content.len() > 32 << 20 {
+        return Err("content exceeds the 32 MiB export limit".to_string());
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().set_title("Save file").set_file_name(&default_name).blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(path) = picked.and_then(|path| path.into_path().ok()) else {
+        return Ok(None);
+    };
+    std::fs::write(&path, content).map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
