@@ -29,7 +29,7 @@ Aster combines a native desktop workbench with a narrow, loopback-only Go sideca
 
 ## Capabilities and Constraints
 
-- Electron main/preload/renderer isolation with a typed, allowlisted `window.aster` API.
+- Tauri Rust shell as the only privileged process, exposing a typed, allowlisted `DesktopApi` to the renderer.
 - Random loopback Go sidecar protected by one-time bearer authentication.
 - Native Kubernetes pagination, selectors, scoped watch, bookmark handling, reconnect, and expired-resource-version reset.
 - Virtualized resource tables; never add an `All` page size or render full large lists into the DOM.
@@ -49,7 +49,7 @@ Aster combines a native desktop workbench with a narrow, loopback-only Go sideca
 ## Evidence on Hand
 
 - Product and architecture documentation in `README.md` and `apps/desktop/README.md`.
-- Existing renderer, typed preload API, Go sidecar, unit tests, packaged Electron smoke fixture, and visual screenshots.
+- Existing renderer, typed preload API, Go sidecar, unit tests, packaged desktop smoke fixture, and visual screenshots.
 - Five user-provided Aptakube screenshots documenting the accepted layout topology.
 - No customer claims, performance benchmarks, telemetry, or metrics data should be fabricated.
 

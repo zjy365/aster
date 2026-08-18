@@ -216,7 +216,7 @@ The palette is a cool macOS-like neutral field with clearly separated jobs for i
 
 ## Themes
 
-Aster supports `system`, `light`, and `dark`. `system` is the default and follows macOS appearance changes. Renderer tokens, Electron window background, native menus, scrollbars, and launch surfaces must resolve to the same appearance so the window never flashes or splits into mismatched themes.
+Aster supports `system`, `light`, and `dark`. `system` is the default and follows macOS appearance changes. Renderer tokens, the native window background, native menus, scrollbars, and launch surfaces must resolve to the same appearance so the window never flashes or splits into mismatched themes.
 
 | Semantic role | Light | Dark |
 | --- | --- | --- |
@@ -240,7 +240,7 @@ Aster supports `system`, `light`, and `dark`. `system` is the default and follow
 | Caution | `#9a6700` | `#ffd60a` |
 | Destructive | `#d70015` | `#ff453a` |
 
-Dark mode is designed role by role, not produced by inverting light mode. Semantic status must remain distinguishable without color. Release acceptance requires real Electron review of core workbench states in both appearances, plus increased-contrast and reduced-transparency system settings; this remains a gate until the evidence exists.
+Dark mode is designed role by role, not produced by inverting light mode. Semantic status must remain distinguishable without color. Release acceptance requires real packaged-app review of core workbench states in both appearances, plus increased-contrast and reduced-transparency system settings; this remains a gate until the evidence exists.
 
 ## Typography
 
@@ -268,7 +268,7 @@ Dark mode is designed role by role, not produced by inverting light mode. Semant
 
 The desktop shell is a two-column grid: a persistent Source List at 236px and a flexible workspace. At widths below 1120px the Source List narrows to 216px; below 960px labels compress selectively while the desktop application maintains a 900px minimum width. The top toolbar is 52px high and spans the workspace, keeping history, namespace, search, safety, refresh, and appearance controls in one line.
 
-On macOS, the titlebar is 52px high and reserves at least 76px at the leading edge for native traffic lights and drag space. Product branding belongs in the Context Picker content or Source List, never beside the traffic lights. Interactive controls inside a draggable titlebar are explicitly non-draggable. The chosen appearance is synchronized with Electron's native window theme.
+On macOS, the titlebar is 52px high and reserves at least 76px at the leading edge for native traffic lights and drag space. Product branding belongs in the Context Picker content or Source List, never beside the traffic lights. Interactive controls inside a draggable titlebar are explicitly non-draggable. The chosen appearance is synchronized with the native window theme.
 
 Resource browsing uses a 64px pane heading, a 34px table header, 38px virtualized rows, and a 34px footer. Detail replaces the list in the same workspace rather than opening a side inspector. Detail and cluster Overview share one summary language: border-defined cards (one-pixel hairline, 10px radius, surface fill) spaced by 12px gaps on a 16px page margin — grouping comes from the card edge and whitespace, not from nested hairlines or shadows. The detail readable column keeps its 1040px ceiling; on workspaces wider than 920px Overview adds a 288px card rail beside that column, for a combined ceiling of 1328px, so common window widths already gain the two-column density instead of stacking into one long column. Metadata grids run four columns, collapsing to three and then two as their own column narrows — measured with container queries against the main column, since the main column is narrower than the workspace whenever the aside is present. Short viewports below 720px reduce vertical ceremony without changing the information model.
 
@@ -347,7 +347,7 @@ Overview answers "is this healthy and what is it connected to" without tab-hoppi
 
 ### Commands and Context Menus
 
-Aster must converge on one typed command registry in the shared application layer, outside individual views. Electron main consumes its allowlisted command IDs to build native menus and dispatches them through the narrow preload bridge; renderer surfaces consume the same definitions for enablement, toolbar and More actions, row context menus, and the future `Command-K` palette. Privileged data and execution remain in main or the authenticated Core, never in the registry payload. A command declares its scope, availability, shortcut, permission requirement, danger level, and reversibility contract. `Enter` performs the primary local action, `Escape` closes or steps back, and standard macOS shortcuts are never repurposed. Right-click menus expose relevant row actions and make their keyboard shortcuts discoverable; they do not contain a separate capability set. Until the shared registry exists, do not describe the current hard-coded native menu and toolbar paths as unified.
+Aster must converge on one typed command registry in the shared application layer, outside individual views. The Tauri Rust shell consumes its allowlisted command IDs to build native menus and dispatches them through the narrow typed bridge; renderer surfaces consume the same definitions for enablement, toolbar and More actions, row context menus, and the future `Command-K` palette. Privileged data and execution remain in the Rust shell or the authenticated Core, never in the registry payload. A command declares its scope, availability, shortcut, permission requirement, danger level, and reversibility contract. `Enter` performs the primary local action, `Escape` closes or steps back, and standard macOS shortcuts are never repurposed. Right-click menus expose relevant row actions and make their keyboard shortcuts discoverable; they do not contain a separate capability set. Until the shared registry exists, do not describe the current hard-coded native menu and toolbar paths as unified.
 
 ### Feedback, Errors, and Mutation Safety
 
