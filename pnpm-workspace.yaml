@@ -1,5 +1,6 @@
 packages:
   - "apps/desktop"
+  - "apps/landing"
 
 onlyBuiltDependencies:
   - "electron"

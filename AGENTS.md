@@ -28,3 +28,11 @@ cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
 (`pnpm check` at the repository root runs the full suite.)
 
 UI changes require the renderer Playwright smoke suite (`pnpm --dir apps/desktop smoke:visual`) to pass with screenshots and overlap/overflow inspection before completion. Shell changes additionally require a manual `pnpm dev` run against a real kubeconfig.
+
+## Landing site (`apps/landing`)
+
+- 静态营销站，与 `apps/desktop` 完全解耦；不得从 `apps/desktop` 或 `core/` import 任何代码。
+- 页面上的每一条能力声明和每一个数字，必须能在 `core/`、`PRODUCT.md` 或 `DESIGN.md` 中找到出处。
+  不得出现客户证言、性能基准、遥测或统计数字。
+- 颜色 token 与 `DESIGN.md` 保持同步；system blue 用于交互，Aster orange 仅用于品牌标识。
+- 不参与根 `pnpm check`。验证：`pnpm --dir apps/landing typecheck && pnpm --dir apps/landing build`。
