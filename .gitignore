@@ -41,5 +41,4 @@ core/bin/
 *.swo
 todo.md
 
-# local planning specs (not tracked)
-specs/
+specs
