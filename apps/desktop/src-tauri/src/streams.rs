@@ -15,6 +15,10 @@ const RECONNECT_DELAY: Duration = Duration::from_millis(250);
 /// (AbortSignal.timeout on the fetch): watch connections are recycled on a
 /// fixed deadline so stale half-open streams cannot wedge the UI.
 const WATCH_STREAM_TIMEOUT: Duration = Duration::from_secs(65);
+/// Delta events accumulate until either cap before one IPC batch: a busy
+/// cluster would otherwise pay a round-trip per object and stall the renderer.
+const DELTA_BATCH_SIZE: usize = 64;
+const DELTA_BATCH_WINDOW: Duration = Duration::from_millis(40);
 
 /// Receives renderer-bound batches; the app adapts a tauri Channel, tests
 /// adapt an mpsc sender.
@@ -160,49 +164,102 @@ impl Streams {
                 };
                 let mut lines = Ndjson::new(stream);
                 let mut reset = false;
+                // Delta events are batched so a busy cluster (or a large watch
+                // stream) does not pay one IPC round-trip per object. The batch
+                // flushes on size or on a short tick; the renderer already
+                // merges multi-event deltas in one pass.
+                let mut pending_deltas: Vec<Value> = Vec::with_capacity(DELTA_BATCH_SIZE);
+                // resourceVersion advances with every event; the batch carries
+                // the latest one seen so far (versions are monotonic).
+                let mut pending_version = String::new();
+                let mut batch_deadline = tokio::time::Instant::now() + DELTA_BATCH_WINDOW;
                 loop {
-                    let item = tokio::select! {
-                        () = tokio::time::sleep_until(deadline) => break,
-                        item = lines.next(&token) => item,
-                    };
-                    match item {
-                        NdjsonItem::Cancelled => return,
-                        NdjsonItem::Ended => break,
-                        NdjsonItem::Failed(error) => {
-                            let _ = send(sink, json!({ "subscriptionId": id, "kind": "error", "message": error }));
-                            return;
-                        }
-                        NdjsonItem::Line(line) => {
-                            let event: Value = match serde_json::from_str(&line) {
-                                Ok(event) => event,
-                                Err(_) => continue,
-                            };
-                            if let Some(version) = event.get("resourceVersion").and_then(Value::as_str) {
-                                resource_version = version.to_string();
+                    let mut flush = !pending_deltas.is_empty()
+                        && (pending_deltas.len() >= DELTA_BATCH_SIZE
+                            || tokio::time::Instant::now() >= batch_deadline);
+                    if !flush {
+                        let item = tokio::select! {
+                            () = tokio::time::sleep_until(batch_deadline) => {
+                                flush = !pending_deltas.is_empty();
+                                batch_deadline = tokio::time::Instant::now() + DELTA_BATCH_WINDOW;
+                                continue;
                             }
-                            match event.get("type").and_then(Value::as_str).unwrap_or("") {
-                                "BOOKMARK" => continue,
-                                "RESET" => {
-                                    reset = true;
-                                    break;
+                            () = tokio::time::sleep_until(deadline) => break,
+                            item = lines.next(&token) => item,
+                        };
+                        match item {
+                            NdjsonItem::Cancelled => return,
+                            NdjsonItem::Ended => break,
+                            NdjsonItem::Failed(error) => {
+                                let _ = send(sink, json!({ "subscriptionId": id, "kind": "error", "message": error }));
+                                return;
+                            }
+                            NdjsonItem::Line(line) => {
+                                let event: Value = match serde_json::from_str(&line) {
+                                    Ok(event) => event,
+                                    Err(_) => continue,
+                                };
+                                if let Some(version) = event.get("resourceVersion").and_then(Value::as_str) {
+                                    resource_version = version.to_string();
+                                    pending_version = resource_version.clone();
                                 }
-                                "ERROR" => {
-                                    let message = event
-                                        .pointer("/error/message")
-                                        .and_then(Value::as_str)
-                                        .unwrap_or("Kubernetes watch failed");
-                                    let _ = send(sink, json!({ "subscriptionId": id, "kind": "error", "message": message }));
-                                    return;
-                                }
-                                _ => {
-                                    if let Some(batch) = delta_batch_from_watch_event(id, &event, &resource_version) {
-                                        if !send(sink, batch) {
-                                            return;
+                                match event.get("type").and_then(Value::as_str).unwrap_or("") {
+                                    "BOOKMARK" => continue,
+                                    "RESET" => {
+                                        reset = true;
+                                        break;
+                                    }
+                                    "ERROR" => {
+                                        let message = event
+                                            .pointer("/error/message")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("Kubernetes watch failed");
+                                        let _ = send(sink, json!({ "subscriptionId": id, "kind": "error", "message": message }));
+                                        return;
+                                    }
+                                    _ => {
+                                        if let Some(mut delta) = delta_batch_from_watch_event(id, &event, &resource_version) {
+                                            if let Some(events) = delta.get_mut("events").and_then(|value| value.as_array_mut()) {
+                                                pending_deltas.append(events);
+                                                batch_deadline = tokio::time::Instant::now() + DELTA_BATCH_WINDOW;
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                    if flush {
+                        let mut batch = json!({
+                            "subscriptionId": id,
+                            "kind": "delta",
+                            "events": pending_deltas,
+                        });
+                        if !pending_version.is_empty() {
+                            batch["resourceVersion"] = json!(pending_version);
+                        }
+                        if !send(sink, batch) {
+                            return;
+                        }
+                        pending_deltas = Vec::with_capacity(DELTA_BATCH_SIZE);
+                        pending_version.clear();
+                        batch_deadline = tokio::time::Instant::now() + DELTA_BATCH_WINDOW;
+                    }
+                }
+                // Flush whatever accumulated, even on RESET: events already
+                // seen were real and the original per-event delivery guaranteed
+                // they reached the renderer before the relist snapshot.
+                if !pending_deltas.is_empty() {
+                    let mut batch = json!({
+                        "subscriptionId": id,
+                        "kind": "delta",
+                        "events": pending_deltas,
+                    });
+                    if !pending_version.is_empty() {
+                        batch["resourceVersion"] = json!(pending_version);
+                    }
+                    if !send(sink, batch) {
+                        return;
                     }
                 }
                 if reset {
@@ -598,7 +655,8 @@ mod tests {
         assert_eq!(second["events"][0]["row"]["uid"], "u1");
         assert_eq!(second["resourceVersion"], "101");
 
-        // RESET must trigger a re-list and a fresh snapshot.
+        // RESET must flush any buffered deltas, then trigger a re-list and a
+        // fresh snapshot.
         let third = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
         assert_eq!(third["kind"], "snapshot");
 
