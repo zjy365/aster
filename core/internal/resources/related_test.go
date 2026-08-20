@@ -118,3 +118,25 @@ func TestSearchScopedByNamespace(t *testing.T) {
 		t.Fatal("blank query was accepted")
 	}
 }
+
+func TestSearchSkipsClusterScopedKinds(t *testing.T) {
+	// Cluster-scoped kinds (nodes, namespaces, PVs, storage classes, RBAC)
+	// are never searched: in a 100k-namespace cluster they are unbounded and
+	// the palette does not need them. The fake records every list call.
+	service, _ := relatedFixture(t)
+	client := newListableFakeClient()
+	service.clients = fakeProvider{client: client}
+
+	_, err := service.Search(context.Background(), SearchRequest{ContextID: "context", Query: "web", Namespace: "apps"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range client.Actions() {
+		if action.GetResource().Resource == "namespaces" ||
+			action.GetResource().Resource == "nodes" ||
+			action.GetResource().Resource == "persistentvolumes" ||
+			action.GetResource().Resource == "clusterroles" {
+			t.Fatalf("cluster-scoped kind %q was searched", action.GetResource().Resource)
+		}
+	}
+}

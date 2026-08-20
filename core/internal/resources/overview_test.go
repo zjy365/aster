@@ -166,6 +166,33 @@ func TestServiceOverviewRequiresContext(t *testing.T) {
 	}
 }
 
+func TestServiceOverviewFlagsTruncatedCounts(t *testing.T) {
+	// Namespaces always carry a continue token so the page cap is hit: the
+	// dashboard must report truncated instead of pretending 10k is the count.
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), overviewListKinds())
+	var namespaceListCalls int
+	client.PrependReactor("list", "namespaces", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "NamespaceList"})
+		namespaceListCalls++
+		if namespaceListCalls < overviewMaxPages+1 {
+			list.SetContinue("next-page")
+		}
+		return true, list, nil
+	})
+
+	result, err := NewService(fakeProvider{client: client}).Overview(context.Background(), OverviewRequest{ContextID: "context"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated flag when a kind hits the page cap")
+	}
+	if namespaceListCalls != overviewMaxPages {
+		t.Fatalf("namespace list calls = %d, want %d", namespaceListCalls, overviewMaxPages)
+	}
+}
+
 // overviewListKinds registers a list kind for every resource the fake client
 // must LIST during an Overview call.
 func overviewListKinds() map[schema.GroupVersionResource]string {

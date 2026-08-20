@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -65,6 +66,10 @@ type Overview struct {
 	Services   int64            `json:"services"`
 	Resource   OverviewResource `json:"resource"`
 	Events     []OverviewEvent  `json:"events"`
+	// True when any count hit the per-kind page cap (overviewMaxPages): the
+	// dashboard is a snapshot, so a 100k-namespace cluster legitimately shows
+	// "10,000" with this flag instead of silently pretending to be exact.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // Overview snapshots the connected cluster for the dashboard: object counts
@@ -84,6 +89,7 @@ func (s *Service) Overview(ctx context.Context, request OverviewRequest) (Overvi
 	var namespaces, services int64
 	var cpuAllocatable, memoryAllocatable, cpuRequested, memoryRequested, cpuLimited, memoryLimited resource.Quantity
 	var events []OverviewEvent
+	var truncated atomic.Bool
 
 	// Each goroutine owns the variables it writes, so the shared result needs
 	// no lock; the buffered channel carries the first failing kind.
@@ -98,7 +104,7 @@ func (s *Service) Overview(ctx context.Context, request OverviewRequest) (Overvi
 	wg.Add(5)
 
 	go run(func() error {
-		return s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "nodes"}, overviewMaxPages, func(object *unstructured.Unstructured) error {
+		return s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "nodes"}, overviewMaxPages, &truncated, func(object *unstructured.Unstructured) error {
 			nodes.Total++
 			if project(object).Status == "Ready" {
 				nodes.Ready++
@@ -113,7 +119,7 @@ func (s *Service) Overview(ctx context.Context, request OverviewRequest) (Overvi
 	})
 
 	go run(func() error {
-		return s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "pods"}, overviewMaxPages, func(object *unstructured.Unstructured) error {
+		return s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "pods"}, overviewMaxPages, &truncated, func(object *unstructured.Unstructured) error {
 			pods.Total++
 			if project(object).Status == "Running" {
 				pods.Ready++
@@ -124,21 +130,23 @@ func (s *Service) Overview(ctx context.Context, request OverviewRequest) (Overvi
 	})
 
 	go run(func() error {
-		return s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}, overviewMaxPages, func(object *unstructured.Unstructured) error {
+		return s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}, overviewMaxPages, &truncated, func(object *unstructured.Unstructured) error {
 			namespaces++
 			return nil
 		})
 	})
 
 	go run(func() error {
-		return s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "services"}, overviewMaxPages, func(object *unstructured.Unstructured) error {
+		return s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "services"}, overviewMaxPages, &truncated, func(object *unstructured.Unstructured) error {
 			services++
 			return nil
 		})
 	})
 
 	go run(func() error {
-		if err := s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "events"}, 1, func(object *unstructured.Unstructured) error {
+		// Events are intentionally one page of "most recent"; a full event
+		// stream is not an inventory, so its cap is not a truncation.
+		if err := s.listOverviewResource(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "events"}, 1, nil, func(object *unstructured.Unstructured) error {
 			row := project(object)
 			events = append(events, OverviewEvent{
 				Namespace:     row.Namespace,
@@ -188,14 +196,16 @@ func (s *Service) Overview(ctx context.Context, request OverviewRequest) (Overvi
 				Allocatable: memoryAllocatable.Value(),
 			},
 		},
-		Events: events,
+		Events:    events,
+		Truncated: truncated.Load(),
 	}, nil
 }
 
 // listOverviewResource pages a cluster-scoped resource up to maxPages pages.
 // The kinds are core v1 resources, so their GVRs are hardcoded rather than
-// resolved through discovery.
-func (s *Service) listOverviewResource(ctx context.Context, client dynamic.Interface, gvr schema.GroupVersionResource, maxPages int, collect func(*unstructured.Unstructured) error) error {
+// resolved through discovery. When the caller passes a non-nil truncated flag,
+// it is set when the page cap cut the inventory short.
+func (s *Service) listOverviewResource(ctx context.Context, client dynamic.Interface, gvr schema.GroupVersionResource, maxPages int, truncated *atomic.Bool, collect func(*unstructured.Unstructured) error) error {
 	resource := client.Resource(gvr)
 	continueToken := ""
 	for page := 0; page < maxPages; page++ {
@@ -212,6 +222,9 @@ func (s *Service) listOverviewResource(ctx context.Context, client dynamic.Inter
 		if continueToken == "" {
 			return nil
 		}
+	}
+	if truncated != nil {
+		truncated.Store(true)
 	}
 	return nil
 }

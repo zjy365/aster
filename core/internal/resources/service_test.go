@@ -179,7 +179,7 @@ func TestServiceGetReturnsSanitizedYAML(t *testing.T) {
 func TestServiceValidation(t *testing.T) {
 	service := NewService(fakeProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
 	for _, request := range []ListRequest{
-		{ContextID: "context", GVR: GVR{Group: "apps", Version: "v1", Resource: "deployments"}, Limit: 501},
+		{ContextID: "context", GVR: GVR{Group: "apps", Version: "v1", Resource: "deployments"}, Limit: maxPageSize + 1},
 		{ContextID: "context", GVR: GVR{Version: "v1", Resource: "widgets"}},
 	} {
 		if _, err := service.List(context.Background(), request); err == nil {

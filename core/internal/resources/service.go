@@ -18,7 +18,10 @@ import (
 
 const (
 	defaultPageSize int64 = 100
-	maxPageSize     int64 = 500
+	// Large enough that a 200k-namespace inventory loads in ~40 pages instead
+	// of 400; pagination and continue tokens are still enforced. The overhead
+	// per page is a JSON marshal, which stays small for the projected rows.
+	maxPageSize int64 = 5000
 )
 
 type ClientProvider interface {

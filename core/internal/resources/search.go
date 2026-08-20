@@ -12,8 +12,11 @@ import (
 
 // Search queries the enabled resource kinds by name substring. It fans out
 // bounded list calls (page size 100 per kind) directly to the API server —
-// deliberately no informer and no cache. Cluster-scoped kinds are always
-// searched; namespaced kinds search the given namespace only.
+// deliberately no informer and no cache. Only namespaced kinds are searched,
+// and only within the given namespace: a cluster-scoped kind (nodes,
+// namespaces, PVs, storage classes, RBAC) has no bound short of the whole
+// cluster, so searching it would list tens of thousands of objects per query
+// in a 100k-namespace cluster for results the palette does not need.
 
 const searchPerKindLimit = 100
 const searchMaxResults = 50
@@ -40,7 +43,7 @@ func (s *Service) Search(ctx context.Context, request SearchRequest) (SearchResp
 		if definition.Resource == "events" || definition.Resource == "replicasets" {
 			continue
 		}
-		if definition.Namespaced && request.Namespace == "" {
+		if !definition.Namespaced || request.Namespace == "" {
 			continue
 		}
 		definition := definition

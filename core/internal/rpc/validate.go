@@ -28,7 +28,7 @@ const (
 	maxWatchResourceVersion = 1_024
 	maxWatchKind            = 128
 	maxPortForwardID        = 64
-	maxListLimit            = 500
+	maxListLimit            = 5000
 	maxTailLines            = 100_000
 	maxReplicas             = 1_000_000
 )
