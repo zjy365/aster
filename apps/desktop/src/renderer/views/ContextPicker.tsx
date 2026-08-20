@@ -361,7 +361,7 @@ function ContextPicker({
                     data-context-option
                     data-context-id={context.id}
                     data-selected={isSelected || undefined}
-                    data-current={context.current || undefined}
+                    data-current={isSelected || undefined}
                     data-testid={`context-option-${context.id}`}
                     onClick={() => onSelect(context.id)}
                     onDoubleClick={() => connect(context)}
@@ -375,7 +375,7 @@ function ContextPicker({
                       <span>{context.cluster || "Kubernetes cluster"}</span>
                       {context.error && <small>{context.error}</small>}
                     </span>
-                    {context.current && (
+                    {isSelected && (
                       <span className="current-context-badge">Current</span>
                     )}
                     <span className="context-selected-indicator" aria-hidden="true">

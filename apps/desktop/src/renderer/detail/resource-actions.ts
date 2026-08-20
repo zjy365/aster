@@ -17,6 +17,8 @@ export interface ResourceActionDescriptor {
   danger: boolean;
   /** Collects a value in a dialog before the dry-run instead of dispatching straight away. */
   needsInput: boolean;
+  /** Keyboard hint shown beside the action (Linear-style object shortcuts). */
+  shortcut?: string;
 }
 
 const ROLLABLE_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet"]);
@@ -29,6 +31,7 @@ const SCALE: ResourceActionDescriptor = {
   icon: Scale3d,
   danger: false,
   needsInput: true,
+  shortcut: "S",
 };
 
 const UPDATE_IMAGE: ResourceActionDescriptor = {
@@ -37,6 +40,7 @@ const UPDATE_IMAGE: ResourceActionDescriptor = {
   icon: Container,
   danger: false,
   needsInput: true,
+  shortcut: "I",
 };
 
 const RESTART: ResourceActionDescriptor = {
@@ -45,6 +49,7 @@ const RESTART: ResourceActionDescriptor = {
   icon: RotateCw,
   danger: false,
   needsInput: false,
+  shortcut: "R",
 };
 
 const DELETE: ResourceActionDescriptor = {
@@ -53,6 +58,7 @@ const DELETE: ResourceActionDescriptor = {
   icon: Trash2,
   danger: true,
   needsInput: false,
+  shortcut: "⌘⌫",
 };
 
 export function resourceActionsFor(kind: string): ResourceActionDescriptor[] {

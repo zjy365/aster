@@ -90,9 +90,9 @@ export function OverviewView({
 function StatCards({ overview, onNavigate }: { overview: OverviewData; onNavigate(kindId: string): void }) {
   const cards: StatCardConfig[] = [
     { kindId: "nodes", label: "Nodes", value: overview.nodes.total, ready: overview.nodes.ready, icon: Server, accent: "overview-icon-blue" },
-    { kindId: "pods", label: "Pods", value: overview.pods.total, ready: overview.pods.ready, icon: Boxes, accent: "overview-icon-green" },
+    { kindId: "pods", label: "Pods", value: overview.pods.total, ready: overview.pods.ready, icon: Boxes, accent: "overview-icon-blue" },
     { kindId: "namespaces", label: "Namespaces", value: overview.namespaces, icon: Folder, accent: "overview-icon-purple" },
-    { kindId: "services", label: "Services", value: overview.services, icon: Network, accent: "overview-icon-orange" },
+    { kindId: "services", label: "Services", value: overview.services, icon: Network, accent: "overview-icon-blue" },
   ];
 
   return (
@@ -174,14 +174,14 @@ function UsageCard({
         </span>
       </div>
       <div className="overview-usage-row">
-        <span className="overview-usage-caption text-[var(--focus)]">Requests</span>
+        <span className="overview-usage-caption">Requests</span>
         <span className="overview-bar">
           <span className={cn("overview-bar-fill", barTone(requested))} style={{ width: `${Math.min(requested, 100)}%` }} />
         </span>
         <span className="overview-usage-value tabular">{formatValue(usage.requested)}</span>
       </div>
       <div className="overview-usage-row">
-        <span className="overview-usage-caption text-[var(--warning)]">Limits</span>
+        <span className="overview-usage-caption">Limits</span>
         <span className="overview-bar">
           <span className={cn("overview-bar-fill", barTone(limited))} style={{ width: `${Math.min(limited, 100)}%` }} />
         </span>
@@ -252,7 +252,7 @@ function eventBadgeVariant(type?: string): "default" | "secondary" | "destructiv
     case "error":
       return "destructive";
     default:
-      return "default";
+      return "secondary";
   }
 }
 

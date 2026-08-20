@@ -28,13 +28,13 @@ export function WorkbenchShell({
       >
         {sidebar}
         <div className="workbench-main-column">
-          {toolbar}
-          <main
+          <div
             className={cn("main-workspace", mainClassName)}
             data-testid="main-workspace"
           >
-            {children}
-          </main>
+            {toolbar}
+            <div className="main-workspace-body">{children}</div>
+          </div>
         </div>
     </div>
   );

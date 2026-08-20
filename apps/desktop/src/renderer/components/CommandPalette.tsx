@@ -7,6 +7,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Kbd } from "@/components/ui/kbd";
 import {
   commandFilter,
   groupCommandItems,
@@ -20,6 +21,8 @@ export interface CommandPaletteProps {
   items: CommandItem[];
   onExecute(action: CommandAction): void;
   onQueryChange?(query: string): void;
+  /** Linear-style contextual mode: the object the palette operates on. */
+  context?: { kind: string; name: string };
 }
 
 /**
@@ -27,7 +30,7 @@ export interface CommandPaletteProps {
  * this component only renders the cmdk list inside the shared dialog shell
  * and reports the chosen action back to the composition root.
  */
-export function CommandPalette({ open, onOpenChange, items, onExecute, onQueryChange }: CommandPaletteProps) {
+export function CommandPalette({ open, onOpenChange, items, onExecute, onQueryChange, context }: CommandPaletteProps) {
   const groups = groupCommandItems(items);
 
   return (
@@ -48,6 +51,11 @@ export function CommandPalette({ open, onOpenChange, items, onExecute, onQueryCh
               data-testid="command-palette-input"
               onValueChange={onQueryChange}
             />
+            {context ? (
+              <span className="command-palette-context" data-testid="command-palette-context">
+                {context.kind} · {context.name}
+              </span>
+            ) : null}
           </div>
           <Command.List className="command-palette-list">
             <Command.Empty className="command-palette-empty">No matching commands.</Command.Empty>
@@ -71,7 +79,7 @@ export function CommandPalette({ open, onOpenChange, items, onExecute, onQueryCh
                     data-testid={`command-item-${item.id}`}
                   >
                     <span className="command-palette-item-label">{item.label}</span>
-                    {item.hint ? <span className="command-palette-item-hint">{item.hint}</span> : null}
+                    {item.hint ? <Kbd className="command-palette-item-hint">{item.hint}</Kbd> : null}
                     {item.current ? <Check aria-hidden="true" className="command-palette-item-check" /> : null}
                   </Command.Item>
                 ))}
@@ -79,9 +87,9 @@ export function CommandPalette({ open, onOpenChange, items, onExecute, onQueryCh
             ))}
           </Command.List>
           <div className="command-palette-footer" aria-hidden="true">
-            <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
-            <span><kbd>↵</kbd> Run</span>
-            <span><kbd>esc</kbd> Close</span>
+            <span><Kbd>↑</Kbd><Kbd>↓</Kbd> Navigate</span>
+            <span><Kbd>↵</Kbd> Run</span>
+            <span><Kbd>esc</Kbd> Close</span>
           </div>
         </Command>
       </DialogContent>

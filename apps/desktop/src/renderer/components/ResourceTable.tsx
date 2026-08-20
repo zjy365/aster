@@ -7,7 +7,7 @@ import { formatAge, formatReady } from "../lib/format";
 
 type Icon = ComponentType<LucideProps>;
 
-const ROW_HEIGHT = 40;
+const ROW_HEIGHT = 36;
 
 export function rowKey(row: ResourceRow): string {
   return row.uid || `${row.namespace}/${row.name}`;
@@ -193,6 +193,6 @@ export function StatusDot({ status }: { status?: string }) {
     ? "healthy"
     : /fail|error|crash|lost/.test(normalized)
       ? "failed"
-      : /pending|progress|terminat|unknown/.test(normalized) ? "warning" : "neutral";
+      : /pending|progress|terminat/.test(normalized) ? "warning" : "neutral";
   return <span className={`status-dot ${tone}`} aria-hidden="true" />;
 }

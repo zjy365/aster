@@ -117,7 +117,7 @@ export function LogViewer({ contextId, namespace, name, workload }: LogViewerPro
       allowProposedApi: true,
       convertEol: true,
       disableStdin: true,
-      fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+      fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace',
       fontSize: 12,
       lineHeight: 1.45,
       scrollback: TERMINAL_SCROLLBACK,

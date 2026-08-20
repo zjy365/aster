@@ -5,7 +5,7 @@ import type { ResourceRow } from "../../shared/types";
 import { formatAge, formatReady } from "../lib/format";
 import { StatusDot } from "../components/ResourceTable";
 
-const ROW_HEIGHT = 38;
+const ROW_HEIGHT = 36;
 
 export interface WorkloadPodsPanelProps {
   rows: ResourceRow[];

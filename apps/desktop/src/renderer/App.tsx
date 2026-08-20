@@ -27,7 +27,7 @@ import { useResourceDetail } from "./hooks/useResourceDetail";
 import { useResourceList } from "./hooks/useResourceList";
 import { useTheme } from "./hooks/useTheme";
 import { useUpdater } from "./hooks/useUpdater";
-import { buildCommandItems, searchResultItems, type CommandAction } from "./lib/command-palette";
+import { buildCommandItems, objectCommandItems, searchResultItems, type CommandAction } from "./lib/command-palette";
 import { messageOf, pluralize } from "./lib/format";
 import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
 import { Sidebar, type SidebarToolGroup } from "./shell/Sidebar";
@@ -298,6 +298,15 @@ export default function App() {
         event.preventDefault();
         if (!paletteOpen) searchRef.current?.focus();
       }
+      if (event.key === "F5") {
+        event.preventDefault();
+        if (contexts.view === "workbench") {
+          if (helmActive) helm.refresh();
+          else if (overviewActive) overview.refresh();
+          else resources.refresh();
+        }
+        return;
+      }
       if (event.key === "Escape") {
         if (paletteOpen) return;
         const active = document.activeElement;
@@ -310,19 +319,25 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detail, paletteOpen, contexts.view]);
+  }, [detail, paletteOpen, contexts.view, helmActive, helm, overviewActive, overview, resources]);
 
-  const paletteItems = useMemo(() => buildCommandItems({
-    coreReady: core.state === "ready",
-    contexts: contexts.contexts,
-    activeContextId: contextId,
-    resourceGroups,
-    activeKindId: kind.id,
-    namespaces: namespaces.namespaces,
-    namespacesTruncated: namespaces.truncated,
-    activeNamespace: namespaces.namespace,
-    theme,
-  }), [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.namespace, theme]);
+  const paletteItems = useMemo(() => {
+    const base = buildCommandItems({
+      coreReady: core.state === "ready",
+      contexts: contexts.contexts,
+      activeContextId: contextId,
+      resourceGroups,
+      activeKindId: kind.id,
+      namespaces: namespaces.namespaces,
+      namespacesTruncated: namespaces.truncated,
+      activeNamespace: namespaces.namespace,
+      theme,
+    });
+    // Linear-style contextual mode: while a row is selected, the palette leads
+    // with object-scoped commands under a "Selected object" group.
+    if (detail.selected) return [...objectCommandItems(detail.selected), ...base];
+    return base;
+  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.namespace, theme, detail.selected]);
 
   const executePaletteCommand = useCallback((action: CommandAction) => {
     switch (action.type) {
@@ -351,6 +366,19 @@ export default function App() {
       }
       case "open-resource":
         openResource(action);
+        return;
+      case "open-detail": {
+        // The palette already opened against a selected row; navigating back
+        // into its detail is a no-op refresh of the same selection. Keeping
+        // the row selected and closing the palette is the useful behavior.
+        if (detail.selected) detail.select(detail.selected);
+        return;
+      }
+      case "copy-name":
+        void navigator.clipboard.writeText(action.name);
+        return;
+      case "copy-namespace":
+        void navigator.clipboard.writeText(action.namespace);
         return;
     }
   }, [overview, overviewActive, helm, helmActive, resources, showContextPicker, connectContext, namespaces, setTheme, resourceGroups, selectKind, openResource]);
@@ -625,6 +653,7 @@ export default function App() {
         items={[...searchItems, ...paletteItems]}
         onExecute={executePaletteCommand}
         onQueryChange={setPaletteQuery}
+        context={detail.selected ? { kind: detail.selected.kind, name: detail.selected.name } : undefined}
       />
       {createOpen && (
         <Suspense fallback={null}>

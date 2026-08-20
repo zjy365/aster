@@ -5,8 +5,10 @@ import {
   buildCommandItems,
   commandFilter,
   groupCommandItems,
+  objectCommandItems,
   type CommandPaletteState,
 } from "./command-palette";
+import type { ResourceRow } from "../../shared/types";
 
 const contexts: ContextInfo[] = [
   { id: "prod", name: "prod-eu", cluster: "prod-cluster", server: "https://prod", user: "admin", namespace: "default", current: true },
@@ -114,6 +116,39 @@ describe("buildCommandItems", () => {
     expect(devboxes?.hint).toBe("devbox.sealos.io");
     expect(devboxes?.keywords).toContain("devbox.sealos.io");
     expect(byId.has("kind:crd:devbox.sealos.io/v1alpha1/off")).toBe(false);
+  });
+});
+
+describe("objectCommandItems", () => {
+  const row: ResourceRow = {
+    uid: "u1",
+    apiVersion: "apps/v1",
+    kind: "Deployment",
+    name: "api-gateway",
+    namespace: "default",
+    resourceVersion: "1",
+    createdAt: "2026-01-01T00:00:00Z",
+  };
+
+  it("builds a scoped object group with keyboard hints", () => {
+    const items = objectCommandItems(row);
+    expect(items.map((item) => item.group)).toEqual(["object", "object", "object", "object"]);
+    expect(items[0].label).toBe("Open in detail");
+    expect(items[0].action).toEqual({ type: "open-detail" });
+    expect(items[0].hint).toBe("↵");
+    expect(items[1].label).toBe("Copy name");
+    expect(items[1].action).toEqual({ type: "copy-name", name: "api-gateway" });
+    expect(items[1].hint).toBeUndefined();
+    expect(items[2].action).toEqual({ type: "copy-namespace", namespace: "default" });
+    expect(items[3].action).toEqual({ type: "refresh" });
+    expect(items[3].hint).toBe("F5");
+  });
+
+  it("appears as the leading group ahead of actions", () => {
+    const items = groupCommandItems([...objectCommandItems(row), ...buildCommandItems(makeState())]);
+    expect(items[0].id).toBe("object");
+    expect(items[0].items.length).toBe(4);
+    expect(items[1].id).toBe("actions");
   });
 });
 

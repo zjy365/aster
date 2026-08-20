@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { AppearanceTheme, ContextInfo, NamespaceInfo, RelatedResource } from "../../shared/types";
+import type { AppearanceTheme, ContextInfo, NamespaceInfo, RelatedResource, ResourceRow } from "../../shared/types";
 
-export type PaletteGroupId = "search" | "actions" | "contexts" | "resources" | "namespaces" | "appearance";
+export type PaletteGroupId = "search" | "actions" | "contexts" | "resources" | "namespaces" | "appearance" | "object";
 
 export type CommandAction =
   | { type: "refresh" }
@@ -10,7 +10,10 @@ export type CommandAction =
   | { type: "select-kind"; kindId: string }
   | { type: "select-namespace"; namespace: string }
   | { type: "set-theme"; theme: AppearanceTheme }
-  | { type: "open-resource"; group: string; version: string; resource: string; name: string; namespace?: string };
+  | { type: "open-resource"; group: string; version: string; resource: string; name: string; namespace?: string }
+  | { type: "open-detail" }
+  | { type: "copy-name"; name: string }
+  | { type: "copy-namespace"; namespace: string };
 
 export interface CommandItem {
   id: string;
@@ -67,12 +70,53 @@ const PALETTE_NAMESPACE_LIMIT = 100;
 
 const GROUP_ORDER: { id: PaletteGroupId; heading: string }[] = [
   { id: "search", heading: "Search results" },
+  { id: "object", heading: "Selected object" },
   { id: "actions", heading: "Actions" },
   { id: "contexts", heading: "Contexts" },
   { id: "resources", heading: "Resources" },
   { id: "namespaces", heading: "Namespaces" },
   { id: "appearance", heading: "Appearance" },
 ];
+
+/**
+ * Contextual commands for the selected resource (Linear-style object mode):
+ * a small, scoped set that operates on the object the palette opened against.
+ * Single-letter shortcuts are discoverable through the palette's kbd hints.
+ */
+export function objectCommandItems(row: ResourceRow): CommandItem[] {
+  return [
+    {
+      id: `object:open:${row.uid}`,
+      group: "object",
+      label: "Open in detail",
+      hint: "↵",
+      keywords: ["open", "detail", "view", "inspect", row.name, row.kind],
+      action: { type: "open-detail" },
+    },
+    {
+      id: `object:copy-name:${row.uid}`,
+      group: "object",
+      label: "Copy name",
+      keywords: ["copy", "name", "clipboard", row.name],
+      action: { type: "copy-name", name: row.name },
+    },
+    {
+      id: `object:copy-namespace:${row.uid}`,
+      group: "object",
+      label: "Copy namespace",
+      keywords: ["copy", "namespace", "clipboard", row.namespace],
+      action: { type: "copy-namespace", namespace: row.namespace },
+    },
+    {
+      id: `object:refresh:${row.uid}`,
+      group: "object",
+      label: "Refresh list",
+      hint: "F5",
+      keywords: ["refresh", "reload", "refetch"],
+      action: { type: "refresh" },
+    },
+  ];
+}
 
 /**
  * Yields every resource group with a hint built from its nesting path,

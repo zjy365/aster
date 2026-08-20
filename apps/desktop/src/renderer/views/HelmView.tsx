@@ -155,7 +155,7 @@ function ReleaseTable({
             type="button"
           >
             <span className="primary-cell">{release.name}</span>
-            <span className={`status-dot ${statusTone(release.status)}`}>{release.status}</span>
+            <span className="status-cell"><span className={`status-dot ${statusTone(release.status)}`} aria-hidden="true" />{release.status}</span>
             <span>{release.chart}</span>
             <span>{release.chartVersion}</span>
             <span>{release.appVersion}</span>
@@ -166,14 +166,6 @@ function ReleaseTable({
       </div>
     </div>
   );
-}
-
-function helmStatusTone(status: string): string {
-  const normalized = status.toLowerCase();
-  if (normalized === "deployed") return "status-dot healthy";
-  if (normalized === "failed" || normalized === "uninstalled" || normalized === "uninstalling") return "status-dot failed";
-  if (normalized === "superseded") return "status-dot neutral";
-  return "status-dot warning";
 }
 
 function ReleaseDetail({
@@ -211,7 +203,7 @@ function ReleaseDetail({
           </span>
           <div className="resource-detail-title-row">
             <h1>{detail.name}</h1>
-            <span className={`status-dot ${statusTone(detail.status)}`}>{detail.status}</span>
+            <span className="status-cell"><span className={`status-dot ${statusTone(detail.status)}`} aria-hidden="true" />{detail.status}</span>
           </div>
         </div>
         <div className="resource-summary">
@@ -295,7 +287,7 @@ function RevisionHistory({ history }: { history: HelmReleaseSummary[] }) {
           {revisions.map((item) => (
             <li key={item.version}>
               <span className="tabular">v{item.version}</span>
-              <span className={`status-dot ${statusTone(item.status)}`}>{item.status}</span>
+              <span className="status-cell"><span className={`status-dot ${statusTone(item.status)}`} aria-hidden="true" />{item.status}</span>
               <span>{item.description || "—"}</span>
               <span className="tabular">{item.updatedAt ? formatAge(item.updatedAt) : "—"}</span>
             </li>

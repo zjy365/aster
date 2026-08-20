@@ -113,6 +113,42 @@ export function ResourceDetailView({
     setOperationDialog(null);
   }, [row?.uid]);
 
+  // Object-scoped keyboard shortcuts (Linear-style single letters). They run
+  // while a detail is open and no modal or input owns the focus, and mirror
+  // the kbd hints shown on the header actions and More menu.
+  useEffect(() => {
+    if (!row) return;
+    const actions = new Set(resourceActionsFor(row.kind).map((action) => action.id));
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (operationDialog || mutationBusy) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+      // ⌘⌫ for delete (standard macOS destructive gesture).
+      if (event.metaKey && event.key === "Backspace") {
+        if (actions.has("delete")) {
+          event.preventDefault();
+          void onMutate({ operation: "delete" });
+        }
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "s" && actions.has("scale")) {
+        event.preventDefault();
+        openOperation("scale");
+      } else if (key === "i" && actions.has("image")) {
+        event.preventDefault();
+        openOperation("image");
+      } else if (key === "r" && actions.has("restart")) {
+        event.preventDefault();
+        void onMutate({ operation: "restart" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row, operationDialog, mutationBusy, onMutate]);
+
   // Workload facts parsed from the live YAML the core already shipped; powers
   // the conditions/strategy/selector rows, annotations, and the pods list.
   const workload = Boolean(row && isWorkloadLogKind(row.kind));
@@ -217,7 +253,6 @@ export function ResourceDetailView({
         mutationBusy={mutationBusy}
         statusMessage={mutationMessage}
         onAction={runAction}
-        onBack={onBack}
       />
 
       <Tabs
@@ -232,6 +267,7 @@ export function ResourceDetailView({
               Pods{podCount ? ` (${podCount}${pods.list.continueToken ? "+" : ""})` : ""}
             </TabsTrigger>
           )}
+          {showLogs && <TabsTrigger value="logs">Logs</TabsTrigger>}
           <TabsTrigger value="yaml">YAML</TabsTrigger>
           <TabsTrigger value="events">
             Events{events.length ? ` (${events.length})` : ""}
@@ -239,7 +275,6 @@ export function ResourceDetailView({
           <TabsTrigger value="related">
             Related{related.length ? ` (${related.length})` : ""}
           </TabsTrigger>
-          {showLogs && <TabsTrigger value="logs">Logs</TabsTrigger>}
         </TabsList>
 
         <div className="resource-detail-scroll">

@@ -1,7 +1,8 @@
-import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, MoreHorizontal } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock3, MoreHorizontal } from "lucide-react";
 
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Kbd } from "../components/ui/kbd";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,13 +21,13 @@ export interface DetailHeaderProps {
   /** Live write feedback; falls back to the standing dry-run promise. */
   statusMessage: string;
   onAction(id: ResourceActionId): void;
-  onBack(): void;
 }
 
 /**
- * The 72px identity header owns every object-scoped action. Actions sit beside
+ * The identity header owns every object-scoped action. Actions sit beside
  * the name and namespace they operate on, stay reachable from every tab, and
  * never scroll out of view — mutation feedback appears directly beneath them.
+ * Back navigation lives in the unified toolbar, not here.
  */
 export function DetailHeader({
   row,
@@ -35,7 +36,6 @@ export function DetailHeader({
   mutationBusy,
   statusMessage,
   onAction,
-  onBack,
 }: DetailHeaderProps) {
   const safeActions = actions.filter((action) => !action.danger);
   const dangerActions = actions.filter((action) => action.danger);
@@ -46,16 +46,6 @@ export function DetailHeader({
   return (
     <div className="resource-detail-headline">
       <header className="resource-detail-header">
-        <Button
-          aria-label="Back to resource list"
-          data-testid="resource-detail-back"
-          size="icon"
-          variant="ghost"
-          onClick={onBack}
-        >
-          <ArrowLeft />
-        </Button>
-
         {KindIcon && (
           <span className="resource-detail-kind-icon" aria-hidden="true">
             <KindIcon size={15} />
@@ -89,6 +79,7 @@ export function DetailHeader({
                   >
                     <action.icon data-icon="inline-start" />
                     {action.label}
+                    {action.shortcut ? <Kbd>{action.shortcut}</Kbd> : null}
                   </Button>
                 ))}
               </div>
@@ -117,6 +108,7 @@ export function DetailHeader({
                         key={action.id}
                         data-testid={`resource-action-menu-${action.id}`}
                         onClick={() => onAction(action.id)}
+                        shortcut={action.shortcut}
                       >
                         <action.icon aria-hidden="true" />
                         {action.label}
@@ -141,6 +133,7 @@ export function DetailHeader({
             >
               <action.icon data-icon="inline-start" />
               {action.label}
+              {action.shortcut ? <Kbd>{action.shortcut}</Kbd> : null}
             </Button>
           ))}
         </div>

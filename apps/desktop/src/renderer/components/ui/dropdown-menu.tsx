@@ -5,6 +5,7 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { Check, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { Kbd } from "@/components/ui/kbd"
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
@@ -77,10 +78,14 @@ function DropdownMenuItem({
   className,
   inset,
   variant = "default",
+  shortcut,
+  children,
   ...props
 }: MenuPrimitive.Item.Props & {
   inset?: boolean
   variant?: "default" | "destructive"
+  /** Keyboard hint rendered as a mono chip at the trailing edge. */
+  shortcut?: string
 }) {
   return (
     <MenuPrimitive.Item
@@ -92,7 +97,12 @@ function DropdownMenuItem({
         className
       )}
       {...props}
-    />
+    >
+      {children}
+      {shortcut ? (
+        <Kbd className="ml-auto pointer-events-none">{shortcut}</Kbd>
+      ) : null}
+    </MenuPrimitive.Item>
   )
 }
 
