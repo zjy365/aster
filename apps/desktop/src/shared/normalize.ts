@@ -28,6 +28,7 @@ export interface CoreOverview {
   services: number;
   resource: OverviewResource;
   events: CoreOverviewEvent[];
+  truncated?: boolean;
 }
 
 export interface CoreOverviewEvent {

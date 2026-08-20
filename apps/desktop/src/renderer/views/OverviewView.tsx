@@ -55,7 +55,10 @@ export function OverviewView({
       <div className="pane-heading">
         <div>
           <h1>Overview</h1>
-          <p>{contextName ? `${contextName} · Cluster summary` : "Cluster summary"}</p>
+          <p>
+            {contextName ? `${contextName} · Cluster summary` : "Cluster summary"}
+            {overview?.truncated ? " · counts capped at 10,000 (large cluster)" : ""}
+          </p>
         </div>
         <div className="resource-summary">
           <button className="load-more" data-testid="overview-refresh" disabled={loading} onClick={onRefresh} type="button">
@@ -75,7 +78,7 @@ export function OverviewView({
         ) : (
           <>
             <StatCards overview={overview} onNavigate={onNavigate} />
-            <ResourceUsage resource={overview.resource} />
+            <ResourceUsage resource={overview.resource} truncated={overview.truncated} />
             <RecentEvents events={overview.events} />
           </>
         )}
@@ -137,11 +140,16 @@ function StatCards({ overview, onNavigate }: { overview: OverviewData; onNavigat
   );
 }
 
-function ResourceUsage({ resource }: { resource: OverviewData["resource"] }) {
+function ResourceUsage({ resource, truncated }: { resource: OverviewData["resource"]; truncated?: boolean }) {
   return (
     <div className="overview-usage-grid">
       <UsageCard title="CPU" usage={resource.cpu} formatValue={formatCores} />
       <UsageCard title="Memory" usage={resource.memory} formatValue={formatBytes} />
+      {truncated ? (
+        <p className="overview-usage-note">
+          Capacity and requests are aggregated from the first 10,000 pods — values are approximate in this cluster.
+        </p>
+      ) : null}
     </div>
   );
 }

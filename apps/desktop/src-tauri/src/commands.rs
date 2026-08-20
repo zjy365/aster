@@ -46,16 +46,29 @@ pub async fn sources_report(state: State<'_, AppState>) -> Result<Value, String>
 
 #[tauri::command]
 pub async fn namespaces_list(state: State<'_, AppState>, context_id: String) -> Result<Value, String> {
-    // Follow continueToken until the list is complete: clusters can have far
-    // more than one page (500) of namespaces, and the picker must see them all.
+    // Pull the full inventory with large pages so a 200k-namespace cluster
+    // loads in ~40 requests instead of ~400. The namespace picker and the
+    // command palette keep the full ordered array and filter it locally by
+    // prefix (see namespace-search.ts), so an exhaustive list is the point —
+    // it is loaded once on first use and never during connect. A failed page
+    // degrades to whatever was already collected with truncated set.
+    const MAX_PAGES: usize = 40;
+    const PAGE_LIMIT: i64 = 5000;
     let mut namespaces: Vec<Value> = Vec::new();
     let mut continue_token = String::new();
-    for _ in 0..40 {
-        let mut query = format!("contextId={}&limit=500", url_encode(&context_id));
+    let mut truncated = false;
+    for _ in 0..MAX_PAGES {
+        let mut query = format!("contextId={}&limit={}", url_encode(&context_id), PAGE_LIMIT);
         if !continue_token.is_empty() {
             query.push_str(&format!("&continueToken={}", url_encode(&continue_token)));
         }
-        let value = state.core.get(&format!("/v1/namespaces?{query}")).await?;
+        let value = match state.core.get(&format!("/v1/namespaces?{query}")).await {
+            Ok(value) => value,
+            Err(_) => {
+                truncated = true;
+                break;
+            }
+        };
         if let Some(items) = value.get("items").and_then(Value::as_array) {
             for item in items {
                 let mut entry = json!({ "name": item.get("name").cloned().unwrap_or(Value::Null) });
@@ -67,10 +80,13 @@ pub async fn namespaces_list(state: State<'_, AppState>, context_id: String) -> 
         }
         match value.get("continueToken").and_then(Value::as_str) {
             Some(token) if !token.is_empty() => continue_token = token.to_string(),
-            _ => return Ok(Value::Array(namespaces)),
+            _ => break,
         }
     }
-    Ok(Value::Array(namespaces))
+    Ok(json!({
+        "namespaces": namespaces,
+        "truncated": truncated || !continue_token.is_empty(),
+    }))
 }
 
 #[tauri::command]

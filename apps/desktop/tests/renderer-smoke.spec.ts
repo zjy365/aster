@@ -160,10 +160,13 @@ const MOCK_DESKTOP_API = `
     },
     discovery: { list: async () => discovery },
     namespaces: {
-      list: async () => [
-        { name: "default", status: "Active" },
-        { name: "kube-system", status: "Active" },
-      ],
+      list: async () => ({
+        namespaces: [
+          { name: "default", status: "Active" },
+          { name: "kube-system", status: "Active" },
+        ],
+        truncated: false,
+      }),
     },
     metrics: { pods: async () => [] },
     overview: {

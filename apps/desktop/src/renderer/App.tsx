@@ -181,6 +181,13 @@ export default function App() {
 
   const [searchResults, setSearchResults] = useState<RelatedResource[]>([]);
 
+  // The namespace list is lazy (see useNamespaces): open the palette to load
+  // it once, so ⌘K namespace commands are available in a 100k+ namespace
+  // cluster without paying the full inventory fetch at connect time.
+  useEffect(() => {
+    if (paletteOpen) namespaces.load();
+  }, [paletteOpen, namespaces]);
+
   // Selecting a resource kind always leaves the overview and the Helm pane;
   // the kind switches only when it differs, otherwise the row selection resets.
   const selectKind = useCallback((next: ResourceKind) => {
@@ -230,10 +237,10 @@ export default function App() {
 
   useEffect(() => {
     const query = paletteQuery.trim();
-    if (!paletteOpen || query.length < 2 || !contextId) {
-      setSearchResults([]);
-      return;
-    }
+    // Only run the server search once a real query is present; a shorter
+    // query must not clear results that a prior debounced request is still
+    // owed, so the empty branch never touches searchResults.
+    if (!paletteOpen || query.length < 2 || !contextId) return;
     let active = true;
     const timer = setTimeout(() => {
       desktop.resources.search({
@@ -249,6 +256,11 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [paletteQuery, paletteOpen, contextId, namespaces.namespace, contexts.activeContext]);
+
+  // A stale result set is cleared when the palette closes or the query resets.
+  useEffect(() => {
+    if (!paletteOpen) setSearchResults([]);
+  }, [paletteOpen]);
 
   const connectContext = useCallback((targetId?: string) => {
     const target = targetId ? contexts.contexts.find((item) => item.id === targetId) : contexts.chosenContext;
@@ -307,6 +319,7 @@ export default function App() {
     resourceGroups,
     activeKindId: kind.id,
     namespaces: namespaces.namespaces,
+    namespacesTruncated: namespaces.truncated,
     activeNamespace: namespaces.namespace,
     theme,
   }), [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.namespace, theme]);
@@ -338,6 +351,7 @@ export default function App() {
       }
       case "open-resource":
         openResource(action);
+        return;
     }
   }, [overview, overviewActive, helm, helmActive, resources, showContextPicker, connectContext, namespaces, setTheme, resourceGroups, selectKind, openResource]);
 
@@ -447,9 +461,11 @@ export default function App() {
       toolbar={(
         <UnifiedToolbar
           namespaces={namespaces.namespaces}
+          namespacesTruncated={namespaces.truncated}
           namespace={namespaces.namespace}
+          onNamespaceOpen={namespaces.load}
           onNamespaceChange={namespaces.setNamespace}
-          namespaceDisabled={overviewActive || (!helmActive && !kind.namespaced) || !namespaces.namespaces.length}
+          namespaceDisabled={overviewActive || (!helmActive && !kind.namespaced)}
           query={helmActive || overviewActive ? "" : resources.query}
           onQueryChange={helmActive || overviewActive ? () => undefined : resources.setQuery}
           queryInputRef={searchRef}
@@ -503,7 +519,9 @@ export default function App() {
             <div className="pane-heading">
               <div>
                 <h1>{pluralize(kind.kind)}</h1>
-                <p>{kind.category} · {contexts.activeContext?.name || "Kubernetes"}</p>
+                <p>{kind.category} · {contexts.activeContext?.name || "Kubernetes"}
+                  {resources.snapshotOnly ? " · All namespaces (snapshot, refresh to update)" : ""}
+                </p>
               </div>
               <div className="resource-summary">
                 {checkedRows.length > 0 && (

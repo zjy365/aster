@@ -12,6 +12,7 @@ import type {
   HelmRollbackRequest,
   HelmUninstallRequest,
   LogStreamBatch,
+  NamespaceInfo,
   Overview,
   PodLogsRequest,
   ResourceGetRequest,
@@ -117,7 +118,13 @@ export function createTauriDesktopApi(): DesktopApi {
       list: async (contextId) => discoveredResourceList(await invoke("discovery_list", { contextId })),
     },
     namespaces: {
-      list: (contextId) => invoke("namespaces_list", { contextId }),
+      list: async (contextId) => {
+        const value = await invoke<{ namespaces: NamespaceInfo[]; truncated?: boolean }>("namespaces_list", { contextId });
+        return {
+          namespaces: value.namespaces || [],
+          truncated: Boolean(value.truncated),
+        };
+      },
     },
     metrics: {
       pods: async (contextId, namespace) => podMetricList(await invoke("metrics_pods", { request: { contextId, namespace } })),
@@ -132,6 +139,7 @@ export function createTauriDesktopApi(): DesktopApi {
           services: value.services,
           resource: value.resource,
           events: (value.events || []).map((event) => ({ ...event, namespace: event.namespace || "" })),
+          ...(value.truncated ? { truncated: true } : {}),
         };
       },
     },

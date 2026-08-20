@@ -34,11 +34,16 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { NamespaceInfo } from "../../shared/types";
+import { searchNamespaces } from "../lib/namespace-search";
 
 export type AppearanceTheme = "system" | "light" | "dark";
 
 export interface UnifiedToolbarProps {
   namespaces: NamespaceInfo[];
+  /** True when the core capped the namespace list; the picker footer says so. */
+  namespacesTruncated?: boolean;
+  /** Called when the namespace picker opens; the list loads lazily on first use. */
+  onNamespaceOpen?(): void;
   namespace: string;
   onNamespaceChange(namespace: string): void;
   namespaceDisabled?: boolean;
@@ -69,6 +74,8 @@ interface NamespaceItem {
 
 export function UnifiedToolbar({
   namespaces,
+  namespacesTruncated = false,
+  onNamespaceOpen,
   namespace,
   onNamespaceChange,
   namespaceDisabled = false,
@@ -96,9 +103,16 @@ export function UnifiedToolbar({
   ], [namespaces]);
   const selectedNamespace = namespaceItems.find((item) => item.value === (namespace || null)) ?? null;
   const [namespaceQuery, setNamespaceQuery] = useState("");
-  const namespaceMatches = namespaceQuery.trim()
-    ? namespaceItems.filter((item) => item.label.toLowerCase().includes(namespaceQuery.trim().toLowerCase())).length
-    : namespaceItems.length;
+  // Progressive narrowing: a short prefix on a huge cluster matches tens of
+  // thousands of names — rendering 100 of them is noise. The hint shows the
+  // exact match count instead, and concrete rows appear as the user types.
+  const namespaceSearch = useMemo(() => {
+    const names = namespaces.map((item) => item.name);
+    return searchNamespaces(names, namespaceQuery);
+  }, [namespaces, namespaceQuery]);
+  const namespaceFooter = namespaceSearch.narrowed
+    ? `${namespaceSearch.total.toLocaleString()} namespaces match — keep typing to narrow`
+    : null;
 
   return (
     <header
@@ -135,6 +149,7 @@ export function UnifiedToolbar({
           limit={NAMESPACE_MATCH_LIMIT}
           onInputValueChange={(inputValue) => setNamespaceQuery(inputValue)}
           onOpenChange={(open) => {
+            if (open) onNamespaceOpen?.();
             if (!open) setNamespaceQuery("");
           }}
           onValueChange={(item) => onNamespaceChange(item?.value ?? "")}
@@ -163,24 +178,19 @@ export function UnifiedToolbar({
                   No matching namespaces
                 </Combobox.Empty>
                 <Combobox.List className="namespace-combobox-list">
-                  {(item: NamespaceItem) => (
-                    <Combobox.Item
-                      key={item.value ?? ALL_NAMESPACES_VALUE}
-                      value={item}
-                      className="namespace-combobox-item"
-                    >
-                      <span className="namespace-combobox-check">
-                        <Combobox.ItemIndicator>
-                          <Check aria-hidden="true" />
-                        </Combobox.ItemIndicator>
-                      </span>
-                      <span className="min-w-0 truncate">{item.label}</span>
-                    </Combobox.Item>
-                  )}
+                  {(item: NamespaceItem) => {
+                    if (item.value === null) return renderNamespaceItem(item, ALL_NAMESPACES_VALUE);
+                    // Only rows that survive the prefix search are rendered;
+                    // the narrowed hint below covers the rest.
+                    if (!namespaceSearch.shown.includes(item.label)) return null;
+                    return renderNamespaceItem(item, item.value as string);
+                  }}
                 </Combobox.List>
-                {namespaceMatches > NAMESPACE_MATCH_LIMIT ? (
+                {namespaceSearch.narrowed ? (
+                  <div className="namespace-combobox-footer">{namespaceFooter}</div>
+                ) : namespacesTruncated ? (
                   <div className="namespace-combobox-footer">
-                    Showing {NAMESPACE_MATCH_LIMIT} of {namespaceMatches.toLocaleString()} — keep typing to narrow
+                    First {namespaces.length.toLocaleString()} namespaces — type to narrow (large cluster)
                   </div>
                 ) : null}
               </Combobox.Popup>
@@ -258,6 +268,23 @@ export function UnifiedToolbar({
         )}
       </div>
     </header>
+  );
+}
+
+function renderNamespaceItem(item: NamespaceItem, key: string) {
+  return (
+    <Combobox.Item
+      key={key}
+      value={item}
+      className="namespace-combobox-item"
+    >
+      <span className="namespace-combobox-check">
+        <Combobox.ItemIndicator>
+          <Check aria-hidden="true" />
+        </Combobox.ItemIndicator>
+      </span>
+      <span className="min-w-0 truncate">{item.label}</span>
+    </Combobox.Item>
   );
 }
 

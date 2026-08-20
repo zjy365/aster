@@ -1,17 +1,24 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextInfo, NamespaceInfo } from "../../shared/types";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
 export interface NamespacesState {
   namespaces: NamespaceInfo[];
+  /** True when the core capped the namespace list; pickers should say so. */
+  truncated: boolean;
   namespace: string;
   setNamespace(namespace: string): void;
+  /** Lazily fetches the namespace list on first use (pickers, ⌘K). */
+  load(): void;
 }
 
 /**
- * Loads namespaces for the connected context and applies the context's
- * default namespace. Empties out when no context is connected.
+ * Applies the context's default namespace on connect and lazily loads the
+ * namespace list. In a 100k+ namespace cluster the list can take seconds and
+ * tens of pages to fetch, so it is never loaded eagerly at connect time —
+ * only when the top picker or the command palette first needs it, once.
+ * Failures surface through onError and allow a retry on the next open.
  */
 export function useNamespaces(
   contextId: string,
@@ -19,25 +26,40 @@ export function useNamespaces(
   onError: (message: string) => void,
 ): NamespacesState {
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([]);
+  const [truncated, setTruncated] = useState(false);
   const [namespace, setNamespace] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const loadingRef = useRef(false);
 
   useEffect(() => {
     if (!contextId) {
       setNamespaces([]);
+      setTruncated(false);
       setNamespace("");
+      setLoaded(false);
       return;
     }
-    let active = true;
-    void desktop.namespaces.list(contextId).then((items) => {
-      if (!active) return;
-      setNamespaces(items);
-      const context = contexts.find((item) => item.id === contextId);
-      setNamespace(context?.namespace || "");
-    }).catch((cause) => {
-      if (active) onError(messageOf(cause));
-    });
-    return () => { active = false; };
-  }, [contextId, contexts, onError]);
+    // The context's default namespace is known without the list.
+    const context = contexts.find((item) => item.id === contextId);
+    setNamespace(context?.namespace || "");
+  }, [contextId, contexts]);
 
-  return { namespaces, namespace, setNamespace };
+  const load = useCallback(() => {
+    if (!contextId || loaded || loadingRef.current) return;
+    loadingRef.current = true;
+    desktop.namespaces.list(contextId)
+      .then((result) => {
+        setNamespaces(result.namespaces);
+        setTruncated(result.truncated);
+        setLoaded(true);
+      })
+      .catch((cause) => {
+        // Keep loadingRef false so the next open retries; the picker stays on
+        // "All namespaces" rather than showing a broken partial list.
+        loadingRef.current = false;
+        onError(messageOf(cause));
+      });
+  }, [contextId, loaded, onError]);
+
+  return { namespaces, truncated, namespace, setNamespace, load };
 }

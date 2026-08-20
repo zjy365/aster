@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ResourceKind, ResourceListResponse, ResourceRow, ResourceWatchBatch } from "../../shared/types";
 import { applyResourceWatchBatches } from "../lib/resource-watch";
+import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
 export interface ResourceListOptions {
@@ -22,11 +23,23 @@ export interface ResourceListState {
   query: string;
   setQuery(query: string): void;
   visibleRows: ResourceRow[];
+  /** True when the list is a bounded snapshot rather than a live watch stream. */
+  snapshotOnly: boolean;
   /** Bumps on every explicit refresh; detail view uses it to close stale selections. */
   generation: number;
   refresh(): void;
   loadMore(): Promise<void>;
   reset(): void;
+}
+
+/**
+ * A cluster-wide list (namespace unset on a namespaced kind) is never watched.
+ * Watching it would open one cluster-scoped watch stream whose per-object
+ * deltas flood the IPC channel and the API server in a 100k-namespace cluster,
+ * so the table gets the first snapshot page and manual refresh only.
+ */
+function watchEnabled(kind: ResourceKind, namespace: string, enabled: boolean): boolean {
+  return enabled && (kind.namespaced ? namespace !== "" : true);
 }
 
 /**
@@ -45,6 +58,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
   const watchQueue = useRef<ResourceWatchBatch[]>([]);
   const watchHasSnapshot = useRef(false);
   const watchFlushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const liveWatch = watchEnabled(kind, namespace, enabled);
 
   const loadMore = useCallback(async () => {
     if (!contextId || !coreReady || !enabled || !list.continueToken) return;
@@ -81,6 +95,27 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     watchQueue.current = [];
     watchHasSnapshot.current = false;
 
+    // Cluster-wide namespaced lists are snapshot-only (see watchEnabled): the
+    // initial page is fetched, watch never starts, and refresh re-fetches.
+    if (!liveWatch) {
+      let active = true;
+      desktop.resources.list({
+        contextId,
+        resourceKind: kind,
+        ...(kind.namespaced && namespace ? { namespace } : {}),
+        ...(labelSelector ? { labelSelector } : {}),
+        limit: 100,
+      }).then((response) => {
+        if (!active || !listRequest.current) return;
+        setList(response);
+      }).catch((cause) => {
+        if (active) setError(messageOf(cause));
+      }).finally(() => {
+        if (active) setLoading(false);
+      });
+      return () => { active = false; };
+    }
+
     const stop = desktop.resources.watch({
       contextId,
       resourceKind: kind,
@@ -113,7 +148,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
         watchFlushTimer.current = undefined;
       }
     };
-  }, [contextId, namespace, kind, coreReady, enabled, labelSelector, generation, setError]);
+  }, [contextId, namespace, kind, coreReady, enabled, labelSelector, generation, setError, liveWatch]);
 
   const visibleRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -135,6 +170,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     query,
     setQuery,
     visibleRows,
+    snapshotOnly: !liveWatch,
     generation,
     refresh,
     loadMore,

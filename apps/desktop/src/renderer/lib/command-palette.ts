@@ -50,9 +50,20 @@ export interface CommandPaletteState {
   resourceGroups: PaletteResourceGroup[];
   activeKindId: string;
   namespaces: NamespaceInfo[];
+  /** True when the core capped the namespace list at the load cap. */
+  namespacesTruncated: boolean;
   activeNamespace: string;
   theme: AppearanceTheme;
 }
+
+/**
+ * Namespace commands are capped so a 100k-namespace cluster never mounts a
+ * command per namespace in the palette DOM. In a truncated list the concrete
+ * rows are dropped entirely: a prefix over tens of thousands of names is
+ * noise, and the palette degrades to "All namespaces" plus a pointer to the
+ * top picker, which does progressive prefix search.
+ */
+const PALETTE_NAMESPACE_LIMIT = 100;
 
 const GROUP_ORDER: { id: PaletteGroupId; heading: string }[] = [
   { id: "search", heading: "Search results" },
@@ -142,7 +153,23 @@ export function buildCommandItems(state: CommandPaletteState): CommandItem[] {
     current: state.activeNamespace === "",
     action: { type: "select-namespace", namespace: "" },
   });
-  for (const namespace of state.namespaces) {
+
+  // Truncated (100k+ namespace cluster): the concrete list is noise — a short
+  // prefix matches tens of thousands of names. Show only a pointer to the top
+  // picker, which runs progressive prefix search over the full array.
+  if (state.namespacesTruncated) {
+    items.push({
+      id: "namespace:more",
+      group: "namespaces",
+      label: `${state.namespaces.length.toLocaleString()}+ namespaces — type the prefix in the top picker`,
+      keywords: ["namespace", "more", "narrow", "prefix"],
+      disabled: true,
+      action: { type: "select-namespace", namespace: "" },
+    });
+    return items;
+  }
+
+  for (const namespace of state.namespaces.slice(0, PALETTE_NAMESPACE_LIMIT)) {
     items.push({
       id: `namespace:${namespace.name}`,
       group: "namespaces",
@@ -150,6 +177,16 @@ export function buildCommandItems(state: CommandPaletteState): CommandItem[] {
       keywords: ["namespace", namespace.name],
       current: namespace.name === state.activeNamespace,
       action: { type: "select-namespace", namespace: namespace.name },
+    });
+  }
+  if (state.namespaces.length > PALETTE_NAMESPACE_LIMIT) {
+    items.push({
+      id: "namespace:more",
+      group: "namespaces",
+      label: `First ${PALETTE_NAMESPACE_LIMIT} of ${state.namespaces.length.toLocaleString()} loaded — use the top picker to narrow`,
+      keywords: ["namespace", "more", "narrow"],
+      disabled: true,
+      action: { type: "select-namespace", namespace: "" },
     });
   }
 

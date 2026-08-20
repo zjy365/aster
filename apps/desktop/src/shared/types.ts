@@ -62,6 +62,17 @@ export interface NamespaceInfo {
   message?: string;
 }
 
+/**
+ * A hard cap keeps a 100k-namespace cluster from streaming its whole
+ * inventory into the renderer. `truncated` is explicit so pickers can
+ * degrade honestly (type-to-filter) instead of showing a partial list
+ * as if it were complete.
+ */
+export interface NamespaceListResult {
+  namespaces: NamespaceInfo[];
+  truncated: boolean;
+}
+
 export interface ResourceKind {
   id: string;
   group: string;
@@ -363,7 +374,9 @@ export interface OverviewEvent {
 /**
  * Cluster-wide dashboard snapshot computed by the core: counts are paged to
  * a bounded maximum, resource usage aggregates node allocatable capacity
- * versus pod requests/limits, and events are the newest twenty.
+ * versus pod requests/limits, and events are the newest twenty. `truncated`
+ * is set when any count hit the page cap, so a 100k-namespace cluster shows
+ * the bound honestly instead of a silent undercount.
  */
 export interface Overview {
   nodes: OverviewCount;
@@ -372,6 +385,7 @@ export interface Overview {
   services: number;
   resource: OverviewResource;
   events: OverviewEvent[];
+  truncated?: boolean;
 }
 
 export type UpdaterState =
@@ -435,7 +449,7 @@ export interface DesktopApi {
     list(contextId: string): Promise<DiscoveredResource[]>;
   };
   namespaces: {
-    list(contextId: string): Promise<NamespaceInfo[]>;
+    list(contextId: string): Promise<NamespaceListResult>;
   };
   metrics: {
     pods(contextId: string, namespace?: string): Promise<PodMetric[]>;

@@ -33,6 +33,7 @@ function makeState(overrides: Partial<CommandPaletteState> = {}): CommandPalette
     ],
     activeKindId: "deployments",
     namespaces,
+    namespacesTruncated: false,
     activeNamespace: "default",
     theme: "system",
     ...overrides,
@@ -66,6 +67,28 @@ describe("buildCommandItems", () => {
     expect(byId.has("kind:off")).toBe(false);
   });
 
+  it("caps namespace commands and flags the remainder as a disabled hint", () => {
+    const many = Array.from({ length: 150 }, (_, index) => ({ name: `ns-${index}` }));
+    const items = buildCommandItems(makeState({ namespaces: many }));
+    const namespaceItems = items.filter((item) => item.group === "namespaces");
+    // "All namespaces" + 100 capped + 1 hint.
+    expect(namespaceItems).toHaveLength(102);
+    const hint = namespaceItems.find((item) => item.id === "namespace:more");
+    expect(hint?.disabled).toBe(true);
+    expect(hint?.label).toContain("150 loaded");
+    expect(namespaceItems.some((item) => item.id === "namespace:ns-149")).toBe(false);
+  });
+
+  it("drops concrete namespace rows entirely when the list is truncated", () => {
+    const many = Array.from({ length: 200_000 }, (_, index) => ({ name: `ns-${index}` }));
+    const items = buildCommandItems(makeState({ namespaces: many, namespacesTruncated: true }));
+    const namespaceItems = items.filter((item) => item.group === "namespaces");
+    // Only "All namespaces" + the disabled pointer; zero concrete rows.
+    expect(namespaceItems.map((item) => item.id)).toEqual(["namespace:all", "namespace:more"]);
+    expect(namespaceItems[1].disabled).toBe(true);
+    expect(namespaceItems[1].label).toContain("200,000+ namespaces");
+  });
+
   it("lists nested subgroup items with their own label as hint", () => {
     const items = buildCommandItems(makeState({
       resourceGroups: [
@@ -94,8 +117,7 @@ describe("buildCommandItems", () => {
   });
 });
 
-describe("groupCommandItems", () => {
-  it("keeps the fixed group order and omits empty groups", () => {
+describe("groupCommandItems", () => {  it("keeps the fixed group order and omits empty groups", () => {
     const items = buildCommandItems(makeState({ namespaces: [] }));
     const groups = groupCommandItems(items);
 
