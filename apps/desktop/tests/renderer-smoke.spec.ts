@@ -124,7 +124,7 @@ const MOCK_DESKTOP_API = `
   window.__ASTER_DESKTOP__ = {
     platform: "darwin",
     app: {
-      version: async () => "0.1.0",
+      version: async () => "1.0.0",
       onCommand: () => () => undefined,
       openExternal: async (url) => {
         window.__asterOpenedUrls = window.__asterOpenedUrls || [];
@@ -132,7 +132,7 @@ const MOCK_DESKTOP_API = `
       },
     },
     updater: {
-      state: async () => ({ state: "disabled", currentVersion: "0.1.0" }),
+      state: async () => ({ state: "disabled", currentVersion: "1.0.0" }),
       check: async () => undefined,
       download: async () => undefined,
       install: async () => undefined,
@@ -141,7 +141,7 @@ const MOCK_DESKTOP_API = `
     appearance: { setThemeSource: async () => undefined },
     files: { saveTextFile: async () => null },
     core: {
-      status: async () => ({ state: "ready", version: "0.1.0" }),
+      status: async () => ({ state: "ready", version: "1.0.0" }),
       onStatus: () => () => undefined,
     },
     contexts: {
@@ -684,7 +684,7 @@ test("settings opens as a page and returns to the picker", async ({ page }) => {
 
   // About reports version and a core state.
   await settings.getByTestId("settings-tab-about").click();
-  await expect(settings).toContainText("0.1.0");
+  await expect(settings).toContainText("1.0.0");
   await expect(settings).toContainText("Ready");
   await expect(settings.getByTestId("settings-check-updates")).toBeVisible();
 

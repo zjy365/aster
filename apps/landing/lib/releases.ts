@@ -1,6 +1,6 @@
 export type Release = {
   os: "macOS" | "Windows" | "Linux";
-  meta: string; // e.g. "v0.1.0 · Apple Silicon & Intel · .dmg"
+  meta: string; // e.g. "v1.0.0 · Apple Silicon & Intel · .dmg"
   href: string;
   primary?: boolean;
 };
