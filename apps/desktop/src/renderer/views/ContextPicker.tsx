@@ -1,7 +1,6 @@
 import {
   AlertCircle,
   ArrowRight,
-  Asterisk,
   Boxes,
   CheckCircle2,
   LayoutGrid,
@@ -11,6 +10,7 @@ import {
   Search,
   Settings,
 } from "lucide-react";
+import { AsterMark } from "../components/AsterMark";
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import type { ContextInfo, CoreStatus } from "../../shared/types";
@@ -203,7 +203,7 @@ function ContextPicker({
           <div className="context-picker-heading">
             <div className="context-picker-brand" aria-hidden="true">
               <span className="brand-mark">
-                <Asterisk size={25} strokeWidth={2.1} />
+                <AsterMark size={25} />
               </span>
               <strong>Aster</strong>
             </div>

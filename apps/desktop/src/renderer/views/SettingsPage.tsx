@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   ArrowLeft,
-  Asterisk,
   AtSign,
   Boxes,
   FilePlus2,
@@ -14,6 +13,7 @@ import {
   Sun,
   X,
 } from "lucide-react";
+import { AsterMark } from "../components/AsterMark";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -211,7 +211,7 @@ export function SettingsPage({
           <div className="settings-sidebar-titlebar" aria-hidden="true" data-tauri-drag-region />
           <div className="settings-brand">
             <span className="brand-mark" aria-hidden="true">
-              <Asterisk size={19} strokeWidth={2.1} />
+              <AsterMark size={19} />
             </span>
             <strong>Aster</strong>
           </div>
@@ -451,7 +451,7 @@ export function SettingsPage({
               <TabsContent value="about" className="settings-section settings-about">
                 <div className="settings-about-hero">
                   <span className="settings-about-logo" aria-hidden="true">
-                    <Asterisk size={30} strokeWidth={2.1} />
+                    <AsterMark size={30} />
                   </span>
                   <h2 className="settings-about-name">Aster</h2>
                   <p className="settings-about-version" data-testid="settings-about-version">
