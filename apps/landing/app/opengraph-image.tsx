@@ -21,13 +21,10 @@ export default function OpengraphImage() {
           color: "#1d1d1f",
         }}
       >
-        <svg width="72" height="72" viewBox="0 0 24 24" fill="none">
-          <g stroke="#c65f2d" strokeWidth="2.1" strokeLinecap="round">
-            <path d="M12 3v18" />
-            <path d="M4.2 7.5l15.6 9" />
-            <path d="M19.8 7.5l-15.6 9" />
-          </g>
-          <circle cx="12" cy="12" r="2.6" fill="#c65f2d" />
+        <svg width="72" height="74" viewBox="0 0 86 88" fill="#c65f2d">
+          <rect x="33.25" y="0" width="19.5" height="88" />
+          <rect x="33.25" y="0" width="19.5" height="88" transform="rotate(60 43 44)" />
+          <rect x="33.25" y="0" width="19.5" height="88" transform="rotate(-60 43 44)" />
         </svg>
         <div
           style={{

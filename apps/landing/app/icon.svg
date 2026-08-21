@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 86 88">
+  <style>
+    rect { fill: #c65f2d; }
+    @media (prefers-color-scheme: dark) { rect { fill: #e17b48; } }
+  </style>
+  <rect x="33.25" y="0" width="19.5" height="88"/>
+  <rect x="33.25" y="0" width="19.5" height="88" transform="rotate(60 43 44)"/>
+  <rect x="33.25" y="0" width="19.5" height="88" transform="rotate(-60 43 44)"/>
+</svg>

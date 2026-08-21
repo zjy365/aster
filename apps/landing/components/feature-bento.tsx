@@ -6,14 +6,14 @@ import { DiffBlock } from "./diff-block";
 const CARD =
   "reveal group flex h-full flex-col overflow-hidden rounded-[20px] border border-hairline-soft bg-surface " +
   "transition-[transform,box-shadow] duration-[350ms] ease-(--ease-out) " +
-  "hover:-translate-y-[3px] hover:shadow-[0_2px_6px_rgb(0_0_0/0.04),0_20px_48px_rgb(30_25_20/0.08)]";
+  "hover:-translate-y-[3px] hover:shadow-(--shadow-card-hover)";
 
 type Shot = { src: string; alt: string; width: number; height: number };
 
 function CardCopy({ card }: { card: FeatureCard }) {
   return (
     <>
-      <h3 className="text-[18px] leading-[1.25] font-[640] tracking-[-0.014em] text-balance sm:text-[19px]">
+      <h3 className="text-[18px] leading-[1.25] font-semibold tracking-[-0.014em] text-balance sm:text-[19px]">
         {card.title}
       </h3>
       <p className="mt-2.5 max-w-[48ch] text-[14.5px] leading-[1.58] text-pretty text-ink-2">{card.body}</p>

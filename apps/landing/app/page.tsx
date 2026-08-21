@@ -1,5 +1,6 @@
 import { SiteNav } from "@/components/site-nav";
 import { Hero } from "@/components/hero";
+import { SectionSeparator } from "@/components/section-separator";
 import { Principles } from "@/components/principles";
 import { FeatureBento } from "@/components/feature-bento";
 import { Security } from "@/components/security";
@@ -13,10 +14,12 @@ export default function Page() {
       <SiteNav />
       <main>
         <Hero />
+        <SectionSeparator label="why aster" />
         <Principles />
         <FeatureBento />
         <Security />
         <Download />
+        <SectionSeparator label="faq" />
         <Faq />
       </main>
       <SiteFooter />

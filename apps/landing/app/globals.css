@@ -1,32 +1,137 @@
 @import "tailwindcss";
 
-@theme inline {
-  /* Design tokens — keep in sync with DESIGN.md (§ colors). */
-  --color-canvas: #f7f6f3;
-  --color-surface: #ffffff;
-  --color-surface-muted: #f6f6f7;
-  --color-ink: #1d1d1f;
-  --color-ink-2: #66666b;
-  --color-ink-3: #68686d; /* DESIGN.md faint; #8a8a90 failed AA at 3.18:1 */
-  --color-brand: #c65f2d; /* aster-orange */
-  --color-brand-deep: #88401f; /* aster-orange-text */
-  --color-primary: #007aff; /* system blue: interaction / focus only */
-  --color-positive: #18753a;
-  --color-caution: #9a6700;
-  --color-destructive: #d70015;
+/*
+ * Design tokens — keep in sync with DESIGN.md (§ colors, § themes).
+ *
+ * Two themes, one variable set. Light is the default on :root; dark values
+ * come from the DESIGN.md dark column and apply either when the visitor's
+ * system is dark (no theme class on <html>) or when the footer switcher sets
+ * `html.dark` / `html.light` explicitly. The inline script in layout.tsx
+ * restores the stored choice before first paint, so there is no flash.
+ *
+ * The `night` tokens are fixed on purpose: the Security section is a dark
+ * island in both themes (on the dark page it reads as the raised surface).
+ */
+:root {
+  --canvas: #f7f6f3;
+  --surface: #ffffff;
+  --surface-muted: #f6f6f7;
+  --ink: #1d1d1f;
+  --ink-2: #66666b;
+  --ink-3: #68686d; /* DESIGN.md faint; #8a8a90 failed AA at 3.18:1 */
+  --brand: #c65f2d; /* aster-orange */
+  --brand-deep: #88401f; /* aster-orange-text */
+  --brand-soft: rgb(198 95 45 / 9%);
+  --primary: #007aff; /* system blue: interaction / focus only */
+  --positive: #18753a;
+  --caution: #9a6700;
+  --destructive: #d70015;
 
-  /* Structural colors for the landing-page visual language. */
-  --color-hairline: rgb(60 60 67 / 14%);
-  --color-hairline-soft: rgb(60 60 67 / 8%);
-  --color-brand-soft: rgb(198 95 45 / 9%);
-  --color-dark: #1d1d1f;
-  --color-dark-2: #2c2c2e;
-  --color-dark-ink: #f5f5f7;
-  --color-dark-ink-2: #a1a1a6;
+  --hairline: rgb(60 60 67 / 14%);
+  --hairline-soft: rgb(60 60 67 / 8%);
+  --chip: #eef0f1; /* secondary button / switcher track */
+  --chip-hover: #e4e6e8;
+  --nav-bg: rgb(255 255 255 / 82%);
+  --on-ink-badge: rgb(255 255 255 / 16%); /* glyph badge inside a solid button */
+  --scrollbar: rgb(60 60 67 / 22%);
+
+  --shadow-card-hover: 0 2px 6px rgb(0 0 0 / 4%), 0 20px 48px rgb(30 25 20 / 8%);
+  --shadow-window: 0 2px 6px rgb(0 0 0 / 5%), 0 32px 80px rgb(30 25 20 / 12%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --canvas: #131315;
+    --surface: #1b1b1e;
+    --surface-muted: #222225;
+    --ink: #ececef;
+    --ink-2: #9b9ba2;
+    --ink-3: #8b8b93; /* DESIGN.md faint #6d6d74 is 3.6:1 here; bumped for AA */
+    --brand: #e17b48;
+    --brand-deep: #e17b48;
+    --brand-soft: rgb(225 123 72 / 14%);
+    --primary: #0a84ff;
+    --positive: #30d158;
+    --caution: #ffd60a;
+    --destructive: #ff453a;
+
+    --hairline: rgb(255 255 255 / 14%);
+    --hairline-soft: rgb(255 255 255 / 8%);
+    --chip: #1d1d22;
+    --chip-hover: #26262b;
+    --nav-bg: rgb(19 19 21 / 82%);
+    --on-ink-badge: rgb(0 0 0 / 8%);
+    --scrollbar: rgb(255 255 255 / 22%);
+
+    --shadow-card-hover: 0 2px 6px rgb(0 0 0 / 30%), 0 20px 48px rgb(0 0 0 / 45%);
+    --shadow-window: 0 2px 6px rgb(0 0 0 / 30%), 0 32px 80px rgb(0 0 0 / 55%);
+  }
+}
+
+:root.dark {
+  --canvas: #131315;
+  --surface: #1b1b1e;
+  --surface-muted: #222225;
+  --ink: #ececef;
+  --ink-2: #9b9ba2;
+  --ink-3: #8b8b93;
+  --brand: #e17b48;
+  --brand-deep: #e17b48;
+  --brand-soft: rgb(225 123 72 / 14%);
+  --primary: #0a84ff;
+  --positive: #30d158;
+  --caution: #ffd60a;
+  --destructive: #ff453a;
+
+  --hairline: rgb(255 255 255 / 14%);
+  --hairline-soft: rgb(255 255 255 / 8%);
+  --chip: #1d1d22;
+  --chip-hover: #26262b;
+  --nav-bg: rgb(19 19 21 / 82%);
+  --on-ink-badge: rgb(0 0 0 / 8%);
+  --scrollbar: rgb(255 255 255 / 22%);
+
+  --shadow-card-hover: 0 2px 6px rgb(0 0 0 / 30%), 0 20px 48px rgb(0 0 0 / 45%);
+  --shadow-window: 0 2px 6px rgb(0 0 0 / 30%), 0 32px 80px rgb(0 0 0 / 55%);
+}
+
+/* Fixed dark-island tokens (Security section), identical in both themes. */
+:root {
+  --night: #1d1d1f;
+  --night-2: #2c2c2e;
+  --night-ink: #f5f5f7;
+  --night-ink-2: #a1a1a6;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-soft: var(--brand-soft);
+  --color-primary: var(--primary);
+  --color-positive: var(--positive);
+  --color-caution: var(--caution);
+  --color-destructive: var(--destructive);
+
+  --color-hairline: var(--hairline);
+  --color-hairline-soft: var(--hairline-soft);
+  --color-chip: var(--chip);
+  --color-chip-hover: var(--chip-hover);
+  --color-on-ink-badge: var(--on-ink-badge);
+
+  --color-night: var(--night);
+  --color-night-2: var(--night-2);
+  --color-night-ink: var(--night-ink);
+  --color-night-ink-2: var(--night-ink-2);
 
   --font-display: ui-serif, "New York", var(--font-instrument), Georgia, serif;
   --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  --font-mono: var(--font-jbmono), "SF Mono", ui-monospace, "JetBrains Mono", monospace;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -38,8 +143,8 @@
   }
 
   body {
-    background: var(--color-canvas);
-    color: var(--color-ink);
+    background: var(--canvas);
+    color: var(--ink);
     font-family: var(--font-body);
     font-size: 16px;
     line-height: 1.6;
@@ -50,12 +155,12 @@
   }
 
   ::selection {
-    background: var(--color-brand-soft);
-    color: var(--color-brand-deep);
+    background: var(--brand-soft);
+    color: var(--brand-deep);
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-primary);
+    outline: 2px solid var(--primary);
     outline-offset: 3px;
     border-radius: 4px;
   }
@@ -68,8 +173,8 @@
   kbd {
     font-family: var(--font-mono);
     font-size: 0.78em;
-    background: var(--color-surface-muted);
-    border: 1px solid var(--color-hairline);
+    background: var(--surface-muted);
+    border: 1px solid var(--hairline);
     border-bottom-width: 2px;
     border-radius: 5px;
     padding: 1px 6px;
@@ -80,9 +185,9 @@
     width: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgb(60 60 67 / 22%);
+    background: var(--scrollbar);
     border-radius: 5px;
-    border: 3px solid var(--color-canvas);
+    border: 3px solid var(--canvas);
   }
   ::-webkit-scrollbar-track {
     background: transparent;

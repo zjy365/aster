@@ -25,7 +25,7 @@ const OS_ICONS: Record<Release["os"], ReactNode> = {
 function UnreleasedCard() {
   return (
     <div className="reveal mx-auto flex max-w-[640px] flex-col items-center rounded-[20px] border border-hairline-soft bg-surface px-6 py-12 text-center sm:px-8 sm:py-14">
-      <h3 className="text-[19px] font-[640] tracking-[-0.014em]">{download.unreleased.title}</h3>
+      <h3 className="text-[19px] font-semibold tracking-[-0.014em]">{download.unreleased.title}</h3>
       <p className="mt-3 max-w-[52ch] text-[14.5px] leading-[1.58] text-pretty text-ink-2">
         {download.unreleased.body}
       </p>
@@ -47,15 +47,15 @@ function DownloadGrid() {
       {releases.map((release) => (
         <div
           key={release.os}
-          className={`reveal flex flex-col rounded-[20px] border px-7 py-8 transition-[transform,box-shadow,border-color] duration-[350ms] ease-(--ease-out) hover:-translate-y-[3px] hover:shadow-[0_2px_6px_rgb(0_0_0/0.04),0_20px_48px_rgb(30_25_20/0.08)] ${
-            release.primary ? "border-ink bg-ink text-white" : "border-hairline-soft bg-surface"
+          className={`reveal flex flex-col rounded-[20px] border px-7 py-8 transition-[transform,box-shadow,border-color] duration-[350ms] ease-(--ease-out) hover:-translate-y-[3px] hover:shadow-(--shadow-card-hover) ${
+            release.primary ? "border-ink bg-ink text-canvas" : "border-hairline-soft bg-surface"
           }`}
         >
-          <div className="flex items-center gap-2.5 text-[20px] font-[640] tracking-[-0.015em]">
+          <div className="flex items-center gap-2.5 text-[20px] font-semibold tracking-[-0.015em]">
             {OS_ICONS[release.os]}
             {release.os}
           </div>
-          <div className={`mt-1.5 font-mono text-[13px] ${release.primary ? "text-white/60" : "text-ink-2"}`}>
+          <div className={`mt-1.5 font-mono text-[13px] ${release.primary ? "text-canvas/60" : "text-ink-2"}`}>
             {release.meta}
           </div>
           <Button

@@ -37,7 +37,7 @@ export function SectionHead({
     <div className="reveal mb-12 max-w-[42ch] sm:mb-14 lg:mb-16">
       <h2
         className={`font-display text-[clamp(2rem,3.6vw,2.9rem)] leading-[1.12] font-medium tracking-[-0.022em] text-balance ${
-          tone === "dark" ? "text-dark-ink" : "text-ink"
+          tone === "dark" ? "text-night-ink" : "text-ink"
         }`}
       >
         {title}
@@ -45,7 +45,7 @@ export function SectionHead({
       {body ? (
         <p
           className={`mt-4 max-w-[54ch] text-[16.5px] leading-[1.6] text-pretty ${
-            tone === "dark" ? "text-dark-ink-2" : "text-ink-2"
+            tone === "dark" ? "text-night-ink-2" : "text-ink-2"
           }`}
         >
           {body}

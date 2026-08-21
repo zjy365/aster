@@ -19,7 +19,7 @@ export function WindowFrame({
   priority?: boolean;
 }) {
   return (
-    <div className="rounded-[22px] border border-hairline-soft bg-surface-muted p-1.5 shadow-[0_2px_6px_rgb(0_0_0/0.05),0_32px_80px_rgb(30_25_20/0.12)] sm:rounded-[26px] sm:p-2">
+    <div className="rounded-[22px] border border-hairline-soft bg-surface-muted p-1.5 shadow-(--shadow-window) sm:rounded-[26px] sm:p-2">
       <div className="overflow-hidden rounded-[17px] border border-hairline-soft bg-surface sm:rounded-[20px]">
         {title ? (
           <div className="relative flex items-center border-b border-hairline-soft bg-surface px-4 py-3">

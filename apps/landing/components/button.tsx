@@ -30,26 +30,28 @@ export function ExternalGlyph() {
 }
 
 const BASE =
-  "group inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-full font-[550] " +
-  "transition-[transform,background-color,border-color,box-shadow] duration-200 ease-(--ease-out) active:scale-[0.97]";
+  "group inline-flex cursor-pointer items-center justify-center gap-2.5 rounded-full font-medium " +
+  "transition-[transform,background-color,border-color,box-shadow,opacity] duration-200 ease-(--ease-out) active:scale-[0.97]";
 
+/*
+ * The solid button is the ink/canvas inversion: near-black on the light page,
+ * near-white on the dark page. There is no accent-colored button anywhere on
+ * the site — blue stays on focus rings, orange stays on the brand.
+ */
 const VARIANTS = {
-  solid:
-    "bg-ink text-white shadow-[0_1px_2px_rgb(0_0_0/0.12),0_4px_14px_rgb(0_0_0/0.10)] " +
-    "hover:bg-[#333336] hover:shadow-[0_2px_4px_rgb(0_0_0/0.14),0_8px_24px_rgb(0_0_0/0.14)]",
-  ghost:
-    "border border-hairline bg-transparent text-ink hover:border-[rgb(60_60_67/0.28)] hover:bg-surface",
-  onDark: "bg-white text-ink hover:bg-[#ececee]",
-  ghostOnDark: "border border-white/16 bg-transparent text-dark-ink hover:border-white/28 hover:bg-white/6",
+  solid: "bg-ink text-canvas hover:opacity-[0.88]",
+  ghost: "bg-chip text-ink hover:bg-chip-hover",
+  onDark: "bg-night-ink text-night hover:opacity-[0.88]",
+  ghostOnDark: "bg-white/8 text-night-ink hover:bg-white/14",
 } as const;
 
 const SIZES = {
-  md: "px-[22px] py-3 text-[14.5px]",
-  sm: "px-4 py-2 text-[13.5px]",
+  md: "px-[22px] py-3 text-[14px]",
+  sm: "px-4 py-2 text-[13px]",
 } as const;
 
 const BADGES = {
-  solid: "bg-white/16",
+  solid: "bg-on-ink-badge",
   ghost: "bg-brand-soft text-brand-deep",
   onDark: "bg-brand-soft text-brand-deep",
   ghostOnDark: "bg-white/12",

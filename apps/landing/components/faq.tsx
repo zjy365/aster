@@ -8,7 +8,7 @@ export function Faq() {
       <div className="reveal max-w-[760px]">
         {faq.map((item) => (
           <details key={item.q} className="group border-b border-hairline">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-5 text-[16px] font-[580] tracking-[-0.01em] transition-colors duration-200 ease-(--ease-out) hover:text-brand-deep sm:py-6 sm:text-[16.5px] [&::-webkit-details-marker]:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-5 text-[16px] font-medium tracking-[-0.01em] transition-colors duration-200 ease-(--ease-out) hover:text-brand-deep sm:py-6 sm:text-[16.5px] [&::-webkit-details-marker]:hidden">
               {item.q}
               <span
                 aria-hidden="true"
