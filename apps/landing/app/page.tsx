@@ -1,4 +1,3 @@
-import { SiteNav } from "@/components/site-nav";
 import { Hero } from "@/components/hero";
 import { SectionSeparator } from "@/components/section-separator";
 import { Principles } from "@/components/principles";
@@ -11,7 +10,6 @@ import { SiteFooter } from "@/components/site-footer";
 export default function Page() {
   return (
     <>
-      <SiteNav />
       <main>
         <Hero />
         <SectionSeparator label="why aster" />

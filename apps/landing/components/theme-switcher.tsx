@@ -56,25 +56,26 @@ function applyMode(mode: ThemeMode) {
 
 /**
  * The page's one piece of client JavaScript: a three-way appearance switch
- * (system / light / dark), persisted to localStorage. Server-rendered with no
- * active state; the stored choice is read after mount so hydration stays clean.
- * The pre-paint half of this logic is the inline script in app/layout.tsx.
+ * (system / light / dark), persisted to localStorage. Dark is the default,
+ * so an unset preference reads as dark; "system" is stored explicitly so it
+ * can keep following the OS. Server-rendered with no active state; the stored
+ * choice is read after mount so hydration stays clean. The pre-paint half of
+ * this logic is the inline script in app/layout.tsx.
  */
 export function ThemeSwitcher() {
-  const [mode, setMode] = useState<ThemeMode>("system");
+  const [mode, setMode] = useState<ThemeMode>("dark");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark") setMode(stored);
+    if (stored === "light" || stored === "dark" || stored === "system") setMode(stored);
     setMounted(true);
   }, []);
 
   const choose = (next: ThemeMode) => {
     setMode(next);
     applyMode(next);
-    if (next === "system") localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, next);
+    localStorage.setItem(STORAGE_KEY, next);
   };
 
   return (

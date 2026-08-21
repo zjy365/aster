@@ -41,22 +41,12 @@ export type FeatureCard = {
 
 export type FooterLink = NavLink;
 
-export const nav: { links: NavLink[]; download: string } = {
-  links: [
-    { label: "Features", href: "#features" },
-    { label: "Security", href: "#security" },
-    { label: "FAQ", href: "#faq" },
-    { label: "GitHub", href: site.repo, external: true },
-  ],
-  download: "Download",
-};
-
 export const hero = {
   titleLine1: "Cluster work,",
   titleLine2Before: "done ",
   titleLine2Em: "deliberately",
   titleLine2After: ".",
-  sub: "Aster is a Kubernetes desktop app that runs entirely on your machine. Find anything in seconds, watch it change live, and see exactly what a change will do before it happens.",
+  sub: "A Kubernetes desktop app that runs entirely on your machine. Find anything in seconds, and see what a change does before it happens.",
   primaryCta: { label: "Download for macOS", href: "#download" },
   secondaryCta: { label: "View on GitHub", href: site.repo, external: true },
   note: "Free and open source · macOS, Windows & Linux · No account required",
@@ -72,6 +62,22 @@ export const hero = {
     alt: "Aster's command palette open over the resource table, listing actions, clusters, and resource kinds with keyboard hints",
     width: 2560,
     height: 1600,
+  },
+} as const;
+
+/** Short looping screen recordings for the feature cards (dark theme, 880×550). */
+export const demos = {
+  find: {
+    src: "/media/aster-find.gif",
+    alt: "Typing into Aster's filter box narrows ten thousand deployments to matching rows instantly",
+    width: 880,
+    height: 550,
+  },
+  palette: {
+    src: "/media/aster-palette.gif",
+    alt: "Opening Aster's command palette, typing to filter clusters, and switching to production",
+    width: 880,
+    height: 550,
   },
 } as const;
 

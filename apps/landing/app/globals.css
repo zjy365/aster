@@ -3,11 +3,13 @@
 /*
  * Design tokens — keep in sync with DESIGN.md (§ colors, § themes).
  *
- * Two themes, one variable set. Light is the default on :root; dark values
- * come from the DESIGN.md dark column and apply either when the visitor's
- * system is dark (no theme class on <html>) or when the footer switcher sets
- * `html.dark` / `html.light` explicitly. The inline script in layout.tsx
- * restores the stored choice before first paint, so there is no flash.
+ * Two themes, one variable set. Light values live on :root; dark values come
+ * from the DESIGN.md dark column and apply through `html.dark` — which the
+ * inline script in layout.tsx sets by default, since dark is the preferred
+ * appearance. An explicit "system" choice leaves <html> classless, so the
+ * prefers-color-scheme media query below owns that case and tracks live
+ * system changes. The footer switcher sets `html.light` / `html.dark`
+ * explicitly for the other two modes.
  *
  * The `night` tokens are fixed on purpose: the Security section is a dark
  * island in both themes (on the dark page it reads as the raised surface).
@@ -138,8 +140,8 @@
 @layer base {
   html {
     scroll-behavior: smooth;
-    /* Keep anchor targets clear of the fixed nav. */
-    scroll-padding-top: 96px;
+    /* Keep anchor targets off the very top edge. */
+    scroll-padding-top: 24px;
   }
 
   body {
@@ -236,5 +238,85 @@
   }
   html {
     scroll-behavior: auto;
+  }
+}
+
+/*
+ * Brand mark motion (components/aster-mark.tsx). Bars rest at their --angle;
+ * the entrance keyframe sweeps each from vertical with a stagger, then the
+ * whole mark ticks around in 60° steps — one bar-spacing per step, so it
+ * always settles back onto the identical shape.
+ */
+.aster-bar {
+  transform-box: fill-box;
+  transform-origin: center;
+  rotate: var(--angle, 0deg);
+}
+
+.aster-mark .aster-bar {
+  animation: aster-bar-in 520ms var(--ease-out) backwards;
+}
+.aster-mark .aster-bar:nth-child(2) {
+  animation-delay: 90ms;
+}
+.aster-mark .aster-bar:nth-child(3) {
+  animation-delay: 180ms;
+}
+
+@keyframes aster-bar-in {
+  from {
+    rotate: 0deg;
+    opacity: 0;
+  }
+}
+
+/* One 60° tick every 2s, eased out, starting after the entrance lands. */
+.aster-mark {
+  animation: aster-spin 12s linear 900ms infinite;
+}
+.aster-mark:hover {
+  animation-play-state: paused;
+}
+
+@keyframes aster-spin {
+  0% {
+    rotate: 0deg;
+    animation-timing-function: var(--ease-out);
+  }
+  5.5%,
+  16.66% {
+    rotate: 60deg;
+    animation-timing-function: var(--ease-out);
+  }
+  22.16%,
+  33.33% {
+    rotate: 120deg;
+    animation-timing-function: var(--ease-out);
+  }
+  38.83%,
+  50% {
+    rotate: 180deg;
+    animation-timing-function: var(--ease-out);
+  }
+  55.5%,
+  66.66% {
+    rotate: 240deg;
+    animation-timing-function: var(--ease-out);
+  }
+  72.16%,
+  83.33% {
+    rotate: 300deg;
+    animation-timing-function: var(--ease-out);
+  }
+  88.83%,
+  100% {
+    rotate: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aster-mark .aster-bar,
+  .aster-mark {
+    animation: none;
   }
 }

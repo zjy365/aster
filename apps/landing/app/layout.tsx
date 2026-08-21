@@ -38,11 +38,12 @@ export const viewport: Viewport = {
 
 /*
  * Restores the stored theme before first paint so the page never flashes.
- * "system" (the default) sets no class at all — the prefers-color-scheme
- * media query in globals.css owns that case, so it also tracks live system
- * changes. Kept in sync with components/theme-switcher.tsx.
+ * Dark is the default: with nothing stored, <html> gets the `dark` class.
+ * Only an explicit "system" choice leaves no class at all, so the
+ * prefers-color-scheme media query in globals.css owns that case and tracks
+ * live system changes. Kept in sync with components/theme-switcher.tsx.
  */
-const themeScript = `try{var t=localStorage.getItem("aster-theme");if(t==="light")document.documentElement.classList.add("light");else if(t==="dark")document.documentElement.classList.add("dark")}catch(e){}`;
+const themeScript = `try{var t=localStorage.getItem("aster-theme");if(t==="light")document.documentElement.classList.add("light");else if(t!=="system")document.documentElement.classList.add("dark")}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

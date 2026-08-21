@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { asset, features, hero, type FeatureCard } from "@/lib/content";
+import { asset, demos, features, type FeatureCard } from "@/lib/content";
 import { Section, SectionHead } from "./container";
 import { DiffBlock } from "./diff-block";
 
@@ -65,8 +65,8 @@ function Card({ card }: { card: FeatureCard }) {
       </div>
 
       {/* Framed below the window toolbar: the table is the story, the chrome is not. */}
-      {card.media === "resources" ? <CardShot shot={hero.screenshot} focus="object-[0%_38%]" /> : null}
-      {card.media === "palette" ? <CardShot shot={hero.palette} focus="object-[18%_40%]" /> : null}
+      {card.media === "resources" ? <CardShot shot={demos.find} focus="object-[0%_38%]" /> : null}
+      {card.media === "palette" ? <CardShot shot={demos.palette} focus="object-center" /> : null}
 
       {card.hint ? (
         <div className="mt-auto border-t border-hairline-soft px-7 py-4 sm:px-8">

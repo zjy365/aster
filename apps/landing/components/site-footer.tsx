@@ -1,6 +1,6 @@
 import { footer } from "@/lib/content";
+import { AsterMark } from "./aster-mark";
 import { Container } from "./container";
-import { AsterMark } from "./site-nav";
 import { ThemeSwitcher } from "./theme-switcher";
 
 export function SiteFooter() {
