@@ -8,10 +8,6 @@
   <a href="README.md">English</a> · <b>简体中文</b>
 </p>
 
-<p align="center">
-  <img src="docs/media/aster-demo.gif" alt="Aster：⌘K 切集群、跳到 Deployment、看日志" width="820">
-</p>
-
 Aster 是为你每天要重复五十次的那件事做的：打开、找到某个资源、看一眼、关掉。
 
 安装包 **28 MB**（装完 63 MB），因为它是一个原生 Tauri 壳加一个小的 Go sidecar，不是浏览器内核外面套一层控制台。**没有账号、没有遥测、没有后端服务**——它读你的 kubeconfig，直接和你集群的 API Server 说话。
