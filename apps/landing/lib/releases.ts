@@ -9,36 +9,89 @@ export type Release = {
 };
 
 /**
- * Populated when the first GitHub release ships (see spec §6.4). While this
- * array is empty the download section renders the honest "unreleased" card.
+ * Fetch the platform download links from the latest GitHub release at build
+ * time (Next.js Server Component / SSG). The GitHub API is only called during
+ * `next build` (and optional ISR revalidation); the rendered page is static and
+ * makes no runtime API requests, so a static host is fine.
  *
- * Update this file after each release: bump the version in the asset URLs and
- * keep one entry per platform/arch combination that the release ships.
+ * Each release ships a fixed set of asset names (see release-tauri.yml). We
+ * match those by suffix and map them to Tauri-style platform cards.
  */
-export const releases: Release[] = [
+const OWNER = "zjy365";
+const REPO = "aster";
+const GITHUB_API = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
+
+const ASSET_PATTERNS: {
+  id: string;
+  os: Release["os"];
+  meta: string;
+  match: RegExp;
+  primary?: boolean;
+}[] = [
   {
     id: "macos-arm64",
     os: "macOS",
-    meta: "Apple Silicon · v1.0.0 · .dmg",
-    href: "https://github.com/zjy365/aster/releases/download/v1.0.0/Aster_1.0.0_arm64.dmg",
+    meta: "Apple Silicon · .dmg",
+    match: /_arm64\.dmg$/,
     primary: true,
   },
   {
     id: "macos-x64",
     os: "macOS",
-    meta: "Intel · v1.0.0 · .dmg",
-    href: "https://github.com/zjy365/aster/releases/download/v1.0.0/Aster_1.0.0_x64.dmg",
+    meta: "Intel · .dmg",
+    match: /_x64\.dmg$/,
   },
   {
     id: "windows",
     os: "Windows",
-    meta: "x64 · v1.0.0 · .msi",
-    href: "https://github.com/zjy365/aster/releases/download/v1.0.0/Aster_1.0.0_x64_en-US.msi",
+    meta: "x64 · .msi",
+    match: /_x64_en-US\.msi$|_x64\.msi$/,
   },
   {
     id: "linux",
     os: "Linux",
-    meta: "x64 · v1.0.0 · AppImage",
-    href: "https://github.com/zjy365/aster/releases/download/v1.0.0/Aster_1.0.0_amd64.AppImage",
+    meta: "x64 · AppImage",
+    match: /_amd64\.AppImage$/,
   },
 ];
+
+export type ReleasesResult = {
+  /** Semver without the leading "v", e.g. "1.0.0". */
+  version: string;
+  releases: Release[];
+};
+
+async function fetchLatestRelease(): Promise<{
+  tag_name: string;
+  assets: { name: string; browser_download_url: string }[];
+}> {
+  const res = await fetch(GITHUB_API, {
+    headers: { Accept: "application/vnd.github+json" },
+    // Revalidate at most once an hour so a freshly cut release shows up on the
+    // landing page without a manual rebuild.
+    next: { revalidate: 3600 },
+  });
+  if (!res.ok) {
+    throw new Error(`GitHub API returned ${res.status} for ${GITHUB_API}`);
+  }
+  return res.json();
+}
+
+export async function getReleases(): Promise<ReleasesResult> {
+  const release = await fetchLatestRelease();
+  const version = release.tag_name.replace(/^v/, "");
+
+  const releases: Release[] = [];
+  for (const pattern of ASSET_PATTERNS) {
+    const asset = release.assets.find((a) => pattern.match.test(a.name));
+    if (!asset) continue;
+    releases.push({
+      id: pattern.id,
+      os: pattern.os,
+      meta: `${pattern.meta} · v${version}`,
+      href: asset.browser_download_url,
+      primary: pattern.primary,
+    });
+  }
+  return { version, releases };
+}

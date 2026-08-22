@@ -1,5 +1,5 @@
 import { download, site } from "@/lib/content";
-import { releases, type Release } from "@/lib/releases";
+import type { Release } from "@/lib/releases";
 import type { ReactNode } from "react";
 import { Button, DownloadGlyph, ExternalGlyph } from "./button";
 import { Section, SectionHead } from "./container";
@@ -41,7 +41,7 @@ function UnreleasedCard() {
   );
 }
 
-function DownloadGrid() {
+function DownloadGrid({ releases }: { releases: Release[] }) {
   return (
     <div className="grid gap-4 sm:gap-5 sm:grid-cols-2 lg:grid-cols-4">
       {releases.map((release) => (
@@ -73,11 +73,11 @@ function DownloadGrid() {
   );
 }
 
-export function Download() {
+export function Download({ releases }: { releases: Release[] }) {
   return (
     <Section id="download">
       <SectionHead title={download.head.title} body={download.head.body} />
-      {releases.length === 0 ? <UnreleasedCard /> : <DownloadGrid />}
+      {releases.length === 0 ? <UnreleasedCard /> : <DownloadGrid releases={releases} />}
     </Section>
   );
 }
