@@ -212,11 +212,20 @@ func TestLoaderWithSourcesDegradesOnMissingFile(t *testing.T) {
 	}
 }
 
+// setTestHome points the platform home directory at dir. os.UserHomeDir reads
+// HOME on Unix but USERPROFILE on Windows, so both must be set for the loader
+// to see a deterministic home in tests on every platform.
+func setTestHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 // isolateChain points HOME at a temp dir so the real ~/.kube/config can
 // never leak into tests, and clears KUBECONFIG unless a test overrides it.
 func isolateChain(t *testing.T) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	t.Setenv("KUBECONFIG", "")
 }
 
@@ -318,7 +327,7 @@ users:
 func TestDefaultChainIncludesKubeconfigAndDefaultConfig(t *testing.T) {
 	isolateChain(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "staging"))
 
 	defaultConfig := filepath.Join(home, ".kube", "config")

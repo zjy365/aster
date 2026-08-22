@@ -3,27 +3,48 @@ name: Release Tauri
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach artifacts to (default v1.0.0)"
+        required: false
+        default: "v1.0.0"
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref_name || inputs.tag }}
+  cancel-in-progress: true
+
 jobs:
   release:
-    name: Release ${{ matrix.label }}
+    name: Build ${{ matrix.label }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-15
             label: macOS arm64
-          - os: macos-15-intel
+            macos: true
+            arch: arm64
+            rust_target: aarch64-apple-darwin
+            goarch: arm64
+            bundle_suffix: arm64
+          - os: macos-15
             label: macOS x64
+            macos: true
+            arch: x64
+            rust_target: x86_64-apple-darwin
+            goarch: amd64
+            bundle_suffix: x64
           - os: windows-latest
             label: Windows x64
           - os: ubuntu-24.04
             label: Linux x64
             linux: true
     runs-on: ${{ matrix.os }}
+    environment: apple
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -56,30 +77,287 @@ jobs:
       - name: Configure Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Add macOS Rust target
+        if: matrix.macos == true
+        run: rustup target add ${{ matrix.rust_target }}
+
       - name: Restore JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Verify application
-        run: pnpm check
+        run: pnpm typecheck && pnpm test && go -C core test -race ./... && go -C core vet ./...
 
-      - name: Build sidecar core
-        run: pnpm --dir apps/desktop build:core
-
-      - name: Build and upload release
-        uses: tauri-apps/tauri-action@v0
+      - name: Set up macOS signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          # Import the Developer ID certificate into a dedicated keychain so
+          # codesign (invoked by tauri) can find it without UI interaction.
+          CERT_PATH="$RUNNER_TEMP/aster-cert.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/aster-build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 16)"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Resolve the identity dynamically; fall back to the secret if the
+          # keychain lookup surprises us.
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep "Developer ID Application" | grep -oE '"[^"]+"' | head -1 | tr -d '"' || true)"
+          if [ -z "$IDENTITY" ]; then
+            IDENTITY="$APPLE_SIGNING_IDENTITY"
+          fi
+          if [ -z "$IDENTITY" ]; then
+            echo "No Developer ID Application identity found in keychain" >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+          rm -f "$CERT_PATH"
+
+      - name: Build and bundle (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_FILE: ${{ secrets.APPLE_API_KEY_FILE }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Build a single-arch app. Take the target + Go arch from the matrix so
+          # the same arm64 runner can produce both macOS versions (t3code style).
+          BIN_DIR="apps/desktop/src-tauri/binaries"
+          mkdir -p "$BIN_DIR"
+          (
+            cd core
+            CGO_ENABLED=0 GOARCH=${{ matrix.goarch }} go build -trimpath -o \
+              "$GITHUB_WORKSPACE/$BIN_DIR/aster-core-${{ matrix.rust_target }}" ./cmd/aster-core
+          )
+          # Authenticate with Apple via an App Store Connect API key (stable for
+          # CI; APPLE_ID/app-specific passwords are the legacy path). Materialize
+          # the .p8 from the secret, then have the tauri CLI submit the .app
+          # notarization. --skip-stapling submits without waiting on Apple's
+          # queue, so the build never blocks for tens of minutes; stapling is
+          # picked up best-effort in the DMG step.
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_FILE" > "$KEY_PATH"
+          export APPLE_API_KEY="$APPLE_API_KEY_ID"
+          export APPLE_API_KEY_PATH="$KEY_PATH"
+          export APPLE_API_ISSUER="$APPLE_API_ISSUER"
+          max_attempts=3
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo "=== macOS build attempt ${attempt}/${max_attempts} ==="
+            if pnpm --dir apps/desktop tauri build --target ${{ matrix.rust_target }} --skip-stapling; then
+              echo "✅ macOS build succeeded"
+              break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "❌ macOS build failed after ${max_attempts} attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 60))
+          done
+
+      - name: Build and bundle (Windows / Linux)
+        if: runner.os != 'macOS'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          pnpm --dir apps/desktop dist
+
+      - name: Notarize macOS DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_FILE: ${{ secrets.APPLE_API_KEY_FILE }}
+        run: |
+          set -euo pipefail
+          TARGET_DIR="apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle"
+          DMG_ROOT="$TARGET_DIR/dmg"
+          [ -d "$DMG_ROOT" ] || DMG_ROOT="apps/desktop/src-tauri/target/release/bundle/dmg"
+          DMG=$(find "$DMG_ROOT" -name "*.dmg" -type f | head -1 || true)
+          if [ -z "$DMG" ]; then
+            echo "⚠️ No .dmg found to notarize" >&2
+            exit 1
+          fi
+          # Tauri submitted the .app notarization during build with
+          # --skip-stapling. Submit the DMG the same way (no --wait) so this job
+          # never blocks on Apple's queue; attempt the staple best-effort in case
+          # the ticket is already ready. If not, users get the notarized DMG and
+          # Gatekeeper is satisfied once Apple finishes on its side.
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_FILE" > "$KEY_PATH"
+          max_attempts=3
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo "=== DMG notarization submit attempt ${attempt}/${max_attempts} ==="
+            if xcrun notarytool submit "$DMG" \
+              --key "$KEY_PATH" \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER"; then
+              echo "✅ DMG notarization submitted"
+              break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "❌ DMG notarization submit failed after ${max_attempts} attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 60))
+          done
+          # Best-effort staple: the ticket may not be ready yet; that's fine.
+          echo "=== Best-effort DMG stapling ==="
+          xcrun stapler staple "$DMG" || echo "⚠️ Staple not ready yet (expected with async notarization); DMG will pass Gatekeeper once Apple completes"
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # With --target the bundles live under target/<triple>/release/bundle.
+            TARGET_DIR="apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle"
+            [ -d "$TARGET_DIR" ] || TARGET_DIR="apps/desktop/src-tauri/target/release/bundle"
+            # Rename each artifact so the arch is explicit (arm64 / x64) like
+            # conventional macOS distribution, and keep .sig aligned.
+            for dmg in "$TARGET_DIR"/dmg/*.dmg; do
+              [ -e "$dmg" ] && cp "$dmg" "release-assets/Aster_1.0.0_${{ matrix.bundle_suffix }}.dmg"
+            done
+            for tgz in "$TARGET_DIR"/macos/*.tar.gz; do
+              [ -e "$tgz" ] && cp "$tgz" "release-assets/Aster_1.0.0_${{ matrix.bundle_suffix }}.app.tar.gz"
+            done
+            for sig in "$TARGET_DIR"/macos/*.tar.gz.sig; do
+              [ -e "$sig" ] && cp "$sig" "release-assets/Aster_1.0.0_${{ matrix.bundle_suffix }}.app.tar.gz.sig"
+            done
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            find apps/desktop/src-tauri/target/release/bundle/msi apps/desktop/src-tauri/target/release/bundle/nsis -maxdepth 1 -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.sig" \) -exec cp {} release-assets/ \; 2>/dev/null || true
+          else
+            # Linux bundles live under bundle/{deb,rpm,appimage}.
+            find apps/desktop/src-tauri/target/release/bundle -maxdepth 2 -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" -o -name "*.sig" \) -exec cp {} release-assets/ \;
+          fi
+          ls -la release-assets
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
         with:
-          projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: "Aster v__VERSION__"
-          releaseDraft: true
-          prerelease: false
+          name: release-assets-${{ runner.os }}-${{ matrix.bundle_suffix || 'default' }}
+          path: release-assets/*
+          if-no-files-found: error
+
+      - name: Restore default macOS keychain
+        if: runner.os == 'macOS' && always()
+        shell: bash
+        run: |
+          security default-keychain -s "$HOME/Library/Keychains/login.keychain-db" || true
+          rm -f "$RUNNER_TEMP/aster-build.keychain-db"
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-24.04
+    needs: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download built release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: ls -la release-assets
+
+      - name: Upload assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: "Aster ${{ inputs.tag || github.ref_name }}"
+          draft: true
+          fail_on_unmatched_files: true
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate and upload latest.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+          BASE_URL="https://github.com/$REPO/releases/download/$TAG"
+
+          # Build a platforms map from the released .sig files. The signature
+          # content is already base64 (minisign) and is embedded verbatim.
+          shopt -s nullglob
+          declare -A PLATFORMS=()
+          for sig in release-assets/*.sig; do
+            base=$(basename "${sig%.sig}")
+            sig_content=$(cat "$sig")
+            case "$base" in
+              *_arm64.app.tar.gz)   PLATFORMS["darwin-aarch64"]="$base|$sig_content";;
+              *_x64.app.tar.gz|*_x86_64.app.tar.gz) PLATFORMS["darwin-x86_64"]="$base|$sig_content";;
+              *-x86_64.msi|*_x64.msi|*_x64_en-US.msi|*_amd64.msi) PLATFORMS["windows-x86_64"]="$base|$sig_content";;
+              *_amd64.AppImage)      PLATFORMS["linux-x86_64"]="$base|$sig_content";;
+              *_amd64.deb)           PLATFORMS["linux-x86_64-deb"]="$base|$sig_content";;
+              *_amd64.rpm|*.x86_64.rpm) PLATFORMS["linux-x86_64-rpm"]="$base|$sig_content";;
+            esac
+          done
+
+          if [ "${#PLATFORMS[@]}" -eq 0 ]; then
+            echo "No .sig files found; latest.json would be empty" >&2
+            exit 1
+          fi
+
+          TMP_JSON=$(mktemp)
+          {
+            echo "{"
+            echo "  \"version\": \"$VERSION\","
+            echo "  \"notes\": \"\","
+            echo "  \"pub_date\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+            echo "  \"platforms\": {"
+            first=1
+            for key in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64 linux-x86_64-deb linux-x86_64-rpm; do
+              if [ -n "${PLATFORMS[$key]:-}" ]; then
+                IFS='|' read -r fname sig_content <<< "${PLATFORMS[$key]}"
+                [ $first -eq 0 ] && echo ","
+                echo "    \"$key\": {"
+                echo "      \"signature\": \"$sig_content\","
+                echo "      \"url\": \"$BASE_URL/$fname\""
+                echo "    }"
+                first=0
+              fi
+            done
+            echo "  }"
+            echo "}"
+          } > "$TMP_JSON"
+          mv "$TMP_JSON" latest.json
+          echo "Generated latest.json:"
+          cat latest.json
+
+          gh release upload "$TAG" latest.json --clobber --repo "$REPO"
+

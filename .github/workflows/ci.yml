@@ -21,6 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
       - name: Configure Go from module
         uses: actions/setup-go@v6
         with:
@@ -49,6 +54,9 @@ jobs:
 
       - name: Restore JavaScript dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build sidecar core
+        run: pnpm --dir apps/desktop build:core
 
       - name: Run Aster verification suite
         run: pnpm check

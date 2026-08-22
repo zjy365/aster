@@ -9,8 +9,10 @@ mod updater;
 use std::sync::Arc;
 
 use tauri::{
-    Emitter, LogicalPosition, Manager, Position, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
+    Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
+#[cfg(target_os = "macos")]
+use tauri::{LogicalPosition, Position, TitleBarStyle};
 
 pub struct AppState {
     pub sidecar: Arc<sidecar::Sidecar<tauri::Wry>>,
@@ -56,21 +58,24 @@ pub fn run() {
                 updater: updater.clone(),
             });
             menu::install(app.handle())?;
-            // Window parity with the retired Electron shell (window.ts):
-            // overlay title bar, minimum size, and a navigation policy that
-            // confines the webview to app content.
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Aster")
                 .inner_size(1440.0, 900.0)
-                .min_inner_size(900.0, 640.0)
-                .title_bar_style(TitleBarStyle::Overlay)
-                .hidden_title(true)
-                // Logical so the inset survives Retina scale factors; 20pt
-                // keeps the traffic lights off the corner and vertically
-                // centered in the 52px toolbar strip.
-                .traffic_light_position(Position::Logical(LogicalPosition::new(20.0, 20.0)))
-                .on_navigation(is_app_origin)
-                .build()?;
+                .min_inner_size(900.0, 640.0);
+            #[cfg(target_os = "macos")]
+            {
+                // Window parity with the retired Electron shell (window.ts):
+                // overlay title bar, minimum size, and a navigation policy
+                // that confines the webview to app content.
+                builder = builder
+                    .title_bar_style(TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    // Logical so the inset survives Retina scale factors; 20pt
+                    // keeps the traffic lights off the corner and vertically
+                    // centered in the 52px toolbar strip.
+                    .traffic_light_position(Position::Logical(LogicalPosition::new(20.0, 20.0)));
+            }
+            builder.on_navigation(is_app_origin).build()?;
             updater.start();
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = sidecar.start().await {
@@ -135,6 +140,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Aster")
         .run(|app, event| match event {
+            #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();

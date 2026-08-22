@@ -9,7 +9,7 @@
   "packageManager": "pnpm@10.12.2",
   "scripts": {
     "build": "pnpm --dir apps/desktop build",
-    "check": "pnpm typecheck && pnpm test && go -C core test -race ./... && go -C core vet ./... && pnpm --dir apps/desktop test:rust && pnpm build",
+    "check": "pnpm typecheck && pnpm test && go -C core test -race ./... && go -C core vet ./... && pnpm build && pnpm --dir apps/desktop test:rust",
     "dev": "pnpm --dir apps/desktop dev",
     "dist": "pnpm --dir apps/desktop dist",
     "landing:dev": "pnpm --dir apps/landing dev",
