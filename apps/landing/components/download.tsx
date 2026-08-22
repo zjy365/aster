@@ -43,10 +43,10 @@ function UnreleasedCard() {
 
 function DownloadGrid() {
   return (
-    <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
+    <div className="grid gap-4 sm:gap-5 sm:grid-cols-2 lg:grid-cols-4">
       {releases.map((release) => (
         <div
-          key={release.os}
+          key={release.id}
           className={`reveal flex flex-col rounded-[20px] border px-7 py-8 transition-[transform,box-shadow,border-color] duration-[350ms] ease-(--ease-out) hover:-translate-y-[3px] hover:shadow-(--shadow-card-hover) ${
             release.primary ? "border-ink bg-ink text-canvas" : "border-hairline-soft bg-surface"
           }`}
