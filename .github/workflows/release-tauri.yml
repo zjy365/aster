@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to attach artifacts to (default v1.0.0)"
+        description: "Release tag to attach artifacts to (default v1.0.1)"
         required: false
-        default: "v1.0.0"
+        default: "v1.0.1"
 
 permissions:
   contents: write
@@ -242,13 +242,13 @@ jobs:
             # Rename each artifact so the arch is explicit (arm64 / x64) like
             # conventional macOS distribution, and keep .sig aligned.
             for dmg in "$TARGET_DIR"/dmg/*.dmg; do
-              [ -e "$dmg" ] && cp "$dmg" "release-assets/Aster_1.0.0_${{ matrix.bundle_suffix }}.dmg"
+              [ -e "$dmg" ] && cp "$dmg" "release-assets/Aster_1.0.1_${{ matrix.bundle_suffix }}.dmg"
             done
             for tgz in "$TARGET_DIR"/macos/*.tar.gz; do
-              [ -e "$tgz" ] && cp "$tgz" "release-assets/Aster_1.0.0_${{ matrix.bundle_suffix }}.app.tar.gz"
+              [ -e "$tgz" ] && cp "$tgz" "release-assets/Aster_1.0.1_${{ matrix.bundle_suffix }}.app.tar.gz"
             done
             for sig in "$TARGET_DIR"/macos/*.tar.gz.sig; do
-              [ -e "$sig" ] && cp "$sig" "release-assets/Aster_1.0.0_${{ matrix.bundle_suffix }}.app.tar.gz.sig"
+              [ -e "$sig" ] && cp "$sig" "release-assets/Aster_1.0.1_${{ matrix.bundle_suffix }}.app.tar.gz.sig"
             done
           elif [ "$RUNNER_OS" = "Windows" ]; then
             find apps/desktop/src-tauri/target/release/bundle/msi apps/desktop/src-tauri/target/release/bundle/nsis -maxdepth 1 -type f \( -name "*.msi" -o -name "*.exe" -o -name "*.sig" \) -exec cp {} release-assets/ \; 2>/dev/null || true
