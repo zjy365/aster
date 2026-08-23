@@ -36,3 +36,17 @@ UI changes require the renderer Playwright smoke suite (`pnpm --dir apps/desktop
   不得出现客户证言、性能基准、遥测或统计数字。
 - 颜色 token 与 `DESIGN.md` 保持同步；system blue 用于交互，Aster orange 仅用于品牌标识。
 - 不参与根 `pnpm check`。验证：`pnpm --dir apps/landing typecheck && pnpm --dir apps/landing build`。
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles with default label strings (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.md`.
