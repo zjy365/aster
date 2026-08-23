@@ -67,9 +67,6 @@ async function fetchLatestRelease(): Promise<{
 }> {
   const res = await fetch(GITHUB_API, {
     headers: { Accept: "application/vnd.github+json" },
-    // Revalidate at most once an hour so a freshly cut release shows up on the
-    // landing page without a manual rebuild.
-    next: { revalidate: 3600 },
   });
   if (!res.ok) {
     throw new Error(`GitHub API returned ${res.status} for ${GITHUB_API}`);

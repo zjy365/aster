@@ -16,6 +16,10 @@ on:
       - "pnpm-workspace.yaml"
       - "package.json"
       - "pnpm-lock.yaml"
+  # A release goes through draft first; re-build only once it is published so
+  # releases/latest (used at build time) points at the new version.
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -65,8 +69,9 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    # Pull requests build and upload the artifact, but never publish.
-    if: github.event_name == 'push'
+    # Pull requests build and upload the artifact, but never publish. Release
+    # triggers (release: published) deploy like a push does.
+    if: github.event_name == 'push' || github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
