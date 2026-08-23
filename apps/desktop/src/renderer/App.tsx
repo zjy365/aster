@@ -159,12 +159,13 @@ export default function App() {
     setBulkBusy(true);
     try {
       for (const row of checkedRows) {
+        // No resourceVersion here: the list snapshot is stale by construction,
+        // and the confirm dialog — not an RV precondition — is the gate.
         await desktop.resources.mutate({
           contextId,
           resourceKind: kind,
           namespace: row.namespace || undefined,
           name: row.name,
-          resourceVersion: row.resourceVersion,
           operation: "delete",
           dryRun: false,
         });
@@ -266,7 +267,7 @@ export default function App() {
     const target = targetId ? contexts.contexts.find((item) => item.id === targetId) : contexts.chosenContext;
     if (!target || target.error || core.state !== "ready") return;
     setError("");
-    namespaces.setNamespace("");
+    namespaces.setNamespace(target.namespace || "");
     contexts.setContextChoice(target.id);
     contexts.setContextId(target.id);
     contexts.setView("workbench");

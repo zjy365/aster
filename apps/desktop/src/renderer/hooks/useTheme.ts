@@ -26,6 +26,25 @@ function systemPrefersDark(): boolean {
 }
 
 /**
+ * Read-only view of the effective theme for components outside the
+ * preference-owning tree: observes the data-theme attribute that useTheme
+ * writes onto <html>, so the derivation stays in this module.
+ */
+export function useEffectiveTheme(): EffectiveTheme {
+  const [mode, setMode] = useState<EffectiveTheme>(() =>
+    document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+  );
+  useEffect(() => {
+    const read = () =>
+      setMode(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+    const observer = new MutationObserver(read);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+  return mode;
+}
+
+/**
  * Writes the palette's CSS variables onto <html>. The default theme removes
  * every override so the cascade falls back to the :root blocks in styles.css.
  */

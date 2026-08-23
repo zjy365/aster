@@ -68,6 +68,12 @@ test("capture workbench surfaces in both themes", async ({ page }) => {
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await shot(page, "scale-dialog-dark-1440");
+  await dialog.getByLabel("Desired replicas").fill("5");
+  await dialog.getByTestId("operation-prepare-dry-run").click();
+  const review = page.getByTestId("mutation-review-dialog");
+  await expect(review).toBeVisible();
+  await expect(review.locator(".mutation-review-diff")).toContainText("replicas: 5");
+  await shot(page, "mutation-review-dark-1440");
 });
 
 test("capture logs surface dark", async ({ page }) => {

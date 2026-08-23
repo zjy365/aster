@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ResourceKind, ResourceMutationRequest } from "../../shared/types";
-import { HighlightedYaml } from "./yaml-highlight";
+import { MutationDiffView } from "./MutationDiffView";
 
 export interface CreateResourceDialogProps {
   open: boolean;
@@ -88,8 +88,10 @@ export function CreateResourceDialog({
         </DialogHeader>
 
         {reviewing ? (
-          <HighlightedYaml
-            code={preview || "No changes were returned by the dry-run."}
+          <MutationDiffView
+            name={kind.kind}
+            beforeYaml=""
+            afterYaml={preview}
             className="mutation-review-diff"
             ariaLabel="Create dry-run review"
           />

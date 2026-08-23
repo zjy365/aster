@@ -32,9 +32,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useResourceList } from "../hooks/useResourceList";
 import { findEnabledResourceKind } from "../lib/resource-catalog";
-import { semanticDiff } from "../lib/semantic-diff";
 import { DetailHeader } from "./DetailHeader";
 import { LogViewer } from "./LogViewer";
+import { MutationDiffView } from "./MutationDiffView";
 import { OverviewTab, type PodsPreview } from "./OverviewTab";
 import { resourceActionsFor, type ResourceActionId } from "./resource-actions";
 import { formatTimestamp } from "./resource-format";
@@ -209,11 +209,9 @@ export function ResourceDetailView({
     });
   }
   const reviewOpen = Boolean(pendingMutation && (detail || pendingMutation?.operation === "delete"));
-  const diff = !detail
-    ? mutationPreview
-    : pendingMutation?.operation === "delete"
-      ? semanticDiff(detail.yaml, "")
-      : semanticDiff(detail.yaml, mutationPreview || detail.yaml);
+  const diffBefore = detail?.yaml ?? "";
+  const diffAfter =
+    pendingMutation?.operation === "delete" ? "" : mutationPreview || detail?.yaml || "";
 
   function openOperation(kind: Exclude<OperationDialog, null>) {
     setOperationValue(kind === "scale" ? String(currentRow.desired ?? 1) : currentRow.images?.[0] || "");
@@ -383,8 +381,10 @@ export function ResourceDetailView({
           <div className="mutation-review-status" aria-live="polite">
             {mutationMessage || "Dry-run ready"}
           </div>
-          <HighlightedYaml
-            code={diff || "No changes were returned by the dry-run."}
+          <MutationDiffView
+            name={currentRow.name}
+            beforeYaml={diffBefore}
+            afterYaml={diffAfter}
             className="mutation-review-diff"
             ariaLabel="Dry-run Diff"
           />

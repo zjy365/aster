@@ -265,7 +265,25 @@ const MOCK_DESKTOP_API = `
       exec: async () => ({ stdout: "", stderr: "" }),
       portForwardStart: async () => ({ id: "pf-1", localPort: 12_345 }),
       portForwardStop: async () => undefined,
-      mutate: async (request) => ({ operation: request.operation, dryRun: Boolean(request.dryRun), changed: true, resourceVersion: "1001", name: request.name }),
+      mutate: async (request) => {
+        // Mirror the API server's optimistic concurrency: the live object sits
+        // at resourceVersion 1001 (the dry-run response reports it), so an apply
+        // presenting any other version — e.g. the stale list snapshot 1000 —
+        // is rejected.
+        if (!request.dryRun && request.resourceVersion && request.resourceVersion !== "1001") {
+          throw new Error("resource version conflict: expected " + request.resourceVersion + ", got 1001");
+        }
+        // Mirror the API server: a scale dry-run echoes the would-be object,
+        // including server-managed bumps (generation) the review diff filters out.
+        const yaml = request.dryRun && request.operation === "scale" && request.resourceKind.kind === "Deployment"
+          ? deploymentYaml(request.name)
+              .replace("  replicas: 2", "  replicas: " + request.replicas)
+              .replace("  namespace: default", "  namespace: default\\n  generation: 2")
+          : request.operation === "create"
+            ? request.yaml
+            : undefined;
+        return { operation: request.operation, dryRun: Boolean(request.dryRun), changed: true, resourceVersion: "1001", name: request.name, yaml };
+      },
       watch: (request, listener) => {
         const timer = setTimeout(() => {
           listener({
@@ -556,6 +574,69 @@ test("resource detail opens and preserves layout", async ({ page }) => {
   await expect(actions.getByTestId("delete-resource")).toBeVisible();
   await expectNoOverflow(page, "detail 1280x800");
   await screenshot(page, "detail-1280");
+  expect(failures).toEqual([]);
+});
+
+test("mutation review renders a collapsed GitHub-style diff", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
+  await firstRow.click();
+
+  await page.getByTestId("resource-action-scale").click();
+  const scaleDialog = page.getByTestId("resource-operation-dialog");
+  await expect(scaleDialog).toBeVisible();
+  await scaleDialog.getByLabel("Desired replicas").fill("5");
+  await scaleDialog.getByTestId("operation-prepare-dry-run").click();
+
+  const dialog = page.getByTestId("mutation-review-dialog");
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  const diff = dialog.locator(".mutation-review-diff");
+  await expect(diff).toBeVisible();
+  // The diff surface renders hunks, not the whole object: the changed replicas
+  // line shows up, while the server-managed generation bump is filtered out.
+  await expect(diff).toContainText("replicas: 5", { timeout: 15_000 });
+  await expect(diff).not.toContainText("generation");
+  await expect(dialog.getByTestId("mutation-apply")).toBeEnabled();
+  await expectNoOverflow(page, "mutation review diff 1280x800");
+  await screenshot(page, "mutation-review-1280");
+
+  // Apply presents the dry-run's resourceVersion (1001), not the stale list
+  // snapshot (1000) — the mock rejects anything else with a conflict.
+  await dialog.getByTestId("mutation-apply").click();
+  await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+  expect(failures).toEqual([]);
+});
+
+test("create review renders the preview as a pure addition", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("new-resource").click();
+  const dialog = page.getByTestId("create-resource-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId("create-yaml-editor").fill(
+    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: review-me\n  namespace: default\n",
+  );
+  await dialog.getByTestId("create-prepare-dry-run").click();
+
+  // The review reuses the GitHub-style diff surface: the new object is one
+  // pure addition, no server-side noise lines.
+  const diff = dialog.locator(".mutation-review-diff");
+  await expect(diff).toContainText("name: review-me", { timeout: 15_000 });
+  await expect(diff).not.toContainText("generation");
+  await expectNoOverflow(page, "create review 1280x800");
+  await screenshot(page, "create-review-1280");
+
+  await dialog.getByTestId("create-apply").click();
+  await expect(dialog).not.toBeVisible({ timeout: 15_000 });
   expect(failures).toEqual([]);
 });
 

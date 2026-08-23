@@ -72,10 +72,14 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
     try {
       const base: ResourceMutationRequest = isCreate
         ? { contextId, resourceKind: kind, namespace: namespace || undefined, name: "", ...request }
-        : { contextId, resourceKind: kind, namespace: selected?.namespace || undefined, name: selected?.name || "", resourceVersion: selected?.resourceVersion, ...request };
+        : { contextId, resourceKind: kind, namespace: selected?.namespace || undefined, name: selected?.name || "", ...request };
       const preview = await desktop.resources.mutate({ ...base, dryRun: true });
       setMutationPreview(preview.yaml || "");
-      setPendingMutation(base);
+      // The list row's resourceVersion is a stale snapshot; carrying it into the
+      // apply would conflict against any controller write in between. Instead
+      // the apply presents the version the dry-run ran against — exactly what
+      // the user reviewed — so conflicts only fire on changes made after review.
+      setPendingMutation({ ...base, resourceVersion: preview.resourceVersion || undefined });
       setMutationMessage(preview.changed ? "Dry-run ready — review the Diff" : "Dry-run found no changes");
     } catch (cause) {
       setMutationMessage(messageOf(cause));
