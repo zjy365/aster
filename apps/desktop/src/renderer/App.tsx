@@ -437,7 +437,7 @@ export default function App() {
         onOpenExternal={(url) => void desktop.app.openExternal(url)}
         onBack={() => contexts.setView(contexts.settingsFrom)}
       />
-      {updateCard && <UpdateNotice card={updateCard} />}
+      {updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />}
       </>
     );
   }
@@ -468,7 +468,7 @@ export default function App() {
           await contexts.loadContexts();
         }}
       />
-      {updateCard && <UpdateNotice card={updateCard} />}
+      {updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />}
       </>
     );
   }
@@ -648,7 +648,7 @@ export default function App() {
             </Suspense>
           )}
       </div>
-      {updateCard && <UpdateNotice card={updateCard} />}
+      {updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />}
       <CommandPalette
         open={paletteOpen}
         onOpenChange={(open) => {

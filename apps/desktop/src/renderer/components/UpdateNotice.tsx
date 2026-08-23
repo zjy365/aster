@@ -5,7 +5,7 @@ import type { UpdateCard } from "../hooks/useUpdater";
  * Bottom-right update card: new-version announcement with release notes, a
  * changelog link, and the update lifecycle (download → restart).
  */
-export function UpdateNotice({ card }: { card: UpdateCard }) {
+export function UpdateNotice({ card, onOpenExternal }: { card: UpdateCard; onOpenExternal?: (url: string) => void }) {
   if (card.state === "error") {
     return (
       <aside className="update-notice" data-testid="update-notice" data-state="error" role="alert">
@@ -54,7 +54,17 @@ export function UpdateNotice({ card }: { card: UpdateCard }) {
         )}
         <div className="update-notice-actions">
           {card.releaseUrl && card.state !== "downloaded" && (
-            <a className="update-notice-link" data-testid="update-link" href={card.releaseUrl} target="_blank" rel="noreferrer">
+            <a
+              className="update-notice-link"
+              data-testid="update-link"
+              href={card.releaseUrl}
+              onClick={(event) => {
+                // Tauri v2 has no capability for target=_blank webviews, so
+                // route through the app's external-opener channel instead.
+                event.preventDefault();
+                if (card.releaseUrl) onOpenExternal?.(card.releaseUrl);
+              }}
+            >
               What&apos;s changed
             </a>
           )}
