@@ -18,6 +18,7 @@ const maxRequestBody = 1 << 20
 type contextService interface {
 	Contexts() ([]session.ContextInfo, error)
 	SourceReports() session.SourcesReport
+	RenameEntry(path, kind, name, newName string) error
 }
 
 type Server struct {
@@ -37,6 +38,7 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("GET /v1/contexts", server.listContexts)
 	mux.HandleFunc("GET /v1/sources", server.listSources)
+	mux.HandleFunc("POST /v1/sources/rename", server.renameSource)
 	mux.HandleFunc("GET /v1/namespaces", server.listNamespaces)
 	mux.HandleFunc("GET /v1/discovery", server.listDiscovery)
 	mux.HandleFunc("GET /v1/overview", server.overview)
@@ -92,6 +94,30 @@ func (s *Server) listContexts(writer http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) listSources(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, s.contexts.SourceReports())
+}
+
+// renameSourceRequest asks the core to resolve a kubeconfig name collision by
+// renaming the colliding entry inside one configured source file.
+type renameSourceRequest struct {
+	Path    string `json:"path"`
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+	NewName string `json:"newName"`
+}
+
+func (s *Server) renameSource(writer http.ResponseWriter, request *http.Request) {
+	var value renameSourceRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateRenameSourceRequest(value)) {
+		return
+	}
+	if err := s.contexts.RenameEntry(value.Path, value.Kind, value.Name, value.NewName); err != nil {
+		writeError(writer, http.StatusBadRequest, "rename_failed", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"renamed": true})
 }
 
 func (s *Server) listNamespaces(writer http.ResponseWriter, request *http.Request) {

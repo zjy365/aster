@@ -8,6 +8,25 @@ export interface CoreStatus {
   message?: string;
 }
 
+/**
+ * One colliding definition in another kubeconfig source: which entry collides
+ * (the context name, or the name of the cluster this context references) and
+ * a suggested rename that would resolve the collision in that file.
+ */
+export interface ContextConflict {
+  path: string;
+  kind: "cluster" | "context";
+  name: string;
+  suggestion: string;
+}
+
+export interface RenameConflictRequest {
+  path: string;
+  kind: ContextConflict["kind"];
+  name: string;
+  newName: string;
+}
+
 export interface ContextInfo {
   id: string;
   name: string;
@@ -17,6 +36,11 @@ export interface ContextInfo {
   namespace: string;
   current: boolean;
   source?: string;
+  /**
+   * Entries in other source files that collide with this context's identity.
+   * The user is connected to the winning source.
+   */
+  conflicts?: ContextConflict[];
   error?: string;
 }
 
@@ -437,6 +461,11 @@ export interface DesktopApi {
   contexts: {
     list(): Promise<ContextInfo[]>;
     sourcesReport(): Promise<SourcesReport>;
+    /**
+     * Resolves a kubeconfig name collision by renaming the colliding entry
+     * inside the given source file (original preserved as <file>.aster.bak).
+     */
+    renameConflict(request: RenameConflictRequest): Promise<void>;
   };
   settings: {
     get(): Promise<AsterSettings>;

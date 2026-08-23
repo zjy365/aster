@@ -45,6 +45,11 @@ pub async fn sources_report(state: State<'_, AppState>) -> Result<Value, String>
 }
 
 #[tauri::command]
+pub async fn sources_rename(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/sources/rename", request).await
+}
+
+#[tauri::command]
 pub async fn namespaces_list(state: State<'_, AppState>, context_id: String) -> Result<Value, String> {
     // Pull the full inventory with large pages so a 200k-namespace cluster
     // loads in ~40 requests instead of ~400. The namespace picker and the

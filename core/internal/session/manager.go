@@ -170,6 +170,12 @@ func (m *Manager) Contexts() ([]ContextInfo, error) {
 	return m.loader.Contexts()
 }
 
+// RenameEntry resolves a kubeconfig name collision by renaming the colliding
+// entry inside a configured source file (see Loader.RenameEntry).
+func (m *Manager) RenameEntry(path, kind, name, newName string) error {
+	return m.loader.RenameEntry(path, kind, name, newName)
+}
+
 // ClientConfig exposes the context's client config to other domains (Helm).
 // It performs no connection and validates the context id like the lazy
 // clients do.

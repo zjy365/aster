@@ -101,6 +101,7 @@ pub fn run() {
             commands::core_status,
             commands::contexts_list,
             commands::sources_report,
+            commands::sources_rename,
             commands::namespaces_list,
             commands::discovery_list,
             commands::overview_get,

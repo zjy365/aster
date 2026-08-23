@@ -19,6 +19,7 @@ import type {
   ResourceListRequest,
   ResourceWatchBatch,
   SourcesReport,
+  RenameConflictRequest,
   UpdaterSnapshot,
 } from "../../shared/types";
 import {
@@ -104,6 +105,9 @@ export function createTauriDesktopApi(): DesktopApi {
         return value.contexts;
       },
       sourcesReport: () => invoke<SourcesReport>("sources_report"),
+      renameConflict: async (request) => {
+        await invoke("sources_rename", { request });
+      },
     },
     settings: {
       get: () => invoke<AsterSettings>("settings_get"),

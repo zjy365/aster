@@ -3,6 +3,7 @@ package rpc
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
@@ -31,6 +32,7 @@ const (
 	maxListLimit            = 5000
 	maxTailLines            = 100_000
 	maxReplicas             = 1_000_000
+	maxSourcePath           = 4_096
 )
 
 var mutationOperations = map[string]bool{
@@ -325,6 +327,30 @@ func checkLength(label, value string, max int) error {
 		return fmt.Errorf("%s is too long", label)
 	}
 	return nil
+}
+
+// validateRenameSourceRequest caps the rename request before any file is
+// touched; the loader additionally confines the path to configured sources.
+func validateRenameSourceRequest(value renameSourceRequest) error {
+	if err := checkLength("path", value.Path, maxSourcePath); err != nil {
+		return err
+	}
+	if value.Kind != "cluster" && value.Kind != "context" {
+		return fmt.Errorf("kind must be \"cluster\" or \"context\"")
+	}
+	if strings.TrimSpace(value.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	if strings.TrimSpace(value.NewName) == "" {
+		return fmt.Errorf("newName is required")
+	}
+	if value.Name == value.NewName {
+		return fmt.Errorf("newName must differ from name")
+	}
+	if err := checkLength("name", value.Name, maxName); err != nil {
+		return err
+	}
+	return checkLength("newName", value.NewName, maxName)
 }
 
 // rejectInvalid writes a 400 for a failed boundary validation and reports

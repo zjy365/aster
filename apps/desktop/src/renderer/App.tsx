@@ -462,6 +462,10 @@ export default function App() {
           contexts.setSettingsFrom(contexts.view);
           contexts.setView("settings");
         }}
+        onRenameConflict={async (request) => {
+          await desktop.contexts.renameConflict(request);
+          await contexts.loadContexts();
+        }}
       />
       {updateCard && <UpdateNotice card={updateCard} />}
       </>

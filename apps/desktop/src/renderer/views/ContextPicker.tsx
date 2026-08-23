@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowRight,
   Boxes,
   CheckCircle2,
@@ -11,10 +12,18 @@ import {
   Settings,
 } from "lucide-react";
 import { AsterMark } from "../components/AsterMark";
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import type { ContextInfo, CoreStatus } from "../../shared/types";
+import type { ContextInfo, CoreStatus, RenameConflictRequest } from "../../shared/types";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Empty,
   EmptyContent,
@@ -45,6 +54,8 @@ interface ContextPickerProps {
   onRefresh(): void;
   onConnect(contextId?: string): void;
   onOpenSettings(): void;
+  /** Renames a colliding entry inside its kubeconfig file, then reloads contexts. */
+  onRenameConflict(request: RenameConflictRequest): Promise<void>;
 }
 
 function ContextPicker({
@@ -62,8 +73,15 @@ function ContextPicker({
   onRefresh,
   onConnect,
   onOpenSettings,
+  onRenameConflict,
 }: ContextPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
+  const [conflictDialog, setConflictDialog] = useState<ContextInfo | null>(null);
+  // Key of the conflict row whose rename form is open: path|kind|name.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState("");
   const selected = contexts.find((context) => context.id === selectedId);
   const firstSelectableId = contexts.find((context) => !context.error)?.id;
   const canConnect =
@@ -79,6 +97,27 @@ function ContextPicker({
     if (core.state !== "ready" || loading || context.error) return;
     if (context.id !== selectedId) onSelect(context.id);
     onConnect(context.id);
+  }
+
+  function openConflictDialog(context: ContextInfo) {
+    setRenaming(null);
+    setRenameError("");
+    setConflictDialog(context);
+  }
+
+  async function renameConflict(path: string, kind: "cluster" | "context", name: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === name) return;
+    setRenameBusy(true);
+    setRenameError("");
+    try {
+      await onRenameConflict({ path, kind, name, newName: trimmed });
+      setConflictDialog(null);
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRenameBusy(false);
+    }
   }
 
   function focusOption(edgeOrOffset: "first" | "last" | -1 | 1) {
@@ -348,6 +387,7 @@ function ContextPicker({
               contexts.map((context) => {
                 const isSelected = context.id === selectedId;
                 const isTabStop = isSelected || (!selected && context.id === firstSelectableId);
+                const hasConflicts = Boolean(context.conflicts?.length);
 
                 return (
                   <Button
@@ -372,7 +412,41 @@ function ContextPicker({
                     </span>
                     <span className="context-card-copy">
                       <strong>{context.name}</strong>
-                      <span>{context.cluster || "Kubernetes cluster"}</span>
+                      <span className="context-card-sub">
+                        <span className="context-card-cluster">
+                          {context.cluster || "Kubernetes cluster"}
+                        </span>
+                        {hasConflicts && (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <span
+                                  className="context-conflict-warning"
+                                  data-testid={`context-conflict-${context.id}`}
+                                  aria-label="Show conflict details"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openConflictDialog(context);
+                                  }}
+                                  onDoubleClick={(event) => event.stopPropagation()}
+                                />
+                              }
+                            >
+                              <AlertTriangle aria-hidden="true" />
+                              <span>
+                                {context.conflicts!.length}{" "}
+                                {context.conflicts!.length === 1 ? "other source" : "other sources"}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="block max-w-sm leading-relaxed break-all">
+                              This name is defined by {context.conflicts!.length + 1} sources.
+                              Connecting to <strong>{context.server || context.cluster}</strong>{" "}
+                              from <strong>{context.source || "an unknown source"}</strong>. Click
+                              the warning for details and fixes.
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                      </span>
                       {context.error && <small>{context.error}</small>}
                     </span>
                     {isSelected && (
@@ -422,6 +496,112 @@ function ContextPicker({
           </footer>
         </section>
       </main>
+
+      <Dialog
+        open={Boolean(conflictDialog)}
+        onOpenChange={(open) => {
+          if (!open) setConflictDialog(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md" data-testid="context-conflict-dialog">
+          <DialogHeader>
+            <DialogTitle>Kubeconfig name conflict</DialogTitle>
+            <DialogDescription>
+              <strong>{conflictDialog?.name}</strong> is defined by{" "}
+              {(conflictDialog?.conflicts?.length ?? 0) + 1} sources. Aster connects to{" "}
+              <strong>{conflictDialog?.server || conflictDialog?.cluster}</strong> from{" "}
+              <strong>{conflictDialog?.source || "an unknown source"}</strong>; the definitions
+              below disagree, so the first one silently wins.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="context-conflict-files">
+            {conflictDialog?.conflicts?.map((conflict) => {
+              const key = `${conflict.path}|${conflict.kind}|${conflict.name}`;
+              return (
+                <div className="context-conflict-file" key={key}>
+                  <div className="context-conflict-entry">
+                    <span className="context-conflict-name">
+                      {conflict.kind} <strong>{conflict.name}</strong>
+                    </span>
+                    <span className="context-conflict-path" title={conflict.path}>
+                      {conflict.path}
+                    </span>
+                  </div>
+                  {renaming === key ? (
+                    <form
+                      className="context-conflict-rename"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void renameConflict(conflict.path, conflict.kind, conflict.name);
+                      }}
+                    >
+                      <input
+                        className="context-conflict-input"
+                        value={newName}
+                        onChange={(event) => setNewName(event.target.value)}
+                        aria-label="New name"
+                        data-testid="context-conflict-input"
+                        spellCheck={false}
+                        autoFocus
+                      />
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={renameBusy || !newName.trim() || newName.trim() === conflict.name}
+                        data-testid="context-conflict-rename-apply"
+                      >
+                        {renameBusy ? "Renaming…" : "Rename"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={renameBusy}
+                        onClick={() => setRenaming(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </form>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setRenaming(key);
+                        setNewName(conflict.suggestion);
+                        setRenameError("");
+                      }}
+                      data-testid="context-conflict-rename"
+                    >
+                      Rename in file
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {renameError && <p className="context-conflict-error" role="alert">{renameError}</p>}
+          <p className="context-conflict-note">
+            Renaming edits the file in place and updates every reference to the entry; the
+            original is preserved next to it as a .aster.bak file.
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConflictDialog(null)}>
+              Close
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setConflictDialog(null);
+                onOpenSettings();
+              }}
+            >
+              Open Settings
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

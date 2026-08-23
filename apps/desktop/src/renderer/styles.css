@@ -500,9 +500,9 @@ h2 {
   padding-inline: 2px 10px;
 }
 
-.context-card-copy strong,
-.context-card-copy span,
-.context-card-copy small {
+.context-card-copy > strong,
+.context-card-copy > span,
+.context-card-copy > small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -514,7 +514,7 @@ h2 {
   font-weight: 600;
 }
 
-.context-card-copy span {
+.context-card-copy > span {
   margin-top: 2px;
   color: var(--text-secondary);
   font-size: 11px;
@@ -524,6 +524,129 @@ h2 {
   margin-top: 4px;
   color: var(--failed);
   font-size: 10px;
+}
+
+.context-card-copy > .context-card-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.4;
+}
+
+.context-card-cluster {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-conflict-warning {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--warning);
+  cursor: pointer;
+}
+
+.context-conflict-warning > svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.context-conflict-warning > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-conflict-files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 12px;
+}
+
+.context-conflict-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.context-conflict-entry {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.context-conflict-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.context-conflict-name strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.context-conflict-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.context-conflict-rename {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 6px;
+}
+
+.context-conflict-input {
+  height: 26px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.context-conflict-input:focus {
+  border-color: var(--focus);
+}
+
+.context-conflict-error {
+  margin-top: 10px;
+  color: var(--failed);
+  font-size: 11px;
+}
+
+.context-conflict-note {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .current-context-badge {
@@ -2319,8 +2442,7 @@ h2 {
 }
 
 .resource-yaml-view,
-.resource-yaml-editor,
-.mutation-review-diff {
+.resource-yaml-editor {
   width: 100%;
   margin: 0;
   padding: 14px 16px;
@@ -2331,6 +2453,25 @@ h2 {
   color: var(--text);
   font: 11px/1.55 "JetBrains Mono", "SF Mono", ui-monospace, monospace;
   tab-size: 2;
+}
+
+/* Hosts the @pierre/diffs surface: it draws its own rows and padding, we only
+   frame it and hand over the app font stack via its CSS variables. */
+.mutation-review-diff {
+  width: 100%;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font: 11px/1.55 "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --diffs-font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --diffs-font-size: 11px;
+}
+
+.mutation-review-diff-empty {
+  padding: 14px 16px;
 }
 
 .resource-yaml-view {

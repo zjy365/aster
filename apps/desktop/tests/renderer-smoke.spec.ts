@@ -20,7 +20,7 @@ const MOCK_DESKTOP_API = `
   const PAGE = ${PAGE_SIZE};
 
   const contexts = [
-    { id: "dev", name: "dev", cluster: "dev-cluster", server: "https://dev.invalid", user: "dev", namespace: "default", current: true, source: "fixture" },
+    { id: "dev", name: "dev", cluster: "dev-cluster", server: "https://dev.invalid", user: "dev", namespace: "default", current: true, source: "fixture", conflicts: [{ path: "/Users/fixture/other.yaml", kind: "cluster", name: "dev-cluster", suggestion: "dev-cluster-hzh" }] },
     { id: "prod", name: "prod", cluster: "prod-cluster", server: "https://prod.invalid", user: "prod", namespace: "default", current: false, source: "fixture" },
     ...Array.from({ length: 58 }, (_, index) => ({
       id: "ctx-" + index,
@@ -150,6 +150,7 @@ const MOCK_DESKTOP_API = `
         chain: [{ path: "/Users/fixture/.kube/config", kind: "file", files: 1, contexts: 2, default: true }],
         configured: [],
       }),
+      renameConflict: async (request) => { window.__renamedConflict = request; },
     },
     settings: {
       get: async () => ({ kubeconfigSources: [], includeStandardChain: true }),
@@ -320,6 +321,61 @@ test("context picker renders without overflow at both viewports", async ({ page 
   await page.setViewportSize({ width: 900, height: 640 });
   await expectNoOverflow(page, "context picker 900x640");
   await screenshot(page, "picker-900");
+  expect(failures).toEqual([]);
+});
+
+test("context picker marks a context with kubeconfig name conflicts", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  // The dev context carries a conflicts array (same name in another source).
+  const option = page.getByTestId("context-option-dev");
+  await expect(option).toBeVisible();
+  // The warning row (icon + text, one line) is the tooltip trigger.
+  const trigger = page.getByTestId("context-conflict-dev");
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toContainText("1 other source");
+  // The row must stay inside its card, in the narrow grid layout too.
+  await page.getByTestId("context-layout-grid").click();
+  await page.setViewportSize({ width: 900, height: 640 });
+  const cardBox = await option.boundingBox();
+  const warnBox = await trigger.boundingBox();
+  expect(warnBox!.x + warnBox!.width, "warning row overflows its card horizontally")
+    .toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+  expect(warnBox!.y + warnBox!.height, "warning row overflows its card vertically")
+    .toBeLessThanOrEqual(cardBox!.y + cardBox!.height);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await trigger.hover();
+  await expect(page.locator('[data-slot="tooltip-content"]')).toContainText(
+    "Connecting to https://dev.invalid",
+    { timeout: 5000 },
+  );
+  await expectNoOverflow(page, "context picker conflict 1280x800");
+  await screenshot(page, "picker-conflict-1280");
+
+  // Clicking the warning opens the fix dialog; renaming resolves the conflict
+  // in the file itself, with a suggested collision-free name prefilled.
+  await trigger.click();
+  const dialog = page.getByTestId("context-conflict-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("defined by 2 sources");
+  await expect(dialog).toContainText("/Users/fixture/other.yaml");
+  await dialog.getByTestId("context-conflict-rename").click();
+  const input = dialog.getByTestId("context-conflict-input");
+  await expect(input).toHaveValue("dev-cluster-hzh");
+  await screenshot(page, "picker-conflict-dialog");
+  await input.fill("dev-cluster-renamed");
+  await dialog.getByTestId("context-conflict-rename-apply").click();
+  await expect(dialog).toHaveCount(0);
+  expect(
+    await page.evaluate(() => (window as unknown as { __renamedConflict: unknown }).__renamedConflict),
+  ).toEqual({
+    path: "/Users/fixture/other.yaml",
+    kind: "cluster",
+    name: "dev-cluster",
+    newName: "dev-cluster-renamed",
+  });
   expect(failures).toEqual([]);
 });
 

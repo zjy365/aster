@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,7 +20,22 @@ type ContextInfo struct {
 	Namespace string `json:"namespace,omitempty"`
 	Current   bool   `json:"current"`
 	Source    string `json:"source,omitempty"`
-	Error     string `json:"error,omitempty"`
+	// Conflicts lists the entries in other source files that collide with this
+	// context's identity. The winning source is not listed: it is the one the
+	// client actually connects to.
+	Conflicts []ConflictInfo `json:"conflicts,omitempty"`
+	Error     string         `json:"error,omitempty"`
+}
+
+// ConflictInfo describes one colliding definition in another source file:
+// which entry collides (a context name, or the cluster name this context
+// references) and a suggested rename that would resolve the collision in
+// that file.
+type ConflictInfo struct {
+	Path       string `json:"path"`
+	Kind       string `json:"kind"` // "context" or "cluster"
+	Name       string `json:"name"`
+	Suggestion string `json:"suggestion"`
 }
 
 type Loader struct {
@@ -288,10 +304,210 @@ func (l *Loader) Contexts() ([]ContextInfo, error) {
 		contexts = append(contexts, info)
 	}
 	sort.Slice(contexts, func(i, j int) bool { return contexts[i].Name < contexts[j].Name })
+	defs := l.fileDefs()
 	for index := range contexts {
 		contexts[index].Source = perFile[contexts[index].Name]
+		contexts[index].Conflicts = l.sourceConflicts(contexts[index], defs)
 	}
 	return contexts, nil
+}
+
+// fileDefs parses every precedence file once, capturing each file's clusters
+// (name → server) and contexts (name → cluster, server, namespace) so conflict
+// detection never re-reads files per context.
+type fileDefs map[string]fileDef
+
+type fileDef struct {
+	clusters map[string]string // cluster name -> server
+	contexts map[string]struct {
+		cluster   string
+		server    string
+		namespace string
+	}
+}
+
+func (l *Loader) fileDefs() fileDefs {
+	defs := make(fileDefs)
+	for _, file := range l.rules.Precedence {
+		if file == "" {
+			continue
+		}
+		config, err := clientcmd.LoadFromFile(file)
+		if err != nil {
+			continue
+		}
+		def := fileDef{
+			clusters: make(map[string]string, len(config.Clusters)),
+			contexts: make(map[string]struct {
+				cluster   string
+				server    string
+				namespace string
+			}, len(config.Contexts)),
+		}
+		for name, cluster := range config.Clusters {
+			def.clusters[name] = cluster.Server
+		}
+		for name, context := range config.Contexts {
+			def.contexts[name] = struct {
+				cluster   string
+				server    string
+				namespace string
+			}{context.Cluster, config.Clusters[context.Cluster].Server, context.Namespace}
+		}
+		defs[file] = def
+	}
+	return defs
+}
+
+// sourceConflicts reports which configured sources define the same context
+// name, or the same cluster name, with different content than the winning
+// source. Two silent-misconnection failure modes are caught:
+//
+//   - context-name collision: another file defines the same context name
+//     against a different server or namespace, so under first-wins merge the
+//     losing definition is silently dropped.
+//   - cluster-name collision: another file defines the cluster this context
+//     references with a different server, overriding the winner's cluster
+//     server and redirecting the context to the wrong cluster.
+//
+// Sources whose definitions match the winner are not conflicts.
+func (l *Loader) sourceConflicts(context ContextInfo, defs fileDefs) []ConflictInfo {
+	source, ok := defs[context.Source]
+	if !ok {
+		return nil
+	}
+	var conflicts []ConflictInfo
+	seen := map[string]bool{}
+	add := func(file, kind, name, server string, taken func(string) bool) {
+		key := file + "|" + kind + "|" + name
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		conflicts = append(conflicts, ConflictInfo{
+			Path:       file,
+			Kind:       kind,
+			Name:       name,
+			Suggestion: suggestedName(name, server, taken),
+		})
+	}
+	for file, def := range defs {
+		if file == context.Source {
+			continue
+		}
+		if other, exists := def.contexts[context.Name]; exists {
+			namespaceDiffers := other.namespace != "" && context.Namespace != "" && other.namespace != context.Namespace
+			if other.server != context.Server || namespaceDiffers {
+				add(file, "context", context.Name, other.server, func(candidate string) bool {
+					_, exists := def.contexts[candidate]
+					return exists
+				})
+			}
+		}
+		if sourceServer, exists := source.clusters[context.Cluster]; exists {
+			if otherServer, exists := def.clusters[context.Cluster]; exists && otherServer != sourceServer {
+				add(file, "cluster", context.Cluster, otherServer, func(candidate string) bool {
+					_, exists := def.clusters[candidate]
+					return exists
+				})
+			}
+		}
+	}
+	return conflicts
+}
+
+// suggestedName proposes a collision-free rename: base plus the first DNS
+// label of the entry's own server (so "sealos" against usw-1.sealos.io
+// becomes "sealos-usw-1"), numbered upward if the candidate is also taken.
+func suggestedName(base, server string, taken func(string) bool) string {
+	suffix := ""
+	if parsed, err := url.Parse(server); err == nil {
+		if host := parsed.Hostname(); host != "" {
+			suffix = strings.SplitN(host, ".", 2)[0]
+		}
+	}
+	if suffix == "" {
+		suffix = "copy"
+	}
+	candidate := base + "-" + suffix
+	for number := 2; taken(candidate); number++ {
+		candidate = fmt.Sprintf("%s-%s-%d", base, suffix, number)
+	}
+	return candidate
+}
+
+// RenameEntry renames a cluster or context entry inside one of the loader's
+// kubeconfig files, updating in-file references to it (cluster renames update
+// the contexts that point at the cluster; context renames update
+// current-context). The pre-edit original is preserved once next to the file
+// as <name>.aster.bak. The path must be one of the loader's precedence files
+// so the endpoint cannot write to arbitrary files.
+func (l *Loader) RenameEntry(path, kind, name, newName string) error {
+	if !containsPath(l.rules.Precedence, path) {
+		return fmt.Errorf("source %q is not a configured kubeconfig file", path)
+	}
+	config, err := clientcmd.LoadFromFile(path)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", path, err)
+	}
+	switch kind {
+	case "cluster":
+		cluster, exists := config.Clusters[name]
+		if !exists {
+			return fmt.Errorf("cluster %q is not defined in %s", name, path)
+		}
+		if _, exists := config.Clusters[newName]; exists {
+			return fmt.Errorf("cluster %q already exists in %s", newName, path)
+		}
+		config.Clusters[newName] = cluster
+		delete(config.Clusters, name)
+		for _, context := range config.Contexts {
+			if context.Cluster == name {
+				context.Cluster = newName
+			}
+		}
+	case "context":
+		context, exists := config.Contexts[name]
+		if !exists {
+			return fmt.Errorf("context %q is not defined in %s", name, path)
+		}
+		if _, exists := config.Contexts[newName]; exists {
+			return fmt.Errorf("context %q already exists in %s", newName, path)
+		}
+		config.Contexts[newName] = context
+		delete(config.Contexts, name)
+		if config.CurrentContext == name {
+			config.CurrentContext = newName
+		}
+	default:
+		return fmt.Errorf("kind must be \"cluster\" or \"context\"")
+	}
+	if err := backupOnce(path); err != nil {
+		return fmt.Errorf("back up %s: %w", path, err)
+	}
+	data, err := clientcmd.Write(*config)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	return os.WriteFile(path, data, mode)
+}
+
+// backupOnce preserves the file's original content next to it, only when no
+// backup exists yet, so repeated renames never overwrite the pre-Aster state.
+func backupOnce(path string) error {
+	backup := path + ".aster.bak"
+	if _, err := os.Stat(backup); err == nil {
+		return nil
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(backup, original, 0o600)
 }
 
 // mergeContextSources records which file first declares each context name,

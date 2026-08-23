@@ -34,6 +34,10 @@ func (fakeContexts) SourceReports() session.SourcesReport {
 	return session.SourcesReport{}
 }
 
+func (fakeContexts) RenameEntry(_, _, _, _ string) error {
+	return nil
+}
+
 type rpcClientProvider struct {
 	client dynamic.Interface
 }
