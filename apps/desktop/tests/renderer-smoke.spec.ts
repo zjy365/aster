@@ -169,7 +169,18 @@ const MOCK_DESKTOP_API = `
         truncated: false,
       }),
     },
-    metrics: { pods: async () => [] },
+    metrics: {
+      pods: async (_contextId, namespace) => {
+        // One container per pod, values oscillate so the detail chart shows a
+        // line, and the pod detail the test opens (pods-0) reports usage.
+        const value = (base, index) => base + (index % 3) * 5;
+        return [
+          { name: "pods-0", namespace: namespace || "default", containers: [{ name: "app", cpu: value(120, 0) + "m", memory: (96 + (0 % 3) * 8) + "Mi" }] },
+          { name: "pods-1", namespace: namespace || "default", containers: [{ name: "app", cpu: value(80, 1) + "m", memory: (64 + (1 % 3) * 8) + "Mi" }] },
+          { name: "pods-2", namespace: namespace || "default", containers: [{ name: "app", cpu: value(200, 2) + "m", memory: (192 + (2 % 3) * 8) + "Mi" }] },
+        ];
+      },
+    },
     overview: {
       get: async () => ({
         nodes: { total: 3, ready: 3 },
@@ -698,6 +709,47 @@ test("detail actions collapse into one More menu on a narrow window", async ({ p
 
   await expectNoOverflow(page, "detail 1000x800");
   await screenshot(page, "detail-narrow-1000");
+  expect(failures).toEqual([]);
+});
+
+test("pod detail shows live resource usage charts", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("resource-nav-pods").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("pods-0", { timeout: 15_000 });
+
+  // The Pod table carries the live CPU/memory readout columns ahead of Ready.
+  const headerText = await grid.getByRole("row").first().textContent();
+  expect(headerText?.indexOf("CPU") ?? -1).toBeGreaterThan(-1);
+  expect(headerText!.indexOf("CPU")).toBeLessThan(headerText!.indexOf("Ready"));
+  expect(headerText!.indexOf("Memory")).toBeLessThan(headerText!.indexOf("Ready"));
+  await expect(firstRow).toContainText("120m");
+  await expect(firstRow).toContainText("96.0 MiB");
+  await expectNoOverflow(page, "pod table with metrics 1280x800");
+  await screenshot(page, "pod-table-metrics-1280");
+
+  await firstRow.click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+
+  // The overview renders the usage charts once the first sample lands.
+  const usage = page.getByTestId("pod-usage");
+  await expect(usage).toBeVisible({ timeout: 15_000 });
+  await expect(usage).toContainText("Resource usage");
+  await expect(usage).toContainText("120m");
+  await expect(usage).toContainText("96.0 MiB");
+  await expect(usage.getByTestId("pod-usage-refresh")).toBeVisible();
+  await expectNoOverflow(page, "pod detail usage 1280x800");
+  await screenshot(page, "pod-usage-1280");
+
+  // The chart surface itself renders an SVG per series (CPU and memory).
+  await expect(usage.locator(".recharts-wrapper svg").first()).toBeVisible();
+  await expect(usage.locator(".pod-usage-area")).toHaveCount(2);
   expect(failures).toEqual([]);
 });
 

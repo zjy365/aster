@@ -3,7 +3,7 @@ import { AlertCircle, Boxes, Check, LoaderCircle, Minus, type LucideProps } from
 import { Checkbox } from "@base-ui/react/checkbox";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ResourceRow } from "../../shared/types";
-import { formatAge, formatReady } from "../lib/format";
+import { formatAge, formatCpuUsage, formatMemoryUsage, formatReady } from "../lib/format";
 
 type Icon = ComponentType<LucideProps>;
 
@@ -13,7 +13,7 @@ export function rowKey(row: ResourceRow): string {
   return row.uid || `${row.namespace}/${row.name}`;
 }
 
-export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect }: {
+export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics }: {
   rows: ResourceRow[];
   selected?: ResourceRow;
   checkedRows: ReadonlySet<string>;
@@ -25,6 +25,8 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   loading: boolean;
   error: string;
   onSelect(row: ResourceRow): void;
+  /** Live CPU/memory totals keyed by pod name; present only for the Pod kind. */
+  podMetrics?: ReadonlyMap<string, { cpu?: string; memory?: string }>;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   // A trailing "load more" row keeps server pagination reachable without a
@@ -96,7 +98,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
       aria-rowcount={rows.length + 1}
       onKeyDown={onGridKeyDown}
     >
-      <div className="table-header resource-grid" role="row" aria-rowindex={1}>
+      <div className={`table-header resource-grid ${podMetrics ? "pod-metrics-grid" : ""}`} role="row" aria-rowindex={1}>
         <span role="columnheader" className="checkbox-cell">
           <Checkbox.Root
             aria-label="Select all loaded resources"
@@ -114,6 +116,12 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
         <span role="columnheader">Name</span>
         <span role="columnheader">Namespace</span>
         <span role="columnheader">Status</span>
+        {podMetrics && (
+          <>
+            <span role="columnheader">CPU</span>
+            <span role="columnheader">Memory</span>
+          </>
+        )}
         <span role="columnheader">Ready</span>
         <span role="columnheader">Age</span>
       </div>
@@ -139,6 +147,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
             const row = rows[virtualRow.index];
             const active = selected?.uid === row.uid;
             const checked = checkedRows.has(rowKey(row));
+            const usage = podMetrics?.get(row.name);
             return (
               <div
                 role="row"
@@ -146,7 +155,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                 aria-selected={active}
                 data-row-index={virtualRow.index}
                 tabIndex={virtualRow.index === clampedFocus ? 0 : -1}
-                className={`table-row resource-grid ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
+                className={`table-row resource-grid ${podMetrics ? "pod-metrics-grid" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
                 key={rowKey(row)}
                 onClick={() => {
                   setFocusIndex(virtualRow.index);
@@ -172,6 +181,16 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                 <span role="gridcell" className="primary-cell"><StatusDot status={row.status} />{row.name}</span>
                 <span role="gridcell">{row.namespace || "Cluster-scoped"}</span>
                 <span role="gridcell">{row.status || "Unknown"}</span>
+                {podMetrics && (
+                  <>
+                    <span role="gridcell" className="tabular pod-usage-cell">
+                      {usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
+                    </span>
+                    <span role="gridcell" className="tabular pod-usage-cell">
+                      {usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
+                    </span>
+                  </>
+                )}
                 <span role="gridcell" className="tabular">{formatReady(row)}</span>
                 <span role="gridcell" className="tabular">{formatAge(row.createdAt)}</span>
               </div>

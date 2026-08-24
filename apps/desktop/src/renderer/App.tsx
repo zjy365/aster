@@ -97,6 +97,41 @@ export default function App() {
     coreReady: core.state === "ready",
   });
   const [helmActive, setHelmActive] = useState(false);
+
+  // Live CPU/memory readouts for the Pod table. Only fetched while the Pod
+  // kind is the active pane and the list is namespace-scoped, so a browse
+  // through other kinds never touches metrics.k8s.io.
+  const [podUsage, setPodUsage] = useState<ReadonlyMap<string, { cpu?: string; memory?: string }>>(new Map());
+  const [podUsageError, setPodUsageError] = useState("");
+  const podPaneActive = kind.id === "pods" && !overviewActive && !helmActive && Boolean(namespaces.namespace);
+  useEffect(() => {
+    if (!podPaneActive || !contextId) {
+      setPodUsage(new Map());
+      setPodUsageError("");
+      return;
+    }
+    let active = true;
+    const fetchMetrics = async () => {
+      try {
+        const metrics = await desktop.metrics.pods(contextId, namespaces.namespace);
+        if (!active) return;
+        setPodUsage(new Map(metrics.map((pod) => {
+          const cpu = pod.containers.map((container) => container.cpu).find((value) => value);
+          const memory = pod.containers.map((container) => container.memory).find((value) => value);
+          return [pod.name, { cpu, memory }];
+        })));
+        setPodUsageError("");
+      } catch (cause) {
+        if (active) setPodUsageError(messageOf(cause));
+      }
+    };
+    void fetchMetrics();
+    const timer = setInterval(() => void fetchMetrics(), 15_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [podPaneActive, contextId, namespaces.namespace, kind.id]);
   const helmToolGroups: SidebarToolGroup[] = useMemo(() => [{
     label: "Helm",
     items: [{ id: "helm", label: "Releases", icon: Ship }],
@@ -618,8 +653,9 @@ export default function App() {
               loadingMore={resources.loadingMore}
               onLoadMore={() => void resources.loadMore()}
               loading={resources.loading}
-              error={error}
+              error={error || (kind.id === "pods" && podUsageError ? `Metrics unavailable: ${podUsageError}` : "")}
               onSelect={detail.select}
+              podMetrics={kind.id === "pods" ? podUsage : undefined}
             />
           </section>
 

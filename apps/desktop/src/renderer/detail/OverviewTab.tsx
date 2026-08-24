@@ -7,7 +7,8 @@ import { StatusDot } from "../components/ResourceTable";
 import { formatReady } from "../lib/format";
 import { formatAge, formatTimestamp } from "./resource-format";
 import type { WorkloadCondition, WorkloadDetails } from "./workload-detail";
-
+import type { PodMetricsState } from "../hooks/usePodMetrics";
+import { PodUsageChart } from "./PodUsageChart";
 /** How many aside entries preview before deferring to the dedicated tab. */
 const EVENT_PREVIEW = 3;
 const RELATED_PREVIEW = 5;
@@ -32,6 +33,8 @@ export interface OverviewTabProps {
   related: RelatedResource[];
   /** Present for workload kinds that can resolve a pod selector. */
   pods?: PodsPreview;
+  /** Live CPU/memory sampling; present for Pod details. */
+  metrics?: PodMetricsState;
   onOpenEvents(): void;
   onOpenRelated(): void;
   onOpenPods?(): void;
@@ -48,6 +51,7 @@ export function OverviewTab({
   events,
   related,
   pods,
+  metrics,
   onOpenEvents,
   onOpenRelated,
   onOpenPods,
@@ -96,6 +100,10 @@ export function OverviewTab({
 
       <div className="resource-overview-body">
         <div className="resource-overview-main">
+          {metrics && (
+            <PodUsageChart metrics={metrics} />
+          )}
+
           {details && details.conditions.length > 0 && (
             <section className="resource-detail-section">
               <div className="resource-section-heading">

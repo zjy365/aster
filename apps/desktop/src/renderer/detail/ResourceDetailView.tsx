@@ -30,6 +30,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { usePodMetrics } from "../hooks/usePodMetrics";
 import { useResourceList } from "../hooks/useResourceList";
 import { findEnabledResourceKind } from "../lib/resource-catalog";
 import { DetailHeader } from "./DetailHeader";
@@ -166,6 +167,13 @@ export function ResourceDetailView({
     labelSelector: selector,
     enabled: Boolean(workload && selector),
   });
+  // Live CPU/memory for a single Pod; the hook idles (no polls) for other kinds.
+  const isPod = row?.kind === "Pod";
+  const metrics = usePodMetrics(
+    contextId,
+    isPod ? row?.namespace ?? "" : "",
+    isPod ? row?.name ?? "" : "",
+  );
 
   if (!row) {
     return (
@@ -284,6 +292,7 @@ export function ResourceDetailView({
               events={events}
               related={related}
               pods={podsPreview}
+              metrics={isPod ? metrics : undefined}
               onOpenEvents={() => setTab("events")}
               onOpenRelated={() => setTab("related")}
               onOpenPods={workload ? () => setTab("pods") : undefined}
