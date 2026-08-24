@@ -33,6 +33,8 @@ const (
 	maxTailLines            = 100_000
 	maxReplicas             = 1_000_000
 	maxSourcePath           = 4_096
+	maxRepoURL              = 2_048
+	maxChartVersion         = 128
 )
 
 var mutationOperations = map[string]bool{
@@ -320,6 +322,37 @@ func validateHelmRollbackRequest(value helm.RollbackRequest) error {
 		return fmt.Errorf("revision must be between 0 and %d", maxReplicas)
 	}
 	return nil
+}
+
+func validateHelmUpgradeRequest(value helm.UpgradeRequest) error {
+	if err := validateContextID(value.ContextID); err != nil {
+		return err
+	}
+	if err := checkLength("namespace", value.Namespace, maxNamespace); err != nil {
+		return err
+	}
+	if value.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if err := checkLength("name", value.Name, maxName); err != nil {
+		return err
+	}
+	if value.RepoURL == "" {
+		return fmt.Errorf("repoUrl is required")
+	}
+	if err := checkLength("repoUrl", value.RepoURL, maxRepoURL); err != nil {
+		return err
+	}
+	if value.Chart == "" {
+		return fmt.Errorf("chart is required")
+	}
+	if err := checkLength("chart", value.Chart, maxName); err != nil {
+		return err
+	}
+	if err := checkLength("version", value.Version, maxChartVersion); err != nil {
+		return err
+	}
+	return checkLength("values", value.Values, maxYAML)
 }
 
 func checkLength(label, value string, max int) error {

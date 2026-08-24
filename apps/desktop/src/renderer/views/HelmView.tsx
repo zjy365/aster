@@ -1,7 +1,10 @@
-import { ArrowLeft, LoaderCircle, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, CircleArrowUp, LoaderCircle, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { HelmReleaseDetail, HelmReleaseSummary } from "../../shared/types";
+import type { HelmUpgradeInput } from "../hooks/useHelm";
 import { formatAge } from "../lib/format";
+import { HelmUpgradeDialog } from "./HelmUpgradeDialog";
 
 export interface HelmViewProps {
   contextName?: string;
@@ -19,6 +22,7 @@ export interface HelmViewProps {
   onBack(): void;
   onUninstall(name: string): void;
   onRollback(name: string, revision?: number): void;
+  onUpgrade(input: HelmUpgradeInput): Promise<boolean>;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -52,6 +56,7 @@ export function HelmView({
   onBack,
   onUninstall,
   onRollback,
+  onUpgrade,
 }: HelmViewProps) {
   return (
     <section aria-label="Helm releases" className="helm-pane" data-testid="helm-view">
@@ -83,6 +88,7 @@ export function HelmView({
           onBack={onBack}
           onUninstall={onUninstall}
           onRollback={onRollback}
+          onUpgrade={onUpgrade}
         />
       ) : (
         <ReleaseTable
@@ -176,6 +182,7 @@ function ReleaseDetail({
   onBack,
   onUninstall,
   onRollback,
+  onUpgrade,
 }: {
   detail: HelmReleaseDetail;
   detailLoading: boolean;
@@ -184,7 +191,9 @@ function ReleaseDetail({
   onBack(): void;
   onUninstall(name: string): void;
   onRollback(name: string, revision?: number): void;
+  onUpgrade(input: HelmUpgradeInput): Promise<boolean>;
 }) {
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   return (
     <div className="helm-detail" data-testid="helm-detail">
       <header className="resource-detail-header">
@@ -207,6 +216,16 @@ function ReleaseDetail({
           </div>
         </div>
         <div className="resource-summary">
+          <button
+            className="load-more"
+            data-testid="helm-upgrade"
+            disabled={busy || detailLoading}
+            onClick={() => setUpgradeOpen(true)}
+            type="button"
+          >
+            {busy ? <LoaderCircle aria-hidden="true" className="spin size-3.5" /> : <CircleArrowUp aria-hidden="true" className="size-3.5" />}
+            Upgrade
+          </button>
           <button
             className="load-more"
             data-testid="helm-rollback"
@@ -249,6 +268,13 @@ function ReleaseDetail({
           <CodeBlock title="Notes" body={detail.notes} placeholder="No notes" dataTestid="helm-notes" />
         </>
       )}
+      <HelmUpgradeDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        detail={detail}
+        busy={busy}
+        onUpgrade={onUpgrade}
+      />
     </div>
   );
 }

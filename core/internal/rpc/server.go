@@ -46,6 +46,7 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("POST /v1/helm/releases/get", server.getHelmRelease)
 	mux.HandleFunc("POST /v1/helm/releases/uninstall", server.uninstallHelmRelease)
 	mux.HandleFunc("POST /v1/helm/releases/rollback", server.rollbackHelmRelease)
+	mux.HandleFunc("POST /v1/helm/releases/upgrade", server.upgradeHelmRelease)
 	mux.HandleFunc("POST /v1/resources/list", server.listResources)
 	mux.HandleFunc("POST /v1/resources/get", server.getResource)
 	mux.HandleFunc("POST /v1/resources/mutate", server.mutateResource)
@@ -248,6 +249,22 @@ func (s *Server) rollbackHelmRelease(writer http.ResponseWriter, request *http.R
 		return
 	}
 	result, err := s.helm.Rollback(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+func (s *Server) upgradeHelmRelease(writer http.ResponseWriter, request *http.Request) {
+	var value helm.UpgradeRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateHelmUpgradeRequest(value)) {
+		return
+	}
+	result, err := s.helm.Upgrade(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
 		return

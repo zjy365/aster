@@ -85,6 +85,26 @@ type UninstallResponse struct {
 	Info string `json:"info"`
 }
 
+type UpgradeRequest struct {
+	ContextID string `json:"contextId"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// RepoURL points at the chart repository hosting the chart. It is
+	// required because releases do not record their origin repository, so
+	// there is nothing to default it from.
+	RepoURL string `json:"repoUrl"`
+	Chart   string `json:"chart"`
+	Version string `json:"version,omitempty"`
+	// Values is the complete user values YAML for the new revision. An empty
+	// value resets to the chart defaults, matching helm upgrade without
+	// --reuse-values.
+	Values string `json:"values,omitempty"`
+}
+
+type UpgradeResponse struct {
+	Revision int `json:"revision"`
+}
+
 type RollbackRequest struct {
 	ContextID string `json:"contextId"`
 	Namespace string `json:"namespace"`

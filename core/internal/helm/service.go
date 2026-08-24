@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -36,6 +39,9 @@ type Service struct {
 	// newConfiguration replaces the real client wiring in tests so the
 	// service can run against an in-memory Helm storage without a cluster.
 	newConfiguration func(ctx context.Context, contextID, namespace string) (*action.Configuration, error)
+	// locateChart replaces chart resolution in tests so upgrades run without
+	// a chart repository.
+	locateChart func(options action.ChartPathOptions, name string) (*chart.Chart, error)
 }
 
 func NewService(clients ClientConfigProvider) *Service {
@@ -198,6 +204,59 @@ func (s *Service) Uninstall(ctx context.Context, request UninstallRequest) (Unin
 	return UninstallResponse{Info: info}, nil
 }
 
+// loadChart resolves the upgrade chart through the user's local Helm
+// settings (repository config and credentials, matching the helm CLI), or
+// through the injected fake in tests.
+func (s *Service) loadChart(options action.ChartPathOptions, name string) (*chart.Chart, error) {
+	if s.locateChart != nil {
+		return s.locateChart(options, name)
+	}
+	path, err := options.LocateChart(name, cli.New())
+	if err != nil {
+		return nil, fmt.Errorf("locate chart %q: %w", name, err)
+	}
+	loaded, err := loader.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("load chart %q: %w", name, err)
+	}
+	return loaded, nil
+}
+
+func (s *Service) Upgrade(ctx context.Context, request UpgradeRequest) (UpgradeResponse, error) {
+	if request.ContextID == "" || request.Namespace == "" || request.Name == "" {
+		return UpgradeResponse{}, invalid("contextId, namespace and name are required")
+	}
+	if strings.TrimSpace(request.RepoURL) == "" || strings.TrimSpace(request.Chart) == "" {
+		return UpgradeResponse{}, invalid("repoUrl and chart are required")
+	}
+	values := map[string]any{}
+	if strings.TrimSpace(request.Values) != "" {
+		if err := yaml.Unmarshal([]byte(request.Values), &values); err != nil {
+			return UpgradeResponse{}, invalid(fmt.Sprintf("values is not valid YAML: %v", err))
+		}
+	}
+	config, err := s.configuration(ctx, request.ContextID, request.Namespace)
+	if err != nil {
+		return UpgradeResponse{}, err
+	}
+	client := action.NewUpgrade(config)
+	client.Timeout = 5 * time.Minute
+	client.RepoURL = request.RepoURL
+	client.Version = request.Version
+	loaded, err := s.loadChart(client.ChartPathOptions, request.Chart)
+	if err != nil {
+		return UpgradeResponse{}, err
+	}
+	upgraded, err := client.RunWithContext(ctx, request.Name, loaded, values)
+	if err != nil {
+		if isNotFound(err) {
+			return UpgradeResponse{}, notFound(fmt.Sprintf("release %q was not found", request.Name))
+		}
+		return UpgradeResponse{}, fmt.Errorf("upgrade release %q: %w", request.Name, err)
+	}
+	return UpgradeResponse{Revision: upgraded.Version}, nil
+}
+
 func (s *Service) Rollback(ctx context.Context, request RollbackRequest) (RollbackResponse, error) {
 	if request.ContextID == "" || request.Namespace == "" || request.Name == "" {
 		return RollbackResponse{}, invalid("contextId, namespace and name are required")
@@ -264,5 +323,7 @@ func capText(value string) (string, bool) {
 }
 
 func isNotFound(err error) bool {
-	return errors.Is(err, driver.ErrReleaseNotFound)
+	// Upgrade reports a missing release as ErrNoDeployedReleases instead of
+	// ErrReleaseNotFound; both mean the renderer should show not-found.
+	return errors.Is(err, driver.ErrReleaseNotFound) || errors.Is(err, driver.ErrNoDeployedReleases)
 }

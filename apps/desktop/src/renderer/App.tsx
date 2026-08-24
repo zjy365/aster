@@ -585,6 +585,7 @@ export default function App() {
               onBack={helm.clear}
               onUninstall={(name) => void helm.uninstall(name)}
               onRollback={(name, revision) => void helm.rollback(name, revision)}
+              onUpgrade={helm.upgrade}
             />
           )}
           <section className="resource-pane" aria-label={`${kind.kind} resources`} hidden={overviewActive || helmActive || Boolean(detail.selected)}>

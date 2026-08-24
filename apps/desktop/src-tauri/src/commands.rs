@@ -171,6 +171,11 @@ pub async fn helm_releases_rollback(state: State<'_, AppState>, request: Value) 
 }
 
 #[tauri::command]
+pub async fn helm_releases_upgrade(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/helm/releases/upgrade", request).await
+}
+
+#[tauri::command]
 pub async fn pods_portforward_start(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
     state.core.post("/v1/pods/portforward", request).await
 }

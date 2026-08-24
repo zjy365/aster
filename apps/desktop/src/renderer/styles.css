@@ -4309,6 +4309,42 @@ button.overview-card:focus-visible {
   font-size: 11px;
 }
 
+.helm-upgrade-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.helm-upgrade-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.helm-upgrade-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.helm-upgrade-input {
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.helm-upgrade-input:focus {
+  border-color: var(--focus);
+}
+
 /* ---- Log viewer (xterm surface) ---- */
 
 .log-viewer {

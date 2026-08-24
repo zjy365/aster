@@ -369,6 +369,28 @@ export interface HelmRollbackRequest {
   revision?: number;
 }
 
+export interface HelmUpgradeRequest {
+  contextId: string;
+  namespace: string;
+  name: string;
+  /**
+   * Chart repository URL. Required because releases do not record their
+   * origin repository, so there is nothing to default it from.
+   */
+  repoUrl: string;
+  chart: string;
+  version?: string;
+  /**
+   * Complete user values YAML for the new revision. Empty resets the
+   * release to the chart defaults (helm upgrade without --reuse-values).
+   */
+  values?: string;
+}
+
+export interface HelmUpgradeResponse {
+  revision: number;
+}
+
 export interface OverviewCount {
   total: number;
   ready: number;
@@ -491,6 +513,7 @@ export interface DesktopApi {
     get(request: HelmGetRequest): Promise<HelmReleaseDetail>;
     uninstall(request: HelmUninstallRequest): Promise<void>;
     rollback(request: HelmRollbackRequest): Promise<void>;
+    upgrade(request: HelmUpgradeRequest): Promise<HelmUpgradeResponse>;
   };
   resources: {
     list(request: ResourceListRequest): Promise<ResourceListResponse>;

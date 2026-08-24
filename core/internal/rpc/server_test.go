@@ -231,6 +231,19 @@ func TestServerValidatesHelmRequests(t *testing.T) {
 	if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
+
+	missingChart := httptest.NewRequest(http.MethodPost, "/v1/helm/releases/upgrade", bytes.NewBufferString(`{
+		"contextId":"dev",
+		"namespace":"apps",
+		"name":"web",
+		"repoUrl":"https://charts.example.test"
+	}`))
+	missingChart.Header.Set("Authorization", "Bearer token")
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, missingChart)
+	if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
 }
 
 func performRequest(t *testing.T, server *Server, method, target string) *httptest.ResponseRecorder {

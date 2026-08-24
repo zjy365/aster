@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { HelmReleaseDetail, HelmReleaseSummary } from "../../shared/types";
+import type { HelmReleaseDetail, HelmReleaseSummary, HelmUpgradeRequest } from "../../shared/types";
 import { desktop } from "../lib/desktop";
 
 export interface UseHelmOptions {
@@ -7,6 +7,8 @@ export interface UseHelmOptions {
   namespace: string;
   coreReady: boolean;
 }
+
+export type HelmUpgradeInput = Omit<HelmUpgradeRequest, "contextId" | "namespace">;
 
 export interface HelmState {
   releases: HelmReleaseSummary[];
@@ -24,6 +26,8 @@ export interface HelmState {
   clear(): void;
   uninstall(name: string): Promise<void>;
   rollback(name: string, revision?: number): Promise<void>;
+  /** Resolves true when the upgrade succeeded so the dialog can close. */
+  upgrade(input: HelmUpgradeInput): Promise<boolean>;
 }
 
 /**
@@ -118,6 +122,25 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     }
   }, [contextId, namespace, busy, refresh]);
 
+  const upgrade = useCallback(async (input: HelmUpgradeInput): Promise<boolean> => {
+    if (!contextId || !namespace || busy) return false;
+    setBusy(true);
+    setMessage("");
+    setDetailError("");
+    try {
+      const response = await desktop.helm.upgrade({ contextId, namespace, ...input });
+      setMessage(`Release "${input.name}" upgraded to revision ${response.revision}`);
+      await select(input.name);
+      refresh();
+      return true;
+    } catch (cause) {
+      setDetailError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [contextId, namespace, busy, select, refresh]);
+
   return {
     releases,
     loading,
@@ -133,5 +156,6 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     clear,
     uninstall,
     rollback,
+    upgrade,
   };
 }

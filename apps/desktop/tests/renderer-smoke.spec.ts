@@ -230,6 +230,7 @@ const MOCK_DESKTOP_API = `
       }),
       uninstall: async () => undefined,
       rollback: async () => undefined,
+      upgrade: async () => ({ revision: 4 }),
     },
     resources: {
       list: async (request) => pageOf(request),
@@ -1063,6 +1064,21 @@ test("helm view lists releases and opens a detail", async ({ page }) => {
   await expect(detail.getByTestId("helm-uninstall")).toBeVisible();
   await expectNoOverflow(page, "helm detail 1280x800");
   await screenshot(page, "helm-detail-1280");
+
+  // Upgrade opens the form prefilled from the current release.
+  await detail.getByTestId("helm-upgrade").click();
+  const upgradeDialog = page.getByTestId("helm-upgrade-dialog");
+  await expect(upgradeDialog).toBeVisible();
+  await expect(upgradeDialog.getByTestId("helm-upgrade-chart")).toHaveValue("web");
+  await expect(upgradeDialog.getByTestId("helm-upgrade-version")).toHaveValue("1.2.3");
+  await expect(upgradeDialog.getByTestId("helm-upgrade-values")).toHaveValue("replicas: 2");
+  await expect(upgradeDialog.getByTestId("helm-upgrade-submit")).toBeDisabled();
+  await upgradeDialog.getByTestId("helm-upgrade-repo-url").fill("https://charts.example.test");
+  await expectNoOverflow(page, "helm upgrade dialog 1280x800");
+  await screenshot(page, "helm-upgrade-1280");
+  await upgradeDialog.getByTestId("helm-upgrade-submit").click();
+  await expect(view.getByTestId("helm-message")).toContainText("upgraded to revision 4");
+  await expect(upgradeDialog).not.toBeVisible();
 
   // Back returns to the release list; the helm tab stays active.
   await detail.getByTestId("helm-back").click();

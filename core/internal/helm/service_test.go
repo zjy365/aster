@@ -9,6 +9,7 @@ import (
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
+	chartutil "helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/kube/fake"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/storage"
@@ -22,11 +23,29 @@ func testService(t *testing.T, store *storage.Storage) *Service {
 	t.Helper()
 	service := &Service{newConfiguration: func(context.Context, string, string) (*action.Configuration, error) {
 		return &action.Configuration{
-			KubeClient: &fake.PrintingKubeClient{},
-			Releases:   store,
-			Log:        func(string, ...interface{}) {},
+			KubeClient:   &fake.PrintingKubeClient{},
+			Releases:     store,
+			Capabilities: chartutil.DefaultCapabilities,
+			Log:          func(string, ...interface{}) {},
 		}, nil
 	}}
+	return service
+}
+
+// upgradeService stubs chart resolution with a minimal local chart so
+// upgrades run without a chart repository.
+func upgradeService(t *testing.T, store *storage.Storage) *Service {
+	t.Helper()
+	service := testService(t, store)
+	service.locateChart = func(action.ChartPathOptions, string) (*chart.Chart, error) {
+		return &chart.Chart{
+			Metadata: &chart.Metadata{Name: "web", Version: "1.3.0"},
+			Templates: []*chart.File{{
+				Name: "templates/cm.yaml",
+				Data: []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-cm\ndata:\n  replicas: \"{{ .Values.replicas }}\"\n"),
+			}},
+		}, nil
+	}
 	return service
 }
 
@@ -145,6 +164,10 @@ func TestServiceRejectsMissingInputs(t *testing.T) {
 		{"uninstall name", UninstallRequest{ContextID: "dev", Namespace: "apps"}},
 		{"rollback name", RollbackRequest{ContextID: "dev", Namespace: "apps"}},
 		{"rollback revision", RollbackRequest{ContextID: "dev", Namespace: "apps", Name: "web", Revision: -1}},
+		{"upgrade name", UpgradeRequest{ContextID: "dev", Namespace: "apps", RepoURL: "https://example.test", Chart: "web"}},
+		{"upgrade repoUrl", UpgradeRequest{ContextID: "dev", Namespace: "apps", Name: "web", Chart: "web"}},
+		{"upgrade chart", UpgradeRequest{ContextID: "dev", Namespace: "apps", Name: "web", RepoURL: "https://example.test"}},
+		{"upgrade values", UpgradeRequest{ContextID: "dev", Namespace: "apps", Name: "web", RepoURL: "https://example.test", Chart: "web", Values: "{{"}},
 	}
 	for _, test := range cases {
 		var err error
@@ -157,6 +180,8 @@ func TestServiceRejectsMissingInputs(t *testing.T) {
 			_, err = service.Uninstall(context.Background(), request)
 		case RollbackRequest:
 			_, err = service.Rollback(context.Background(), request)
+		case UpgradeRequest:
+			_, err = service.Upgrade(context.Background(), request)
 		}
 		var validationErr *ValidationError
 		if err == nil || !errors.As(err, &validationErr) {
@@ -181,6 +206,57 @@ func TestUninstallAndRollbackOnMissingRelease(t *testing.T) {
 	}
 	if !errors.As(err, &notFoundErr) {
 		t.Fatalf("rollback error = %v, want NotFoundError", err)
+	}
+}
+
+func TestUpgradeCreatesNewRevisionWithValues(t *testing.T) {
+	store := testStorage(t)
+	seed(t, store, chartRelease("web", "apps", 1, release.StatusDeployed))
+	service := upgradeService(t, store)
+
+	response, err := service.Upgrade(context.Background(), UpgradeRequest{
+		ContextID: "dev",
+		Namespace: "apps",
+		Name:      "web",
+		RepoURL:   "https://charts.example.test",
+		Chart:     "web",
+		Version:   "1.3.0",
+		Values:    "replicas: 3\n",
+	})
+	if err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if response.Revision != 2 {
+		t.Fatalf("revision = %d, want 2", response.Revision)
+	}
+	latest, err := store.Last("web")
+	if err != nil {
+		t.Fatalf("store.Last: %v", err)
+	}
+	if latest.Chart.Metadata.Version != "1.3.0" {
+		t.Fatalf("chart version = %q, want 1.3.0", latest.Chart.Metadata.Version)
+	}
+	// YAML numbers arrive as float64 through the sigs.k8s.io/yaml JSON round trip.
+	if latest.Config["replicas"] != float64(3) {
+		t.Fatalf("config = %#v, want replicas 3", latest.Config)
+	}
+	if !strings.Contains(latest.Manifest, "replicas: \"3\"") {
+		t.Fatalf("manifest did not render new values: %q", latest.Manifest)
+	}
+}
+
+func TestUpgradeRejectsMissingRelease(t *testing.T) {
+	service := upgradeService(t, testStorage(t))
+	_, err := service.Upgrade(context.Background(), UpgradeRequest{
+		ContextID: "dev",
+		Namespace: "apps",
+		Name:      "missing",
+		RepoURL:   "https://charts.example.test",
+		Chart:     "web",
+	})
+	var notFoundErr *NotFoundError
+	if err == nil || !errors.As(err, &notFoundErr) {
+		t.Fatalf("error = %v, want NotFoundError", err)
 	}
 }
 
