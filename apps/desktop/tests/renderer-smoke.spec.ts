@@ -844,6 +844,35 @@ test("settings opens as a page and returns to the picker", async ({ page }) => {
   await expect(page.getByTestId("context-option-prod")).toBeVisible();
 });
 
+test("settings opens with no kubeconfig at all", async ({ page }) => {
+  // A machine with no kubeconfig: the core reports zero contexts and an empty
+  // standard chain (the wire contract is [], never null — a null here once
+  // crashed the settings page on open).
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as { __ASTER_DESKTOP__?: { contexts: Record<string, unknown> } }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.contexts.list = async () => [];
+      desktop.contexts.sourcesReport = async () => ({ chain: [], configured: [] });
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  await expect(page.getByTestId("context-picker-empty")).toContainText("No contexts found");
+  await page.getByTestId("context-picker-settings").click();
+
+  const settings = page.getByTestId("settings-page");
+  await expect(settings).toBeVisible();
+  await settings.getByTestId("settings-tab-kubeconfig").click();
+  await expect(settings.getByTestId("settings-chain-list")).toContainText(
+    "No kubeconfig found in the standard chain.",
+  );
+  await expectNoOverflow(page, "settings page with no kubeconfig");
+  await screenshot(page, "settings-no-kubeconfig");
+  expect(failures).toEqual([]);
+});
+
 test("settings opens from the workbench toolbar and returns", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });

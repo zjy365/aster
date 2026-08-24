@@ -151,7 +151,9 @@ type SourcesReport struct {
 }
 
 func (l *Loader) SourceReports() SourcesReport {
-	var report SourcesReport
+	// Chain starts as an empty slice, not nil: the renderer reads
+	// chain.length directly, and a nil slice would serialize as JSON null.
+	report := SourcesReport{Chain: []SourceReport{}}
 	chain := chainFiles()
 	if l.includeChain {
 		home, _ := os.UserHomeDir()

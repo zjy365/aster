@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,6 +254,28 @@ users:
     token: default-token
 `)
 	return path
+}
+
+// The wire contract promises arrays: with no kubeconfig anywhere the chain
+// must serialize as [], not null — the renderer reads chain.length directly.
+func TestSourceReportsEmptyChainSerializesAsArray(t *testing.T) {
+	isolateChain(t)
+
+	loader := NewLoaderWithSources(nil, true)
+	data, err := json.Marshal(loader.SourceReports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Chain      []SourceReport `json:"chain"`
+		Configured []SourceReport `json:"configured"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Chain == nil {
+		t.Fatalf("chain serialized as null: %s", data)
+	}
 }
 
 func TestLoaderWithSourcesCanExcludeStandardChain(t *testing.T) {
