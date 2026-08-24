@@ -466,7 +466,20 @@ function ContextPicker({
                 description={
                   totalContexts
                     ? "Try another name or cluster."
-                    : "Add a context to your kubeconfig, then refresh."
+                    : "Add a kubeconfig file in Settings, then refresh."
+                }
+                action={
+                  totalContexts ? undefined : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={onOpenSettings}
+                      data-testid="context-picker-empty-settings"
+                    >
+                      <Settings data-icon="inline-start" aria-hidden="true" />
+                      Open Settings
+                    </Button>
+                  )
                 }
               />
             )}

@@ -470,7 +470,10 @@ export default function App() {
         onPickFolder={() => desktop.settings.pickKubeconfigFolder()}
         onCheckUpdates={checkForUpdates}
         onOpenExternal={(url) => void desktop.app.openExternal(url)}
-        onBack={() => contexts.setView(contexts.settingsFrom)}
+        onBack={() => {
+          contexts.setView(contexts.settingsFrom);
+          if (contexts.settingsFrom === "contexts") void contexts.loadContexts();
+        }}
       />
       {updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />}
       </>

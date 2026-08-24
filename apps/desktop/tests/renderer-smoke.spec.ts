@@ -912,7 +912,8 @@ test("settings opens with no kubeconfig at all", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByTestId("context-picker-empty")).toContainText("No contexts found");
-  await page.getByTestId("context-picker-settings").click();
+  // The empty state guides straight into Settings instead of the toolbar gear.
+  await page.getByTestId("context-picker-empty-settings").click();
 
   const settings = page.getByTestId("settings-page");
   await expect(settings).toBeVisible();
