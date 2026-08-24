@@ -1,6 +1,11 @@
 name: Landing
 
+# workflow_dispatch is the escape hatch for a stale Pages deploy: GitHub Pages
+# deduplicates deployments by commit SHA (pages_build_version), so re-running a
+# job for the same commit — including the release-triggered run, which always
+# shares the version-bump commit — is accepted but never swaps the content.
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -70,8 +75,8 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     # Pull requests build and upload the artifact, but never publish. Release
-    # triggers (release: published) deploy like a push does.
-    if: github.event_name == 'push' || github.event_name == 'release'
+    # triggers (release: published) and manual dispatches deploy like a push.
+    if: github.event_name == 'push' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
