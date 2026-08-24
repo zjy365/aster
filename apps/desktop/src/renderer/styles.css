@@ -689,12 +689,12 @@ h2 {
   text-align: center;
 }
 
-.context-picker-state svg {
+.context-picker-state [data-slot="empty-icon"] {
   margin-bottom: 12px;
   color: var(--faint);
 }
 
-.context-picker-state[data-tone="error"] svg {
+.context-picker-state[data-tone="error"] [data-slot="empty-icon"] {
   color: var(--failed);
 }
 
@@ -4443,4 +4443,69 @@ button.overview-card:focus-visible {
 
 .log-viewer-section {
   min-width: 0;
+}
+
+/* Pod resource usage: two compact area charts in the detail overview. */
+.pod-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.pod-usage-area {
+  min-width: 0;
+}
+
+.pod-usage-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.pod-usage-heading strong {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pod-usage-value {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pod-usage-chart {
+  width: 100%;
+  height: 150px;
+}
+
+.pod-usage-chart .recharts-cartesian-axis-tick text {
+  fill: var(--faint);
+  font-size: 10px;
+}
+
+.pod-usage-chart .pod-usage-grid-line {
+  stroke: var(--border);
+}
+
+.pod-usage-chart .recharts-surface {
+  outline: none;
+}
+
+.resource-section-subnote {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* Pod table: two extra usage columns ahead of Ready when metrics are live. */
+.pod-metrics-grid {
+  grid-template-columns: 32px minmax(180px, 2fr) minmax(100px, 1.1fr) minmax(90px, 1fr) minmax(64px, 0.7fr) minmax(80px, 0.9fr) 56px 48px;
+}
+
+.pod-usage-cell {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
