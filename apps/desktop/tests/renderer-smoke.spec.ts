@@ -161,11 +161,15 @@ const MOCK_DESKTOP_API = `
     },
     discovery: { list: async () => discovery },
     namespaces: {
-      list: async () => ({
-        namespaces: [
-          { name: "default", status: "Active" },
-          { name: "kube-system", status: "Active" },
-        ],
+      // Per-context lists: dev has two namespaces, prod only one, so the
+      // context-switch regression test can tell a stale list apart.
+      list: async (contextId) => ({
+        namespaces: contextId === "prod"
+          ? [{ name: "default", status: "Active" }]
+          : [
+              { name: "default", status: "Active" },
+              { name: "kube-system", status: "Active" },
+            ],
         truncated: false,
       }),
     },
@@ -1010,6 +1014,44 @@ test("context picker keeps the brand visible when many contexts scroll", async (
   });
   await expect(brand).toBeVisible();
   await expectNoOverflow(page, "picker with many contexts");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker refetches the list after each context switch", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const openPicker = async () => {
+    await page.getByTestId("namespace-select").click();
+    await expect(page.getByTestId("namespace-filter")).toBeVisible();
+  };
+  const namespaceItem = (name: string) =>
+    page.locator(".namespace-combobox-item", { hasText: name });
+
+  // dev: the list loads on first open.
+  await openPicker();
+  await expect(namespaceItem("kube-system")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Switch to prod: only prod's namespaces may appear — never dev's stale list.
+  await page.getByTestId("change-context").click();
+  const prod = page.getByTestId("context-option-prod");
+  await prod.click();
+  await prod.dblclick();
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await openPicker();
+  await expect(namespaceItem("default")).toBeVisible();
+  await expect(namespaceItem("kube-system")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // Back to dev: the list must load again (regression: it stayed empty).
+  await page.getByTestId("change-context").click();
+  await connectToDev(page);
+  await openPicker();
+  await expect(namespaceItem("kube-system")).toBeVisible();
+  await screenshot(page, "namespace-picker-after-context-switch");
   expect(failures).toEqual([]);
 });
 

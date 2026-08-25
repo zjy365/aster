@@ -30,25 +30,35 @@ export function useNamespaces(
   const [namespace, setNamespace] = useState("");
   const [loaded, setLoaded] = useState(false);
   const loadingRef = useRef(false);
+  // Bumped on every context change so a slow fetch started under the previous
+  // context is discarded when it resolves late.
+  const generationRef = useRef(0);
 
   useEffect(() => {
+    generationRef.current += 1;
+    loadingRef.current = false;
+    setNamespaces([]);
+    setTruncated(false);
+    setLoaded(false);
     if (!contextId) {
-      setNamespaces([]);
-      setTruncated(false);
       setNamespace("");
-      setLoaded(false);
       return;
     }
     // The context's default namespace is known without the list.
     const context = contexts.find((item) => item.id === contextId);
     setNamespace(context?.namespace || "");
-  }, [contextId, contexts]);
+    // Only a context switch resets the list; contexts identity churn must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextId]);
 
   const load = useCallback(() => {
     if (!contextId || loaded || loadingRef.current) return;
     loadingRef.current = true;
+    const generation = generationRef.current;
     desktop.namespaces.list(contextId)
       .then((result) => {
+        if (generation !== generationRef.current) return;
+        loadingRef.current = false;
         setNamespaces(result.namespaces);
         setTruncated(result.truncated);
         setLoaded(true);
@@ -56,6 +66,7 @@ export function useNamespaces(
       .catch((cause) => {
         // Keep loadingRef false so the next open retries; the picker stays on
         // "All namespaces" rather than showing a broken partial list.
+        if (generation !== generationRef.current) return;
         loadingRef.current = false;
         onError(messageOf(cause));
       });
