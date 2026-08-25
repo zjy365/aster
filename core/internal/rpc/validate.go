@@ -273,9 +273,8 @@ func validateHelmListRequest(value helm.ListRequest) error {
 	if err := validateContextID(value.ContextID); err != nil {
 		return err
 	}
-	if value.Namespace == "" {
-		return fmt.Errorf("namespace is required")
-	}
+	// An empty namespace is valid: it means every namespace (helm list -A).
+	// Only non-empty value length is bounded.
 	return checkLength("namespace", value.Namespace, maxNamespace)
 }
 
