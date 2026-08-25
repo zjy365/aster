@@ -15,6 +15,10 @@
   <img alt="Platforms" src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-lightgrey">
 </p>
 
+<p align="center">
+  <img src="docs/media/aster-resources.png" alt="Aster's main Kubernetes workspace showing a Deployments list" width="1200">
+</p>
+
 Aster is a Kubernetes desktop client built for the thing you actually do fifty times a day: open it, find one resource, look at it, close it.
 
 It ships as a **28 MB download** (63 MB installed) because it is a native Tauri shell talking to a small Go sidecar — not a browser engine with a control plane bolted on. It has **no account, no telemetry, and no backend**. It reads your kubeconfig and talks straight to your cluster's API server.
