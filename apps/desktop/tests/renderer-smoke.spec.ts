@@ -491,6 +491,39 @@ test("overview is a sidebar pane and swaps back to the resource table", async ({
   expect(failures).toEqual([]);
 });
 
+test("overview shows a permission error instead of loading forever", async ({ page }) => {
+  // Namespace-scoped accounts (e.g. sealos) get RBAC-forbidden on the
+  // cluster-scoped overview lists; the pane must say so, not hang on skeletons.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as { __ASTER_DESKTOP__?: { overview: { get(): Promise<unknown> } } }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.overview.get = async () => {
+        throw new Error('nodes is forbidden: User "cyhipdvv" cannot list resource "nodes" in API group "" at the cluster scope');
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("source-list-overview").click();
+  const overview = page.getByTestId("overview-view");
+  await expect(overview).toBeVisible();
+
+  const error = overview.getByTestId("overview-error");
+  await expect(error).toBeVisible();
+  await expect(error).toContainText("doesn't have permission");
+  // The raw API error stays available as the detail line.
+  await expect(error).toContainText("nodes is forbidden");
+  // No skeleton lingers once the failure is known.
+  await expect(overview.locator(".overview-skeleton")).toHaveCount(0);
+
+  await expectNoOverflow(page, "overview forbidden 1280x800");
+  await screenshot(page, "overview-forbidden-1280");
+  expect(failures).toEqual([]);
+});
+
 test("custom resources nest by API domain and scroll with the sidebar", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
