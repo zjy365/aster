@@ -4063,6 +4063,27 @@ button.overview-card:focus-visible {
   font-size: 12px;
 }
 
+.overview-error:has(.overview-error-detail) {
+  align-items: flex-start;
+}
+
+.overview-error:has(.overview-error-detail) > svg {
+  margin-top: 1px;
+}
+
+.overview-error-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.overview-error-detail {
+  color: color-mix(in srgb, var(--failed) 70%, var(--faint));
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .overview-skeleton {
   display: flex;
   flex-direction: column;

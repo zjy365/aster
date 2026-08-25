@@ -49,6 +49,10 @@ export function OverviewView({
   onNavigate,
 }: OverviewProps) {
   const skeleton = loading || !overview;
+  // RBAC-denied clusters (e.g. namespace-scoped sealos accounts) fail with the
+  // Kubernetes "is forbidden" wording; surface that as a permission message
+  // instead of the raw API error.
+  const forbidden = /forbidden/i.test(error);
 
   return (
     <section aria-label="Cluster overview" className="overview-pane" data-testid="overview-view">
@@ -68,13 +72,20 @@ export function OverviewView({
       </div>
 
       <div className="overview-scroll">
-        {skeleton ? (
-          <OverviewSkeleton />
-        ) : error ? (
-          <div className="overview-error" role="alert">
+        {error ? (
+          <div className="overview-error" role="alert" data-testid="overview-error">
             <AlertTriangle aria-hidden="true" className="size-4" />
-            <span>{error}</span>
+            <span className="overview-error-body">
+              <span>
+                {forbidden
+                  ? "This account doesn't have permission to view the cluster overview. It requires cluster-scoped read access, which namespace-scoped accounts (like sealos) don't have."
+                  : error}
+              </span>
+              {forbidden ? <span className="overview-error-detail">{error}</span> : null}
+            </span>
           </div>
+        ) : skeleton ? (
+          <OverviewSkeleton />
         ) : (
           <>
             <StatCards overview={overview} onNavigate={onNavigate} />
