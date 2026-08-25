@@ -90,9 +90,6 @@ func (s *Service) configuration(ctx context.Context, contextID, namespace string
 	if strings.TrimSpace(contextID) == "" {
 		return nil, invalid("contextId is required")
 	}
-	if strings.TrimSpace(namespace) == "" {
-		return nil, invalid("namespace is required")
-	}
 	raw, err := s.clients.ClientConfig(contextID)
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextID, err)
@@ -105,8 +102,8 @@ func (s *Service) configuration(ctx context.Context, contextID, namespace string
 }
 
 func (s *Service) List(ctx context.Context, request ListRequest) (ListResponse, error) {
-	if request.ContextID == "" || request.Namespace == "" {
-		return ListResponse{}, invalid("contextId and namespace are required")
+	if request.ContextID == "" {
+		return ListResponse{}, invalid("contextId is required")
 	}
 	config, err := s.configuration(ctx, request.ContextID, request.Namespace)
 	if err != nil {
@@ -116,6 +113,9 @@ func (s *Service) List(ctx context.Context, request ListRequest) (ListResponse, 
 	client.StateMask = action.ListDeployed | action.ListFailed
 	client.ByDate = true
 	client.SortReverse = true
+	// An empty namespace means every namespace (helm list -A semantics): the
+	// secret driver lists across namespaces when the lazy client's namespace
+	// is empty, so empty namespace flows through configuration() unmodified.
 	releases, err := client.Run()
 	if err != nil {
 		return ListResponse{}, fmt.Errorf("list releases: %w", err)

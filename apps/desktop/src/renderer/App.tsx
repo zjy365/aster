@@ -581,7 +581,7 @@ export default function App() {
               busy={helm.busy}
               message={helm.message}
               onRefresh={helm.refresh}
-              onSelect={(name) => void helm.select(name)}
+              onSelect={(name, releaseNamespace) => void helm.select(name, releaseNamespace)}
               onBack={helm.clear}
               onUninstall={(name) => void helm.uninstall(name)}
               onRollback={(name, revision) => void helm.rollback(name, revision)}

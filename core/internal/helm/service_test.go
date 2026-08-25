@@ -21,7 +21,13 @@ import (
 // cluster.
 func testService(t *testing.T, store *storage.Storage) *Service {
 	t.Helper()
-	service := &Service{newConfiguration: func(context.Context, string, string) (*action.Configuration, error) {
+	service := &Service{newConfiguration: func(_ context.Context, _ string, namespace string) (*action.Configuration, error) {
+		// Mirror configuration.Init: it propagates the namespace to the driver,
+		// so an empty namespace lists across namespaces. Memory supports
+		// SetNamespace; the real secret driver does it via the lazy client.
+		if setter, ok := store.Driver.(interface{ SetNamespace(string) }); ok {
+			setter.SetNamespace(namespace)
+		}
 		return &action.Configuration{
 			KubeClient:   &fake.PrintingKubeClient{},
 			Releases:     store,
@@ -108,6 +114,36 @@ func TestListFiltersByNamespaceAndState(t *testing.T) {
 	}
 }
 
+func TestListAllNamespaces(t *testing.T) {
+	store := testStorage(t)
+	seed(t, store,
+		chartRelease("web", "apps", 1, release.StatusDeployed),
+		chartRelease("api", "apps", 2, release.StatusSuperseded),
+		chartRelease("legacy", "default", 1, release.StatusDeployed),
+		chartRelease("broken", "apps", 1, release.StatusFailed),
+	)
+	service := testService(t, store)
+
+	// An empty namespace means every namespace (helm list -A semantics): the
+	// driver lists across namespaces instead of scoping to one.
+	response, err := service.List(context.Background(), ListRequest{ContextID: "dev"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	// The superseded release is filtered out by the state mask, so across
+	// namespaces we get the deployed web/legacy plus the failed broken.
+	if len(response.Releases) != 3 {
+		t.Fatalf("all-namespaces releases = %d, want 3", len(response.Releases))
+	}
+	namespaces := map[string]bool{}
+	for _, item := range response.Releases {
+		namespaces[item.Namespace] = true
+	}
+	if !namespaces["apps"] || !namespaces["default"] {
+		t.Fatalf("all-namespaces release namespaces = %#v", namespaces)
+	}
+}
+
 func TestGetReturnsValuesManifestAndHistory(t *testing.T) {
 	store := testStorage(t)
 	seed(t, store,
@@ -159,7 +195,6 @@ func TestServiceRejectsMissingInputs(t *testing.T) {
 		request any
 	}{
 		{"list context", ListRequest{Namespace: "apps"}},
-		{"list namespace", ListRequest{ContextID: "dev"}},
 		{"get name", GetRequest{ContextID: "dev", Namespace: "apps"}},
 		{"uninstall name", UninstallRequest{ContextID: "dev", Namespace: "apps"}},
 		{"rollback name", RollbackRequest{ContextID: "dev", Namespace: "apps"}},

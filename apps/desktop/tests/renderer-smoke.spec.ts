@@ -207,8 +207,10 @@ const MOCK_DESKTOP_API = `
     },
     helm: {
       list: async (_contextId, namespace) => [
-        { name: "web", namespace, version: 3, status: "deployed", chart: "web", chartVersion: "1.2.3", appVersion: "7.0", updatedAt: "2026-08-01T00:00:00Z", description: "Install complete" },
-        { name: "broken", namespace, version: 1, status: "failed", chart: "broken", chartVersion: "0.1.0", appVersion: "1.0", updatedAt: "2026-08-02T00:00:00Z" },
+        // An empty namespace means all namespaces; surface releases from
+        // distinct namespaces so the All-namespaces list is distinguishable.
+        { name: "web", namespace: namespace || "apps", version: 3, status: "deployed", chart: "web", chartVersion: "1.2.3", appVersion: "7.0", updatedAt: "2026-08-01T00:00:00Z", description: "Install complete" },
+        { name: "broken", namespace: namespace || "default", version: 1, status: "failed", chart: "broken", chartVersion: "0.1.0", appVersion: "1.0", updatedAt: "2026-08-02T00:00:00Z" },
       ],
       get: async (request) => ({
         name: request.name,
@@ -1152,6 +1154,33 @@ test("namespace picker refetches the list after each context switch", async ({ p
   await openPicker();
   await expect(namespaceItem("kube-system")).toBeVisible();
   await screenshot(page, "namespace-picker-after-context-switch");
+  expect(failures).toEqual([]);
+});
+
+test("helm view lists releases across namespaces when the picker is on All namespaces", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Set the top namespace picker to "All namespaces" so the list is empty.
+  await page.getByTestId("namespace-select").click();
+  const allNs = page.locator(".namespace-combobox-item", { hasText: "All namespaces" });
+  await allNs.click();
+
+  await page.getByTestId("tool-nav-helm").click();
+  const view = page.getByTestId("helm-view");
+  await expect(view).toBeVisible();
+  // An empty namespace now lists across namespaces: distinct namespaces.
+  const web = view.getByTestId("helm-release-web");
+  await expect(web).toContainText("deployed");
+  // Clicking a release uses the release's own namespace, not the empty picker.
+  await web.click();
+  const detail = page.getByTestId("helm-detail");
+  await expect(detail).toBeVisible();
+  await expect(detail).toContainText("apps");
+  await expectNoOverflow(page, "helm all-namespaces 1280x800");
+  await screenshot(page, "helm-all-namespaces-1280");
   expect(failures).toEqual([]);
 });
 

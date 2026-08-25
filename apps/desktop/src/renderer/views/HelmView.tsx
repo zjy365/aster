@@ -18,7 +18,7 @@ export interface HelmViewProps {
   busy: boolean;
   message: string;
   onRefresh(): void;
-  onSelect(name: string): void;
+  onSelect(name: string, namespace: string): void;
   onBack(): void;
   onUninstall(name: string): void;
   onRollback(name: string, revision?: number): void;
@@ -114,7 +114,7 @@ function ReleaseTable({
   loading: boolean;
   error: string;
   namespace: string;
-  onSelect(name: string): void;
+  onSelect(name: string, namespace: string): void;
 }) {
   if (loading) {
     return (
@@ -157,7 +157,7 @@ function ReleaseTable({
             className="table-row helm-grid"
             data-testid={`helm-release-${release.name}`}
             key={release.name}
-            onClick={() => onSelect(release.name)}
+            onClick={() => onSelect(release.name, release.namespace)}
             type="button"
           >
             <span className="primary-cell">{release.name}</span>

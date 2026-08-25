@@ -22,7 +22,7 @@ export interface HelmState {
   /** Bumps on every explicit refresh so the list effect re-fetches. */
   generation: number;
   refresh(): void;
-  select(name: string): Promise<void>;
+  select(name: string, namespace?: string): Promise<void>;
   clear(): void;
   uninstall(name: string): Promise<void>;
   rollback(name: string, revision?: number): Promise<void>;
@@ -49,7 +49,7 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
   const request = useRef(0);
 
   useEffect(() => {
-    if (!contextId || !coreReady || !namespace) return;
+    if (!contextId || !coreReady) return;
     const current = ++request.current;
     setLoading(true);
     setError("");
@@ -70,12 +70,13 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
 
   const refresh = useCallback(() => setGeneration((value) => value + 1), []);
 
-  const select = useCallback(async (name: string) => {
-    if (!contextId || !namespace || !name) return;
+  const select = useCallback(async (name: string, releaseNamespace?: string) => {
+    const ns = releaseNamespace || namespace;
+    if (!contextId || !ns || !name) return;
     setDetailLoading(true);
     setDetailError("");
     try {
-      const detail = await desktop.helm.get({ contextId, namespace, name });
+      const detail = await desktop.helm.get({ contextId, namespace: ns, name });
       setSelected(detail);
     } catch (cause) {
       setDetailError(cause instanceof Error ? cause.message : String(cause));
@@ -90,12 +91,13 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
   }, []);
 
   const uninstall = useCallback(async (name: string) => {
-    if (!contextId || !namespace || busy) return;
+    const ns = selected?.namespace || namespace;
+    if (!contextId || !ns || busy) return;
     setBusy(true);
     setMessage("");
     setDetailError("");
     try {
-      await desktop.helm.uninstall({ contextId, namespace, name });
+      await desktop.helm.uninstall({ contextId, namespace: ns, name });
       setMessage(`Release "${name}" uninstalled`);
       setSelected(undefined);
       refresh();
@@ -104,15 +106,16 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     } finally {
       setBusy(false);
     }
-  }, [contextId, namespace, busy, refresh]);
+  }, [contextId, namespace, selected, busy, refresh]);
 
   const rollback = useCallback(async (name: string, revision?: number) => {
-    if (!contextId || !namespace || busy) return;
+    const ns = selected?.namespace || namespace;
+    if (!contextId || !ns || busy) return;
     setBusy(true);
     setMessage("");
     setDetailError("");
     try {
-      await desktop.helm.rollback({ contextId, namespace, name, revision });
+      await desktop.helm.rollback({ contextId, namespace: ns, name, revision });
       setMessage(`Release "${name}" rolled back${revision ? ` to revision ${revision}` : " to the previous revision"}`);
       refresh();
     } catch (cause) {
@@ -120,17 +123,18 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     } finally {
       setBusy(false);
     }
-  }, [contextId, namespace, busy, refresh]);
+  }, [contextId, namespace, selected, busy, refresh]);
 
   const upgrade = useCallback(async (input: HelmUpgradeInput): Promise<boolean> => {
-    if (!contextId || !namespace || busy) return false;
+    const ns = selected?.namespace || namespace;
+    if (!contextId || !ns || busy) return false;
     setBusy(true);
     setMessage("");
     setDetailError("");
     try {
-      const response = await desktop.helm.upgrade({ contextId, namespace, ...input });
+      const response = await desktop.helm.upgrade({ contextId, namespace: ns, ...input });
       setMessage(`Release "${input.name}" upgraded to revision ${response.revision}`);
-      await select(input.name);
+      await select(input.name, ns);
       refresh();
       return true;
     } catch (cause) {
@@ -139,7 +143,7 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     } finally {
       setBusy(false);
     }
-  }, [contextId, namespace, busy, select, refresh]);
+  }, [contextId, namespace, selected, busy, select, refresh]);
 
   return {
     releases,
