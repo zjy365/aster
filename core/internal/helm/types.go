@@ -64,11 +64,14 @@ type GetRequest struct {
 // the core before they leave it.
 type ReleaseDetail struct {
 	ReleaseSummary
-	Notes     string           `json:"notes,omitempty"`
-	Values    string           `json:"values,omitempty"`
-	Manifest  string           `json:"manifest,omitempty"`
-	Truncated bool             `json:"truncated,omitempty"`
-	History   []ReleaseSummary `json:"history"`
+	Notes    string `json:"notes,omitempty"`
+	Values   string `json:"values,omitempty"`
+	Manifest string `json:"manifest,omitempty"`
+	// ChartValues is the chart's default values.yaml as stored in the release,
+	// so the upgrade dialog can show defaults without contacting a repository.
+	ChartValues string           `json:"chartValues,omitempty"`
+	Truncated   bool             `json:"truncated,omitempty"`
+	History     []ReleaseSummary `json:"history"`
 }
 
 type GetResponse struct {
@@ -83,6 +86,28 @@ type UninstallRequest struct {
 
 type UninstallResponse struct {
 	Info string `json:"info"`
+}
+
+type UpgradeRequest struct {
+	ContextID string `json:"contextId"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// RepoURL points at the chart repository hosting the chart. It is
+	// optional: empty reuses the chart stored in the release (values-only
+	// upgrade), since releases do not record their origin repository and
+	// there is nothing to default it from. Set it together with Chart to
+	// pull a fresh chart from a repository.
+	RepoURL string `json:"repoUrl"`
+	Chart   string `json:"chart"`
+	Version string `json:"version,omitempty"`
+	// Values is the complete user values YAML for the new revision. An empty
+	// value resets to the chart defaults, matching helm upgrade without
+	// --reuse-values.
+	Values string `json:"values,omitempty"`
+}
+
+type UpgradeResponse struct {
+	Revision int `json:"revision"`
 }
 
 type RollbackRequest struct {

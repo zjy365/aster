@@ -579,12 +579,11 @@ export default function App() {
               detailLoading={helm.detailLoading}
               detailError={helm.detailError}
               busy={helm.busy}
-              message={helm.message}
               onRefresh={helm.refresh}
-              onSelect={(name) => void helm.select(name)}
-              onBack={helm.clear}
+              onSelect={(name, releaseNamespace) => void helm.select(name, releaseNamespace)}
               onUninstall={(name) => void helm.uninstall(name)}
               onRollback={(name, revision) => void helm.rollback(name, revision)}
+              onUpgrade={helm.upgrade}
             />
           )}
           <section className="resource-pane" aria-label={`${kind.kind} resources`} hidden={overviewActive || helmActive || Boolean(detail.selected)}>

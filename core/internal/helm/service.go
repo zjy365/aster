@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -36,6 +39,9 @@ type Service struct {
 	// newConfiguration replaces the real client wiring in tests so the
 	// service can run against an in-memory Helm storage without a cluster.
 	newConfiguration func(ctx context.Context, contextID, namespace string) (*action.Configuration, error)
+	// locateChart replaces chart resolution in tests so upgrades run without
+	// a chart repository.
+	locateChart func(options action.ChartPathOptions, name string) (*chart.Chart, error)
 }
 
 func NewService(clients ClientConfigProvider) *Service {
@@ -84,9 +90,6 @@ func (s *Service) configuration(ctx context.Context, contextID, namespace string
 	if strings.TrimSpace(contextID) == "" {
 		return nil, invalid("contextId is required")
 	}
-	if strings.TrimSpace(namespace) == "" {
-		return nil, invalid("namespace is required")
-	}
 	raw, err := s.clients.ClientConfig(contextID)
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextID, err)
@@ -99,8 +102,8 @@ func (s *Service) configuration(ctx context.Context, contextID, namespace string
 }
 
 func (s *Service) List(ctx context.Context, request ListRequest) (ListResponse, error) {
-	if request.ContextID == "" || request.Namespace == "" {
-		return ListResponse{}, invalid("contextId and namespace are required")
+	if request.ContextID == "" {
+		return ListResponse{}, invalid("contextId is required")
 	}
 	config, err := s.configuration(ctx, request.ContextID, request.Namespace)
 	if err != nil {
@@ -110,6 +113,9 @@ func (s *Service) List(ctx context.Context, request ListRequest) (ListResponse, 
 	client.StateMask = action.ListDeployed | action.ListFailed
 	client.ByDate = true
 	client.SortReverse = true
+	// An empty namespace means every namespace (helm list -A semantics): the
+	// secret driver lists across namespaces when the lazy client's namespace
+	// is empty, so empty namespace flows through configuration() unmodified.
 	releases, err := client.Run()
 	if err != nil {
 		return ListResponse{}, fmt.Errorf("list releases: %w", err)
@@ -146,13 +152,19 @@ func (s *Service) Get(ctx context.Context, request GetRequest) (GetResponse, err
 		manifest = redactManifest(manifest)
 	}
 	values, valuesTruncated := capText(valuesYAML(item.Config))
+	chartValues := ""
+	chartValuesTruncated := false
+	if item.Chart != nil {
+		chartValues, chartValuesTruncated = capText(valuesYAML(item.Chart.Values))
+	}
 	notes, _ := capText(item.Info.Notes)
 	detail := ReleaseDetail{
 		ReleaseSummary: summarize(item),
 		Notes:          notes,
 		Values:         values,
 		Manifest:       manifest,
-		Truncated:      manifestTruncated || valuesTruncated,
+		ChartValues:    chartValues,
+		Truncated:      manifestTruncated || valuesTruncated || chartValuesTruncated,
 		History:        history,
 	}
 	return GetResponse{Release: detail}, nil
@@ -196,6 +208,82 @@ func (s *Service) Uninstall(ctx context.Context, request UninstallRequest) (Unin
 		info = fmt.Sprintf("Release %q uninstalled", request.Name)
 	}
 	return UninstallResponse{Info: info}, nil
+}
+
+// loadChart resolves the upgrade chart through the user's local Helm
+// settings (repository config and credentials, matching the helm CLI), or
+// through the injected fake in tests.
+func (s *Service) loadChart(options action.ChartPathOptions, name string) (*chart.Chart, error) {
+	if s.locateChart != nil {
+		return s.locateChart(options, name)
+	}
+	path, err := options.LocateChart(name, cli.New())
+	if err != nil {
+		return nil, fmt.Errorf("locate chart %q: %w", name, err)
+	}
+	loaded, err := loader.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("load chart %q: %w", name, err)
+	}
+	return loaded, nil
+}
+
+func (s *Service) Upgrade(ctx context.Context, request UpgradeRequest) (UpgradeResponse, error) {
+	if request.ContextID == "" || request.Namespace == "" || request.Name == "" {
+		return UpgradeResponse{}, invalid("contextId, namespace and name are required")
+	}
+	values := map[string]any{}
+	if strings.TrimSpace(request.Values) != "" {
+		if err := yaml.Unmarshal([]byte(request.Values), &values); err != nil {
+			return UpgradeResponse{}, invalid(fmt.Sprintf("values is not valid YAML: %v", err))
+		}
+	}
+	config, err := s.configuration(ctx, request.ContextID, request.Namespace)
+	if err != nil {
+		return UpgradeResponse{}, err
+	}
+	client := action.NewUpgrade(config)
+	client.Timeout = 5 * time.Minute
+
+	var loaded *chart.Chart
+	if strings.TrimSpace(request.RepoURL) == "" {
+		// Values-only upgrade: releases store their chart's full contents, so an
+		// empty repoUrl reuses that stored chart instead of re-pulling one. The
+		// chart and version inputs are meaningless here and ignored.
+		existing, err := action.NewGet(config).Run(request.Name)
+		if err != nil {
+			if isNotFound(err) {
+				return UpgradeResponse{}, notFound(fmt.Sprintf("release %q was not found", request.Name))
+			}
+			return UpgradeResponse{}, fmt.Errorf("load stored chart for release %q: %w", request.Name, err)
+		}
+		if existing.Chart == nil {
+			return UpgradeResponse{}, invalid(fmt.Sprintf("release %q has no stored chart; repoUrl and chart are required", request.Name))
+		}
+		loaded = existing.Chart
+	} else {
+		if strings.TrimSpace(request.Chart) == "" {
+			return UpgradeResponse{}, invalid("chart is required when repoUrl is set")
+		}
+		client.RepoURL = request.RepoURL
+		client.Version = request.Version
+		resolved, err := s.loadChart(client.ChartPathOptions, request.Chart)
+		if err != nil {
+			// Charts resolve through the user's local helm settings
+			// (repositories.yaml and credentials), so a lookup failure usually
+			// means the repository was never configured locally.
+			return UpgradeResponse{}, fmt.Errorf("pull chart %q from %q: %w; verify the repository is added to your local helm config (helm repo add)", request.Chart, request.RepoURL, err)
+		}
+		loaded = resolved
+	}
+	upgraded, err := client.RunWithContext(ctx, request.Name, loaded, values)
+	if err != nil {
+		if isNotFound(err) {
+			return UpgradeResponse{}, notFound(fmt.Sprintf("release %q was not found", request.Name))
+		}
+		return UpgradeResponse{}, fmt.Errorf("upgrade release %q: %w", request.Name, err)
+	}
+	return UpgradeResponse{Revision: upgraded.Version}, nil
 }
 
 func (s *Service) Rollback(ctx context.Context, request RollbackRequest) (RollbackResponse, error) {
@@ -264,5 +352,7 @@ func capText(value string) (string, bool) {
 }
 
 func isNotFound(err error) bool {
-	return errors.Is(err, driver.ErrReleaseNotFound)
+	// Upgrade reports a missing release as ErrNoDeployedReleases instead of
+	// ErrReleaseNotFound; both mean the renderer should show not-found.
+	return errors.Is(err, driver.ErrReleaseNotFound) || errors.Is(err, driver.ErrNoDeployedReleases)
 }

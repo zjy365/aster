@@ -23,6 +23,11 @@ impl<R: tauri::Runtime> CredentialProvider for crate::sidecar::Sidecar<R> {
 pub struct CoreClient {
     provider: Arc<dyn CredentialProvider>,
     http: reqwest::Client,
+    /// Long-running mutations (helm upgrade/rollback re-apply manifests and
+    /// legitimately take minutes; the core caps helm operations at five
+    /// minutes). A 30s cap would abort them client-side while the core keeps
+    /// running, so they get their own client with headroom past that cap.
+    http_long: reqwest::Client,
     /// No total timeout: streaming endpoints stay open until cancelled.
     http_stream: reqwest::Client,
 }
@@ -33,18 +38,26 @@ impl CoreClient {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("reqwest client builds with rustls");
+        let http_long = reqwest::Client::builder()
+            .timeout(Duration::from_secs(6 * 60))
+            .build()
+            .expect("reqwest client builds with rustls");
         let http_stream = reqwest::Client::builder()
             .build()
             .expect("reqwest client builds with rustls");
-        Self { provider, http, http_stream }
+        Self { provider, http, http_long, http_stream }
     }
 
     pub async fn get(&self, path: &str) -> Result<Value, String> {
-        self.request(reqwest::Method::GET, path, None).await
+        self.request(&self.http, reqwest::Method::GET, path, None).await
     }
 
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
-        self.request(reqwest::Method::POST, path, Some(body)).await
+        self.request(&self.http, reqwest::Method::POST, path, Some(body)).await
+    }
+
+    pub async fn post_long(&self, path: &str, body: Value) -> Result<Value, String> {
+        self.request(&self.http_long, reqwest::Method::POST, path, Some(body)).await
     }
 
     pub async fn post_stream(&self, path: &str, body: Value) -> Result<impl Stream<Item = Result<Bytes, reqwest::Error>>, String> {
@@ -66,9 +79,9 @@ impl CoreClient {
         Ok(response.bytes_stream())
     }
 
-    async fn request(&self, method: reqwest::Method, path: &str, body: Option<Value>) -> Result<Value, String> {
+    async fn request(&self, client: &reqwest::Client, method: reqwest::Method, path: &str, body: Option<Value>) -> Result<Value, String> {
         let (base_url, token) = self.provider.credentials()?;
-        let mut request = self.http.request(method, format!("{base_url}{path}")).bearer_auth(token);
+        let mut request = client.request(method, format!("{base_url}{path}")).bearer_auth(token);
         if let Some(body) = body {
             request = request.json(&body);
         }

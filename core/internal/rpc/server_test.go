@@ -203,9 +203,11 @@ func TestServerValidatesHelmRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	missingNamespace := performRequest(t, server, http.MethodGet, "/v1/helm/releases?contextId=dev")
-	if missingNamespace.Code != http.StatusBadRequest || !contains(missingNamespace.Body.String(), `"code":"invalid_request"`) {
-		t.Fatalf("status=%d body=%s", missingNamespace.Code, missingNamespace.Body.String())
+	// An empty namespace is now valid (all namespaces); only a missing
+	// context id is rejected at the RPC boundary.
+	missingContext := performRequest(t, server, http.MethodGet, "/v1/helm/releases")
+	if missingContext.Code != http.StatusBadRequest || !contains(missingContext.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", missingContext.Code, missingContext.Body.String())
 	}
 
 	missingName := httptest.NewRequest(http.MethodPost, "/v1/helm/releases/get", bytes.NewBufferString(`{
@@ -228,6 +230,19 @@ func TestServerValidatesHelmRequests(t *testing.T) {
 	badRevision.Header.Set("Authorization", "Bearer token")
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, badRevision)
+	if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	missingChart := httptest.NewRequest(http.MethodPost, "/v1/helm/releases/upgrade", bytes.NewBufferString(`{
+		"contextId":"dev",
+		"namespace":"apps",
+		"name":"web",
+		"repoUrl":"https://charts.example.test"
+	}`))
+	missingChart.Header.Set("Authorization", "Bearer token")
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, missingChart)
 	if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}

@@ -9,6 +9,7 @@ import (
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
+	chartutil "helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/kube/fake"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/storage"
@@ -20,13 +21,37 @@ import (
 // cluster.
 func testService(t *testing.T, store *storage.Storage) *Service {
 	t.Helper()
-	service := &Service{newConfiguration: func(context.Context, string, string) (*action.Configuration, error) {
+	service := &Service{newConfiguration: func(_ context.Context, _ string, namespace string) (*action.Configuration, error) {
+		// Mirror configuration.Init: it propagates the namespace to the driver,
+		// so an empty namespace lists across namespaces. Memory supports
+		// SetNamespace; the real secret driver does it via the lazy client.
+		if setter, ok := store.Driver.(interface{ SetNamespace(string) }); ok {
+			setter.SetNamespace(namespace)
+		}
 		return &action.Configuration{
-			KubeClient: &fake.PrintingKubeClient{},
-			Releases:   store,
-			Log:        func(string, ...interface{}) {},
+			KubeClient:   &fake.PrintingKubeClient{},
+			Releases:     store,
+			Capabilities: chartutil.DefaultCapabilities,
+			Log:          func(string, ...interface{}) {},
 		}, nil
 	}}
+	return service
+}
+
+// upgradeService stubs chart resolution with a minimal local chart so
+// upgrades run without a chart repository.
+func upgradeService(t *testing.T, store *storage.Storage) *Service {
+	t.Helper()
+	service := testService(t, store)
+	service.locateChart = func(action.ChartPathOptions, string) (*chart.Chart, error) {
+		return &chart.Chart{
+			Metadata: &chart.Metadata{Name: "web", Version: "1.3.0"},
+			Templates: []*chart.File{{
+				Name: "templates/cm.yaml",
+				Data: []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-cm\ndata:\n  replicas: \"{{ .Values.replicas }}\"\n"),
+			}},
+		}, nil
+	}
 	return service
 }
 
@@ -43,7 +68,11 @@ func chartRelease(name, namespace string, version int, status release.Status) *r
 		Namespace: namespace,
 		Version:   version,
 		Info:      &release.Info{Status: status, Description: "test release"},
-		Chart:     &chart.Chart{Metadata: &chart.Metadata{Name: "web", Version: "1.2.3", AppVersion: "7.0"}},
+		Chart: &chart.Chart{
+			Metadata: &chart.Metadata{Name: "web", Version: "1.2.3", AppVersion: "7.0"},
+			// Chart defaults, distinct from the user's Config overrides.
+			Values: map[string]any{"replicas": 1, "imagePullPolicy": "Always"},
+		},
 		Config:    map[string]any{"replicas": 2, "auth": map[string]any{"token": "s3cret"}},
 		Manifest:  "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-cm\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: web-secret\ndata:\n  password: c3VwZXJzZWNyZXQ=\n",
 	}
@@ -89,6 +118,36 @@ func TestListFiltersByNamespaceAndState(t *testing.T) {
 	}
 }
 
+func TestListAllNamespaces(t *testing.T) {
+	store := testStorage(t)
+	seed(t, store,
+		chartRelease("web", "apps", 1, release.StatusDeployed),
+		chartRelease("api", "apps", 2, release.StatusSuperseded),
+		chartRelease("legacy", "default", 1, release.StatusDeployed),
+		chartRelease("broken", "apps", 1, release.StatusFailed),
+	)
+	service := testService(t, store)
+
+	// An empty namespace means every namespace (helm list -A semantics): the
+	// driver lists across namespaces instead of scoping to one.
+	response, err := service.List(context.Background(), ListRequest{ContextID: "dev"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	// The superseded release is filtered out by the state mask, so across
+	// namespaces we get the deployed web/legacy plus the failed broken.
+	if len(response.Releases) != 3 {
+		t.Fatalf("all-namespaces releases = %d, want 3", len(response.Releases))
+	}
+	namespaces := map[string]bool{}
+	for _, item := range response.Releases {
+		namespaces[item.Namespace] = true
+	}
+	if !namespaces["apps"] || !namespaces["default"] {
+		t.Fatalf("all-namespaces release namespaces = %#v", namespaces)
+	}
+}
+
 func TestGetReturnsValuesManifestAndHistory(t *testing.T) {
 	store := testStorage(t)
 	seed(t, store,
@@ -107,6 +166,11 @@ func TestGetReturnsValuesManifestAndHistory(t *testing.T) {
 	}
 	if !strings.Contains(detail.Values, "replicas: 2") {
 		t.Fatalf("values = %q", detail.Values)
+	}
+	// Chart defaults ship alongside the overrides so the upgrade dialog can
+	// show them without contacting a repository.
+	if !strings.Contains(detail.ChartValues, "replicas: 1") {
+		t.Fatalf("chartValues = %q", detail.ChartValues)
 	}
 	// Values are user-authored chart input and travel unredacted; only
 	// rendered manifests have Secret data masked.
@@ -140,11 +204,13 @@ func TestServiceRejectsMissingInputs(t *testing.T) {
 		request any
 	}{
 		{"list context", ListRequest{Namespace: "apps"}},
-		{"list namespace", ListRequest{ContextID: "dev"}},
 		{"get name", GetRequest{ContextID: "dev", Namespace: "apps"}},
 		{"uninstall name", UninstallRequest{ContextID: "dev", Namespace: "apps"}},
 		{"rollback name", RollbackRequest{ContextID: "dev", Namespace: "apps"}},
 		{"rollback revision", RollbackRequest{ContextID: "dev", Namespace: "apps", Name: "web", Revision: -1}},
+		{"upgrade name", UpgradeRequest{ContextID: "dev", Namespace: "apps", RepoURL: "https://example.test", Chart: "web"}},
+		{"upgrade chart", UpgradeRequest{ContextID: "dev", Namespace: "apps", Name: "web", RepoURL: "https://example.test"}},
+		{"upgrade values", UpgradeRequest{ContextID: "dev", Namespace: "apps", Name: "web", RepoURL: "https://example.test", Chart: "web", Values: "{{"}},
 	}
 	for _, test := range cases {
 		var err error
@@ -157,6 +223,8 @@ func TestServiceRejectsMissingInputs(t *testing.T) {
 			_, err = service.Uninstall(context.Background(), request)
 		case RollbackRequest:
 			_, err = service.Rollback(context.Background(), request)
+		case UpgradeRequest:
+			_, err = service.Upgrade(context.Background(), request)
 		}
 		var validationErr *ValidationError
 		if err == nil || !errors.As(err, &validationErr) {
@@ -181,6 +249,104 @@ func TestUninstallAndRollbackOnMissingRelease(t *testing.T) {
 	}
 	if !errors.As(err, &notFoundErr) {
 		t.Fatalf("rollback error = %v, want NotFoundError", err)
+	}
+}
+
+func TestUpgradeCreatesNewRevisionWithValues(t *testing.T) {
+	store := testStorage(t)
+	seed(t, store, chartRelease("web", "apps", 1, release.StatusDeployed))
+	service := upgradeService(t, store)
+
+	response, err := service.Upgrade(context.Background(), UpgradeRequest{
+		ContextID: "dev",
+		Namespace: "apps",
+		Name:      "web",
+		RepoURL:   "https://charts.example.test",
+		Chart:     "web",
+		Version:   "1.3.0",
+		Values:    "replicas: 3\n",
+	})
+	if err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if response.Revision != 2 {
+		t.Fatalf("revision = %d, want 2", response.Revision)
+	}
+	latest, err := store.Last("web")
+	if err != nil {
+		t.Fatalf("store.Last: %v", err)
+	}
+	if latest.Chart.Metadata.Version != "1.3.0" {
+		t.Fatalf("chart version = %q, want 1.3.0", latest.Chart.Metadata.Version)
+	}
+	// YAML numbers arrive as float64 through the sigs.k8s.io/yaml JSON round trip.
+	if latest.Config["replicas"] != float64(3) {
+		t.Fatalf("config = %#v, want replicas 3", latest.Config)
+	}
+	if !strings.Contains(latest.Manifest, "replicas: \"3\"") {
+		t.Fatalf("manifest did not render new values: %q", latest.Manifest)
+	}
+}
+
+func TestUpgradeRejectsMissingRelease(t *testing.T) {
+	service := upgradeService(t, testStorage(t))
+	_, err := service.Upgrade(context.Background(), UpgradeRequest{
+		ContextID: "dev",
+		Namespace: "apps",
+		Name:      "missing",
+		RepoURL:   "https://charts.example.test",
+		Chart:     "web",
+	})
+	var notFoundErr *NotFoundError
+	if err == nil || !errors.As(err, &notFoundErr) {
+		t.Fatalf("error = %v, want NotFoundError", err)
+	}
+}
+
+// An empty repoUrl reuses the chart stored in the release: a values-only
+// upgrade never touches a chart repository, and the chart stays untouched.
+func TestUpgradeWithoutRepoURLReusesStoredChart(t *testing.T) {
+	store := testStorage(t)
+	seed(t, store, chartRelease("web", "apps", 1, release.StatusDeployed))
+	// No locateChart stub: any repository access fails the test.
+	service := testService(t, store)
+
+	response, err := service.Upgrade(context.Background(), UpgradeRequest{
+		ContextID: "dev",
+		Namespace: "apps",
+		Name:      "web",
+		Values:    "replicas: 3\n",
+	})
+	if err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if response.Revision != 2 {
+		t.Fatalf("revision = %d, want 2", response.Revision)
+	}
+	latest, err := store.Last("web")
+	if err != nil {
+		t.Fatalf("store.Last: %v", err)
+	}
+	if latest.Chart.Metadata.Version != "1.2.3" {
+		t.Fatalf("chart version = %q, want the stored 1.2.3", latest.Chart.Metadata.Version)
+	}
+	// YAML numbers arrive as float64 through the sigs.k8s.io/yaml JSON round trip.
+	if latest.Config["replicas"] != float64(3) {
+		t.Fatalf("config = %#v, want replicas 3", latest.Config)
+	}
+}
+
+// The reuse path reports a missing release before attempting any upgrade.
+func TestUpgradeWithoutRepoURLRejectsMissingRelease(t *testing.T) {
+	service := testService(t, testStorage(t))
+	_, err := service.Upgrade(context.Background(), UpgradeRequest{
+		ContextID: "dev",
+		Namespace: "apps",
+		Name:      "missing",
+	})
+	var notFoundErr *NotFoundError
+	if err == nil || !errors.As(err, &notFoundErr) {
+		t.Fatalf("error = %v, want NotFoundError", err)
 	}
 }
 

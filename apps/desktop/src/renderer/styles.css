@@ -2482,6 +2482,9 @@ h2 {
 .resource-yaml-editor {
   min-height: 420px;
   resize: vertical;
+  /* Match the read-only viewer: no soft wrap, long lines scroll horizontally.
+     wrap="off" on the element does the same in WebKit; this pins it across engines. */
+  white-space: pre;
 }
 
 .resource-editor-actions {
@@ -4181,14 +4184,6 @@ button.overview-card:focus-visible {
   font-family: inherit;
 }
 
-.helm-message {
-  padding: 7px 16px;
-  border-bottom: 1px solid var(--border);
-  color: var(--healthy);
-  background: color-mix(in srgb, var(--healthy) 8%, var(--surface));
-  font-size: 11px;
-}
-
 .load-more.helm-danger {
   color: var(--failed);
 }
@@ -4198,61 +4193,28 @@ button.overview-card:focus-visible {
   background: color-mix(in srgb, var(--failed) 10%, var(--surface));
 }
 
+/* The header and release actions stay put; the tab body scrolls beneath via
+   .resource-detail-scroll, same as the resource detail layout. */
 .helm-detail {
+  display: flex;
   min-height: 0;
   flex: 1;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.helm-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px 16px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.helm-meta {
-  min-width: 0;
-}
-
-.helm-meta-label {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.helm-meta-value {
-  display: block;
-  overflow: hidden;
-  color: var(--text);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-direction: column;
 }
 
 .helm-revisions {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.helm-revisions h2,
-.helm-code-heading h2 {
-  margin: 0 0 8px;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.helm-revisions ul {
   display: grid;
   gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.helm-code-heading h2 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .helm-revisions li {
@@ -4271,7 +4233,6 @@ button.overview-card:focus-visible {
 
 .helm-code {
   padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
 }
 
 .helm-code-heading {
@@ -4286,8 +4247,9 @@ button.overview-card:focus-visible {
   font-weight: 600;
 }
 
+/* The tab scroll region owns vertical overflow; capping the code block would
+   nest a second scrollbar inside it. */
 .helm-code-body {
-  max-height: 320px;
   margin: 0;
   padding: 10px 12px;
   overflow: auto;
@@ -4307,6 +4269,95 @@ button.overview-card:focus-visible {
   border-radius: 5px;
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.helm-upgrade-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.helm-upgrade-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.helm-upgrade-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.helm-upgrade-input {
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.helm-upgrade-input:focus {
+  border-color: var(--focus);
+}
+
+/* Kite-style split: chart defaults sit read-only beside the editable values,
+   so parameters that only exist as defaults (replicas, probes…) are visible
+   while editing. Both panes share one height and scroll independently. */
+.helm-upgrade-dialog {
+  width: min(1040px, calc(100vw - 40px));
+  max-width: 1040px;
+}
+
+.helm-upgrade-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.helm-upgrade-defaults {
+  min-height: 320px;
+  max-height: 45vh;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.helm-upgrade-values-editor {
+  min-height: 320px;
+  max-height: 45vh;
+}
+
+.helm-upgrade-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--failed) 35%, transparent);
+  border-radius: 8px;
+  color: var(--failed);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.helm-upgrade-error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 /* ---- Log viewer (xterm surface) ---- */

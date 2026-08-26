@@ -11,6 +11,8 @@ import type {
   HelmReleaseSummary,
   HelmRollbackRequest,
   HelmUninstallRequest,
+  HelmUpgradeRequest,
+  HelmUpgradeResponse,
   LogStreamBatch,
   NamespaceInfo,
   Overview,
@@ -161,6 +163,9 @@ export function createTauriDesktopApi(): DesktopApi {
       },
       rollback: async (request: HelmRollbackRequest): Promise<void> => {
         await invoke("helm_releases_rollback", { request });
+      },
+      upgrade: async (request: HelmUpgradeRequest): Promise<HelmUpgradeResponse> => {
+        return invoke<HelmUpgradeResponse>("helm_releases_upgrade", { request });
       },
     },
     resources: {

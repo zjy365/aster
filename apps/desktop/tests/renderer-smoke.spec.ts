@@ -207,8 +207,10 @@ const MOCK_DESKTOP_API = `
     },
     helm: {
       list: async (_contextId, namespace) => [
-        { name: "web", namespace, version: 3, status: "deployed", chart: "web", chartVersion: "1.2.3", appVersion: "7.0", updatedAt: "2026-08-01T00:00:00Z", description: "Install complete" },
-        { name: "broken", namespace, version: 1, status: "failed", chart: "broken", chartVersion: "0.1.0", appVersion: "1.0", updatedAt: "2026-08-02T00:00:00Z" },
+        // An empty namespace means all namespaces; surface releases from
+        // distinct namespaces so the All-namespaces list is distinguishable.
+        { name: "web", namespace: namespace || "apps", version: 3, status: "deployed", chart: "web", chartVersion: "1.2.3", appVersion: "7.0", updatedAt: "2026-08-01T00:00:00Z", description: "Install complete" },
+        { name: "broken", namespace: namespace || "default", version: 1, status: "failed", chart: "broken", chartVersion: "0.1.0", appVersion: "1.0", updatedAt: "2026-08-02T00:00:00Z" },
       ],
       get: async (request) => ({
         name: request.name,
@@ -221,6 +223,7 @@ const MOCK_DESKTOP_API = `
         updatedAt: "2026-08-01T00:00:00Z",
         description: "Install complete",
         values: "replicas: 2",
+        chartValues: "replicas: 1\\nimagePullPolicy: Always\\n",
         manifest: "apiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: web-cm\\n",
         truncated: false,
         history: [
@@ -230,6 +233,15 @@ const MOCK_DESKTOP_API = `
       }),
       uninstall: async () => undefined,
       rollback: async () => undefined,
+      upgrade: async (request) => {
+        // A real upgrade takes time; the delay keeps the busy state
+        // observable, and the marker exercises the failure path.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        if ((request.values || "").includes("cluster-is-down")) {
+          throw new Error("simulated upgrade failure");
+        }
+        return { revision: 4 };
+      },
     },
     resources: {
       list: async (request) => pageOf(request),
@@ -1051,23 +1063,86 @@ test("helm view lists releases and opens a detail", async ({ page }) => {
   await expectNoOverflow(page, "helm list 1280x800");
   await screenshot(page, "helm-list-1280");
 
-  // Selecting a release opens the read view: values, manifest, history.
+  // Selecting a release opens the tabbed detail: a card-based overview with
+  // vitals, information, and revision history; values and manifest get tabs.
   await view.getByTestId("helm-release-web").click();
   const detail = page.getByTestId("helm-detail");
   await expect(detail).toBeVisible();
   await expect(detail).toContainText("web");
-  await expect(detail.getByTestId("helm-values")).toContainText("replicas");
-  await expect(detail.getByTestId("helm-manifest")).toContainText("ConfigMap");
+  await expect(detail.getByTestId("helm-vitals")).toContainText("1.2.3");
+  await expect(detail.getByTestId("helm-meta")).toContainText("Install complete");
   await expect(detail.getByTestId("helm-history")).toContainText("v3");
   await expect(detail.getByTestId("helm-rollback")).toBeVisible();
   await expect(detail.getByTestId("helm-uninstall")).toBeVisible();
   await expectNoOverflow(page, "helm detail 1280x800");
   await screenshot(page, "helm-detail-1280");
 
-  // Back returns to the release list; the helm tab stays active.
-  await detail.getByTestId("helm-back").click();
+  await detail.getByRole("tab", { name: "Values" }).click();
+  await expect(detail.getByTestId("helm-values")).toContainText("replicas");
+  await detail.getByRole("tab", { name: "Manifest" }).click();
+  await expect(detail.getByTestId("helm-manifest")).toContainText("ConfigMap");
+
+  // Upgrade is a two-step review: edit values, review the diff, confirm.
+  // Leaving the repository empty reuses the installed chart, so the chart
+  // and version inputs stay disabled.
+  await detail.getByTestId("helm-upgrade").click();
+  const upgradeDialog = page.getByTestId("helm-upgrade-dialog");
+  await expect(upgradeDialog).toBeVisible();
+  await expect(upgradeDialog.getByTestId("helm-upgrade-chart")).toHaveValue("web");
+  await expect(upgradeDialog.getByTestId("helm-upgrade-chart")).toBeDisabled();
+  await expect(upgradeDialog.getByTestId("helm-upgrade-version")).toBeDisabled();
+  await expect(upgradeDialog.getByTestId("helm-upgrade-values")).toHaveValue("replicas: 2");
+  // Chart defaults sit read-only beside the editable values (Kite-style split).
+  await expect(upgradeDialog.getByTestId("helm-upgrade-defaults")).toContainText("replicas: 1");
+  await upgradeDialog.getByTestId("helm-upgrade-values").fill("replicas: 3");
+  await upgradeDialog.getByTestId("helm-upgrade-review").click();
+  await expect(upgradeDialog.getByTestId("helm-upgrade-summary")).toContainText("Reuses the installed chart");
+  await expect(upgradeDialog.getByTestId("helm-upgrade-diff")).toContainText("replicas");
+  await expectNoOverflow(page, "helm upgrade review 1280x800");
+  await screenshot(page, "helm-upgrade-1280");
+  await upgradeDialog.getByTestId("helm-upgrade-submit").click();
+  // While the upgrade runs the confirm button shows progress and the dialog
+  // refuses to be dismissed; on success it closes by itself.
+  await expect(upgradeDialog.getByTestId("helm-upgrade-submit")).toContainText("Upgrading");
+  await page.keyboard.press("Escape");
+  await expect(upgradeDialog).toBeVisible();
+  await expect(upgradeDialog).not.toBeVisible();
+  // The success surfaces as a toast that dismisses itself instead of a
+  // banner lingering on the view.
+  const toast = page.locator('[data-slot="toast"]', { hasText: "upgraded to revision 4" });
+  await expect(toast).toBeVisible();
+  await screenshot(page, "helm-upgrade-toast-1280");
+  await expect(toast).toHaveCount(0, { timeout: 10_000 });
+
+  // The unified toolbar back returns to the release list; the helm tab stays active.
+  await page.getByTestId("toolbar-back").click();
   await expect(page.getByTestId("helm-table")).toBeVisible();
   await expect(view.getByTestId("helm-release-broken")).toBeVisible();
+  expect(failures).toEqual([]);
+});
+
+test("helm upgrade failure keeps the dialog open with the error", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("tool-nav-helm").click();
+  const view = page.getByTestId("helm-view");
+  await view.getByTestId("helm-release-web").click();
+  await page.getByTestId("helm-detail").getByTestId("helm-upgrade").click();
+  const dialog = page.getByTestId("helm-upgrade-dialog");
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByTestId("helm-upgrade-values").fill("cluster-is-down: true");
+  await dialog.getByTestId("helm-upgrade-review").click();
+  await dialog.getByTestId("helm-upgrade-submit").click();
+  // The failure surfaces inside the dialog — not on the detail view hidden
+  // behind it — and the dialog stays open so the values can be adjusted and
+  // retried. No success toast is posted.
+  await expect(dialog.getByTestId("helm-upgrade-error")).toContainText("simulated upgrade failure");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('[data-slot="toast"]')).toHaveCount(0);
   expect(failures).toEqual([]);
 });
 
@@ -1136,6 +1211,55 @@ test("namespace picker refetches the list after each context switch", async ({ p
   await openPicker();
   await expect(namespaceItem("kube-system")).toBeVisible();
   await screenshot(page, "namespace-picker-after-context-switch");
+  expect(failures).toEqual([]);
+});
+
+test("helm view lists releases across namespaces when the picker is on All namespaces", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Set the top namespace picker to "All namespaces" so the list is empty.
+  await page.getByTestId("namespace-select").click();
+  const allNs = page.locator(".namespace-combobox-item", { hasText: "All namespaces" });
+  await allNs.click();
+
+  await page.getByTestId("tool-nav-helm").click();
+  const view = page.getByTestId("helm-view");
+  await expect(view).toBeVisible();
+  // An empty namespace now lists across namespaces: distinct namespaces.
+  const web = view.getByTestId("helm-release-web");
+  await expect(web).toContainText("deployed");
+  // Clicking a release uses the release's own namespace, not the empty picker.
+  await web.click();
+  const detail = page.getByTestId("helm-detail");
+  await expect(detail).toBeVisible();
+  await expect(detail).toContainText("apps");
+  await expectNoOverflow(page, "helm all-namespaces 1280x800");
+  await screenshot(page, "helm-all-namespaces-1280");
+  expect(failures).toEqual([]);
+});
+
+test("helm detail closes when the namespace picker switches scope", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("tool-nav-helm").click();
+  const view = page.getByTestId("helm-view");
+  await view.getByTestId("helm-release-web").click();
+  await expect(page.getByTestId("helm-detail")).toBeVisible();
+
+  // Switching the shared namespace picker resets the helm list scope; the
+  // open detail belongs to the old scope and must close back to the list,
+  // matching how resource details behave.
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "All namespaces" }).click();
+  await expect(page.getByTestId("helm-detail")).toHaveCount(0);
+  await expect(view.getByTestId("helm-table")).toBeVisible();
+  await expect(view.getByTestId("helm-release-web")).toBeVisible();
   expect(failures).toEqual([]);
 });
 

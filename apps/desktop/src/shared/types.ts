@@ -344,6 +344,8 @@ export interface HelmReleaseDetail extends HelmReleaseSummary {
   notes?: string;
   values?: string;
   manifest?: string;
+  /** The chart's default values.yaml as stored in the release. */
+  chartValues?: string;
   /** True when the core truncated values or manifest to the size cap. */
   truncated?: boolean;
   history: HelmReleaseSummary[];
@@ -367,6 +369,29 @@ export interface HelmRollbackRequest {
   name: string;
   /** Target revision; zero rolls back to the previous revision. */
   revision?: number;
+}
+
+export interface HelmUpgradeRequest {
+  contextId: string;
+  namespace: string;
+  name: string;
+  /**
+   * Chart repository URL. Empty reuses the chart stored in the release
+   * (values-only upgrade); set with chart to pull a fresh chart from a
+   * repository, since releases do not record their origin repository.
+   */
+  repoUrl: string;
+  chart: string;
+  version?: string;
+  /**
+   * Complete user values YAML for the new revision. Empty resets the
+   * release to the chart defaults (helm upgrade without --reuse-values).
+   */
+  values?: string;
+}
+
+export interface HelmUpgradeResponse {
+  revision: number;
 }
 
 export interface OverviewCount {
@@ -491,6 +516,7 @@ export interface DesktopApi {
     get(request: HelmGetRequest): Promise<HelmReleaseDetail>;
     uninstall(request: HelmUninstallRequest): Promise<void>;
     rollback(request: HelmRollbackRequest): Promise<void>;
+    upgrade(request: HelmUpgradeRequest): Promise<HelmUpgradeResponse>;
   };
   resources: {
     list(request: ResourceListRequest): Promise<ResourceListResponse>;
