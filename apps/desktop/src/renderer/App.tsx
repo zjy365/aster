@@ -323,6 +323,15 @@ export default function App() {
     contexts.setView("contexts");
   }, [contexts, contextId, namespaces, resources, detail, helm]);
 
+  // Refresh targets whatever is on screen: an open detail re-fetches just that
+  // object, because resetting the list scope would close the detail view.
+  const refreshActive = useCallback(() => {
+    if (helmActive) helm.refresh();
+    else if (overviewActive) overview.refresh();
+    else if (detail.selected) void detail.refetch();
+    else resources.refresh();
+  }, [helmActive, helm, overviewActive, overview, detail, resources]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -336,11 +345,7 @@ export default function App() {
       }
       if (event.key === "F5") {
         event.preventDefault();
-        if (contexts.view === "workbench") {
-          if (helmActive) helm.refresh();
-          else if (overviewActive) overview.refresh();
-          else resources.refresh();
-        }
+        if (contexts.view === "workbench") refreshActive();
         return;
       }
       if (event.key === "Escape") {
@@ -355,7 +360,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detail, paletteOpen, contexts.view, helmActive, helm, overviewActive, overview, resources]);
+  }, [detail, paletteOpen, contexts.view, refreshActive]);
 
   const paletteItems = useMemo(() => {
     const base = buildCommandItems({
@@ -378,9 +383,7 @@ export default function App() {
   const executePaletteCommand = useCallback((action: CommandAction) => {
     switch (action.type) {
       case "refresh":
-        if (helmActive) helm.refresh();
-        else if (overviewActive) overview.refresh();
-        else resources.refresh();
+        refreshActive();
         return;
       case "show-contexts":
         showContextPicker();
@@ -417,7 +420,7 @@ export default function App() {
         void navigator.clipboard.writeText(action.namespace);
         return;
     }
-  }, [overview, overviewActive, helm, helmActive, resources, showContextPicker, connectContext, namespaces, setTheme, resourceGroups, selectKind, openResource]);
+  }, [refreshActive, showContextPicker, connectContext, namespaces, setTheme, resourceGroups, selectKind, openResource]);
 
   useEffect(() => desktop.app.onCommand((command) => {
     if (command === "show-contexts") {
@@ -429,16 +432,14 @@ export default function App() {
       return;
     }
     if (command === "refresh" && contexts.view === "workbench") {
-      if (helmActive) helm.refresh();
-      else if (overviewActive) overview.refresh();
-      else resources.refresh();
+      refreshActive();
       return;
     }
     if (command === "go-back") {
       if (helmActive && helm.selected) helm.clear();
       else if (detail.selected) detail.clear();
     }
-  }), [detail, showContextPicker, contexts.view, resources, overview, overviewActive, helm, helmActive]);
+  }), [detail, showContextPicker, contexts.view, refreshActive, helm, helmActive]);
 
   const searchItems = useMemo(() => searchResultItems(searchResults, paletteQuery), [searchResults, paletteQuery]);
 
@@ -540,8 +541,8 @@ export default function App() {
           query={helmActive || overviewActive ? "" : resources.query}
           onQueryChange={helmActive || overviewActive ? () => undefined : resources.setQuery}
           queryInputRef={searchRef}
-          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : resources.loading}
-          onRefresh={helmActive ? helm.refresh : overviewActive ? overview.refresh : resources.refresh}
+          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : detail.selected ? detail.refreshing : resources.loading}
+          onRefresh={refreshActive}
           theme={theme}
           onThemeChange={setTheme}
           onOpenSettings={() => {
@@ -679,7 +680,14 @@ export default function App() {
               events={diagnostics.events}
               related={diagnostics.related}
               onMutate={mutation.mutate}
-              onApplyMutation={mutation.applyPendingMutation}
+              onApplyMutation={async () => {
+                // A successful write re-fetches the object right away instead
+                // of waiting for the list watch (absent in snapshot-only
+                // scopes). Delete removes the object; the list-follow logic
+                // closes the detail when the row disappears.
+                const isDelete = mutation.pendingMutation?.operation === "delete";
+                if (await mutation.applyPendingMutation() && !isDelete) void detail.refetch();
+              }}
               onCancelMutation={mutation.cancelMutation}
               onNavigateRelated={openResource}
               onBack={detail.clear}
@@ -711,7 +719,9 @@ export default function App() {
             preview={mutation.mutationPreview}
             pendingMutation={mutation.pendingMutation}
             onPrepare={(yaml) => mutation.mutate({ operation: "create", yaml })}
-            onApply={mutation.applyPendingMutation}
+            onApply={async () => {
+              await mutation.applyPendingMutation();
+            }}
             onCancel={mutation.cancelMutation}
           />
         </Suspense>

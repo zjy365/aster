@@ -27,7 +27,8 @@ export interface MutationState {
   journal: string[];
   /** Runs the dry-run and stages the pending mutation for review. */
   mutate(request: MutationDraft): Promise<void>;
-  applyPendingMutation(): Promise<void>;
+  /** Applies the staged mutation; resolves true only when the write succeeded. */
+  applyPendingMutation(): Promise<boolean>;
   cancelMutation(): void;
 }
 
@@ -89,7 +90,7 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
   }, [contextId, kind, namespace, selected]);
 
   const applyPendingMutation = useCallback(async () => {
-    if (!pendingMutation) return;
+    if (!pendingMutation) return false;
     setMutationBusy(true);
     setMutationMessage("Applying…");
     try {
@@ -99,8 +100,10 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
       setMutationMessage(applied.changed ? "Applied" : "No change needed");
       setPendingMutation(undefined);
       setMutationPreview("");
+      return true;
     } catch (cause) {
       setMutationMessage(messageOf(cause));
+      return false;
     } finally {
       setMutationBusy(false);
     }

@@ -76,6 +76,10 @@ const MOCK_DESKTOP_API = `
     };
   };
 
+  // Records the last applied scale so the object get reflects the write — the
+  // watch fixture only ever ships the rv-1000 snapshot, like a lagging stream.
+  let scaledReplicas = null;
+
   // A realistic Deployment object: selector, strategy, conditions, and
   // annotations feed the overview's structured sections and the pods scope.
   const deploymentYaml = (name) => [
@@ -229,12 +233,21 @@ const MOCK_DESKTOP_API = `
     },
     resources: {
       list: async (request) => pageOf(request),
-      get: async (request) => ({
-        row: row(request.resourceKind, 0, request.resourceKind.namespaced),
-        yaml: request.resourceKind.kind === "Deployment"
+      get: async (request) => {
+        // The list may open any row, not just index 0; derive the index from
+        // the requested name so the returned uid matches the selected row.
+        const index = Number(request.name.slice(request.resourceKind.resource.length + 1)) || 0;
+        const fresh = row(request.resourceKind, index, request.resourceKind.namespaced);
+        let yaml = request.resourceKind.kind === "Deployment"
           ? deploymentYaml(request.name)
-          : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n",
-      }),
+          : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
+        if (scaledReplicas !== null && request.resourceKind.kind === "Deployment") {
+          fresh.desired = scaledReplicas;
+          fresh.resourceVersion = "1002";
+          yaml = yaml.replace("  replicas: 2", "  replicas: " + scaledReplicas);
+        }
+        return { row: fresh, yaml };
+      },
       events: async () => [
         { name: "event-1", namespace: "default", reason: "Scheduled", message: "Successfully assigned", type: "Normal", count: 1, lastTimestamp: "2026-08-01T00:00:00Z" },
       ],
@@ -287,6 +300,9 @@ const MOCK_DESKTOP_API = `
         // is rejected.
         if (!request.dryRun && request.resourceVersion && request.resourceVersion !== "1001") {
           throw new Error("resource version conflict: expected " + request.resourceVersion + ", got 1001");
+        }
+        if (!request.dryRun && request.operation === "scale") {
+          scaledReplicas = request.replicas;
         }
         // Mirror the API server: a scale dry-run echoes the would-be object,
         // including server-managed bumps (generation) the review diff filters out.
@@ -622,6 +638,41 @@ test("resource detail opens and preserves layout", async ({ page }) => {
   await expect(actions.getByTestId("delete-resource")).toBeVisible();
   await expectNoOverflow(page, "detail 1280x800");
   await screenshot(page, "detail-1280");
+  expect(failures).toEqual([]);
+});
+
+test("detail reflects an applied scale and survives manual refresh", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
+  await firstRow.click();
+
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+  const vitals = page.getByTestId("resource-vitals");
+  await expect(vitals).toContainText("2/2");
+
+  // Scale 2 → 3 through the dry-run review. The mock's list watch never ships
+  // the write (rv-1000 snapshot only), so the update must come from the
+  // post-apply refetch, and the stale snapshot must not downgrade it back.
+  await page.getByTestId("resource-action-scale").click();
+  await page.getByLabel("Desired replicas").fill("3");
+  await page.getByTestId("operation-prepare-dry-run").click();
+  await page.getByTestId("mutation-apply").click();
+  await expect(vitals).toContainText("2/3", { timeout: 15_000 });
+
+  // A manual refresh re-fetches the object in place instead of dropping back
+  // to the resource list.
+  await page.keyboard.press("F5");
+  await expect(detail).toBeVisible();
+  await expect(vitals).toContainText("2/3");
+  await expectNoOverflow(page, "detail after scale and refresh 1280x800");
+  await screenshot(page, "detail-scale-refresh-1280");
   expect(failures).toEqual([]);
 });
 
