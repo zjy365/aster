@@ -2482,6 +2482,9 @@ h2 {
 .resource-yaml-editor {
   min-height: 420px;
   resize: vertical;
+  /* Match the read-only viewer: no soft wrap, long lines scroll horizontally.
+     wrap="off" on the element does the same in WebKit; this pins it across engines. */
+  white-space: pre;
 }
 
 .resource-editor-actions {

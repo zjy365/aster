@@ -523,6 +523,7 @@ function YamlResourceEditor({
       <textarea
         className="resource-yaml-editor"
         value={yaml}
+        wrap="off"
         readOnly={!canMutate || mutationBusy}
         aria-readonly={!canMutate || mutationBusy}
         spellCheck={false}
