@@ -653,6 +653,46 @@ test("resource detail opens and preserves layout", async ({ page }) => {
   expect(failures).toEqual([]);
 });
 
+test("YAML editor scrolls long lines horizontally instead of wrapping", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
+  await firstRow.click();
+
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+  await detail.getByRole("tab", { name: "YAML" }).click();
+  await detail.getByTestId("yaml-edit").click();
+
+  const editor = detail.getByTestId("resource-yaml-editor");
+  await expect(editor).toBeVisible();
+  await expect(editor).toHaveAttribute("wrap", "off");
+
+  // The fixture fits the editor width, so nothing scrolls yet; a long
+  // unbroken line (like kubectl's last-applied-configuration annotation)
+  // must overflow horizontally, staying one visual line that scrolls.
+  expect(await editor.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const longLine =
+    "    kubectl.kubernetes.io/last-applied-configuration: " +
+    '{"apiVersion":"apps/v1","kind":"Deployment","spec":{"replicas":2,"template":{"spec":{"containers":[{"name":"web","image":"nginx:1.27"}]}}}}';
+  await editor.fill((await editor.inputValue()) + "\n" + longLine);
+  expect(await editor.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+
+  // Park the scroll at the long line so the screenshot shows it intact.
+  await editor.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    el.scrollLeft = 0;
+  });
+  await expectNoOverflow(page, "yaml editor long line 1280x800");
+  await screenshot(page, "detail-yaml-editor-nowrap-1280");
+  expect(failures).toEqual([]);
+});
+
 test("detail reflects an applied scale and survives manual refresh", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
