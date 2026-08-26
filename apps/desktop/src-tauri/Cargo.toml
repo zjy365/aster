@@ -1,6 +1,6 @@
 [package]
 name = "aster-desktop"
-version = "1.0.2"
+version = "1.0.3"
 description = "Aster Kubernetes desktop workbench"
 license = "Apache-2.0"
 edition = "2021"
