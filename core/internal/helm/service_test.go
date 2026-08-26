@@ -68,7 +68,11 @@ func chartRelease(name, namespace string, version int, status release.Status) *r
 		Namespace: namespace,
 		Version:   version,
 		Info:      &release.Info{Status: status, Description: "test release"},
-		Chart:     &chart.Chart{Metadata: &chart.Metadata{Name: "web", Version: "1.2.3", AppVersion: "7.0"}},
+		Chart: &chart.Chart{
+			Metadata: &chart.Metadata{Name: "web", Version: "1.2.3", AppVersion: "7.0"},
+			// Chart defaults, distinct from the user's Config overrides.
+			Values: map[string]any{"replicas": 1, "imagePullPolicy": "Always"},
+		},
 		Config:    map[string]any{"replicas": 2, "auth": map[string]any{"token": "s3cret"}},
 		Manifest:  "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-cm\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: web-secret\ndata:\n  password: c3VwZXJzZWNyZXQ=\n",
 	}
@@ -163,6 +167,11 @@ func TestGetReturnsValuesManifestAndHistory(t *testing.T) {
 	if !strings.Contains(detail.Values, "replicas: 2") {
 		t.Fatalf("values = %q", detail.Values)
 	}
+	// Chart defaults ship alongside the overrides so the upgrade dialog can
+	// show them without contacting a repository.
+	if !strings.Contains(detail.ChartValues, "replicas: 1") {
+		t.Fatalf("chartValues = %q", detail.ChartValues)
+	}
 	// Values are user-authored chart input and travel unredacted; only
 	// rendered manifests have Secret data masked.
 	if strings.Contains(detail.Manifest, "c3VwZXJzZWNyZXQ=") || strings.Contains(detail.Manifest, "supersecret") {
@@ -200,7 +209,6 @@ func TestServiceRejectsMissingInputs(t *testing.T) {
 		{"rollback name", RollbackRequest{ContextID: "dev", Namespace: "apps"}},
 		{"rollback revision", RollbackRequest{ContextID: "dev", Namespace: "apps", Name: "web", Revision: -1}},
 		{"upgrade name", UpgradeRequest{ContextID: "dev", Namespace: "apps", RepoURL: "https://example.test", Chart: "web"}},
-		{"upgrade repoUrl", UpgradeRequest{ContextID: "dev", Namespace: "apps", Name: "web", Chart: "web"}},
 		{"upgrade chart", UpgradeRequest{ContextID: "dev", Namespace: "apps", Name: "web", RepoURL: "https://example.test"}},
 		{"upgrade values", UpgradeRequest{ContextID: "dev", Namespace: "apps", Name: "web", RepoURL: "https://example.test", Chart: "web", Values: "{{"}},
 	}
@@ -288,6 +296,53 @@ func TestUpgradeRejectsMissingRelease(t *testing.T) {
 		Name:      "missing",
 		RepoURL:   "https://charts.example.test",
 		Chart:     "web",
+	})
+	var notFoundErr *NotFoundError
+	if err == nil || !errors.As(err, &notFoundErr) {
+		t.Fatalf("error = %v, want NotFoundError", err)
+	}
+}
+
+// An empty repoUrl reuses the chart stored in the release: a values-only
+// upgrade never touches a chart repository, and the chart stays untouched.
+func TestUpgradeWithoutRepoURLReusesStoredChart(t *testing.T) {
+	store := testStorage(t)
+	seed(t, store, chartRelease("web", "apps", 1, release.StatusDeployed))
+	// No locateChart stub: any repository access fails the test.
+	service := testService(t, store)
+
+	response, err := service.Upgrade(context.Background(), UpgradeRequest{
+		ContextID: "dev",
+		Namespace: "apps",
+		Name:      "web",
+		Values:    "replicas: 3\n",
+	})
+	if err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if response.Revision != 2 {
+		t.Fatalf("revision = %d, want 2", response.Revision)
+	}
+	latest, err := store.Last("web")
+	if err != nil {
+		t.Fatalf("store.Last: %v", err)
+	}
+	if latest.Chart.Metadata.Version != "1.2.3" {
+		t.Fatalf("chart version = %q, want the stored 1.2.3", latest.Chart.Metadata.Version)
+	}
+	// YAML numbers arrive as float64 through the sigs.k8s.io/yaml JSON round trip.
+	if latest.Config["replicas"] != float64(3) {
+		t.Fatalf("config = %#v, want replicas 3", latest.Config)
+	}
+}
+
+// The reuse path reports a missing release before attempting any upgrade.
+func TestUpgradeWithoutRepoURLRejectsMissingRelease(t *testing.T) {
+	service := testService(t, testStorage(t))
+	_, err := service.Upgrade(context.Background(), UpgradeRequest{
+		ContextID: "dev",
+		Namespace: "apps",
+		Name:      "missing",
 	})
 	var notFoundErr *NotFoundError
 	if err == nil || !errors.As(err, &notFoundErr) {

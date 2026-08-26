@@ -152,13 +152,19 @@ func (s *Service) Get(ctx context.Context, request GetRequest) (GetResponse, err
 		manifest = redactManifest(manifest)
 	}
 	values, valuesTruncated := capText(valuesYAML(item.Config))
+	chartValues := ""
+	chartValuesTruncated := false
+	if item.Chart != nil {
+		chartValues, chartValuesTruncated = capText(valuesYAML(item.Chart.Values))
+	}
 	notes, _ := capText(item.Info.Notes)
 	detail := ReleaseDetail{
 		ReleaseSummary: summarize(item),
 		Notes:          notes,
 		Values:         values,
 		Manifest:       manifest,
-		Truncated:      manifestTruncated || valuesTruncated,
+		ChartValues:    chartValues,
+		Truncated:      manifestTruncated || valuesTruncated || chartValuesTruncated,
 		History:        history,
 	}
 	return GetResponse{Release: detail}, nil
@@ -226,9 +232,6 @@ func (s *Service) Upgrade(ctx context.Context, request UpgradeRequest) (UpgradeR
 	if request.ContextID == "" || request.Namespace == "" || request.Name == "" {
 		return UpgradeResponse{}, invalid("contextId, namespace and name are required")
 	}
-	if strings.TrimSpace(request.RepoURL) == "" || strings.TrimSpace(request.Chart) == "" {
-		return UpgradeResponse{}, invalid("repoUrl and chart are required")
-	}
 	values := map[string]any{}
 	if strings.TrimSpace(request.Values) != "" {
 		if err := yaml.Unmarshal([]byte(request.Values), &values); err != nil {
@@ -241,11 +244,34 @@ func (s *Service) Upgrade(ctx context.Context, request UpgradeRequest) (UpgradeR
 	}
 	client := action.NewUpgrade(config)
 	client.Timeout = 5 * time.Minute
-	client.RepoURL = request.RepoURL
-	client.Version = request.Version
-	loaded, err := s.loadChart(client.ChartPathOptions, request.Chart)
-	if err != nil {
-		return UpgradeResponse{}, err
+
+	var loaded *chart.Chart
+	if strings.TrimSpace(request.RepoURL) == "" {
+		// Values-only upgrade: releases store their chart's full contents, so an
+		// empty repoUrl reuses that stored chart instead of re-pulling one. The
+		// chart and version inputs are meaningless here and ignored.
+		existing, err := action.NewGet(config).Run(request.Name)
+		if err != nil {
+			if isNotFound(err) {
+				return UpgradeResponse{}, notFound(fmt.Sprintf("release %q was not found", request.Name))
+			}
+			return UpgradeResponse{}, fmt.Errorf("load stored chart for release %q: %w", request.Name, err)
+		}
+		if existing.Chart == nil {
+			return UpgradeResponse{}, invalid(fmt.Sprintf("release %q has no stored chart; repoUrl and chart are required", request.Name))
+		}
+		loaded = existing.Chart
+	} else {
+		if strings.TrimSpace(request.Chart) == "" {
+			return UpgradeResponse{}, invalid("chart is required when repoUrl is set")
+		}
+		client.RepoURL = request.RepoURL
+		client.Version = request.Version
+		resolved, err := s.loadChart(client.ChartPathOptions, request.Chart)
+		if err != nil {
+			return UpgradeResponse{}, err
+		}
+		loaded = resolved
 	}
 	upgraded, err := client.RunWithContext(ctx, request.Name, loaded, values)
 	if err != nil {

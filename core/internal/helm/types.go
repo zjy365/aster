@@ -64,11 +64,14 @@ type GetRequest struct {
 // the core before they leave it.
 type ReleaseDetail struct {
 	ReleaseSummary
-	Notes     string           `json:"notes,omitempty"`
-	Values    string           `json:"values,omitempty"`
-	Manifest  string           `json:"manifest,omitempty"`
-	Truncated bool             `json:"truncated,omitempty"`
-	History   []ReleaseSummary `json:"history"`
+	Notes    string `json:"notes,omitempty"`
+	Values   string `json:"values,omitempty"`
+	Manifest string `json:"manifest,omitempty"`
+	// ChartValues is the chart's default values.yaml as stored in the release,
+	// so the upgrade dialog can show defaults without contacting a repository.
+	ChartValues string           `json:"chartValues,omitempty"`
+	Truncated   bool             `json:"truncated,omitempty"`
+	History     []ReleaseSummary `json:"history"`
 }
 
 type GetResponse struct {

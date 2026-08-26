@@ -336,17 +336,19 @@ func validateHelmUpgradeRequest(value helm.UpgradeRequest) error {
 	if err := checkLength("name", value.Name, maxName); err != nil {
 		return err
 	}
-	if value.RepoURL == "" {
-		return fmt.Errorf("repoUrl is required")
-	}
+	// repoUrl is optional: an empty value means the upgrade reuses the chart
+	// stored in the release (values-only). chart is only needed — and only
+	// meaningful — when pulling from a repository.
 	if err := checkLength("repoUrl", value.RepoURL, maxRepoURL); err != nil {
 		return err
 	}
-	if value.Chart == "" {
-		return fmt.Errorf("chart is required")
-	}
-	if err := checkLength("chart", value.Chart, maxName); err != nil {
-		return err
+	if value.RepoURL != "" {
+		if value.Chart == "" {
+			return fmt.Errorf("chart is required")
+		}
+		if err := checkLength("chart", value.Chart, maxName); err != nil {
+			return err
+		}
 	}
 	if err := checkLength("version", value.Version, maxChartVersion); err != nil {
 		return err
