@@ -48,6 +48,14 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
   const [generation, setGeneration] = useState(0);
   const request = useRef(0);
 
+  // Same scope-reset contract as useResourceDetail: when the list scope
+  // (context or namespace) changes, close any open release detail so a stale
+  // cross-namespace read can't linger under a picker that says otherwise.
+  useEffect(() => {
+    setSelected(undefined);
+    setDetailError("");
+  }, [contextId, namespace]);
+
   useEffect(() => {
     if (!contextId || !coreReady) return;
     const current = ++request.current;

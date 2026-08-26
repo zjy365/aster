@@ -1184,6 +1184,28 @@ test("helm view lists releases across namespaces when the picker is on All names
   expect(failures).toEqual([]);
 });
 
+test("helm detail closes when the namespace picker switches scope", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("tool-nav-helm").click();
+  const view = page.getByTestId("helm-view");
+  await view.getByTestId("helm-release-web").click();
+  await expect(page.getByTestId("helm-detail")).toBeVisible();
+
+  // Switching the shared namespace picker resets the helm list scope; the
+  // open detail belongs to the old scope and must close back to the list,
+  // matching how resource details behave.
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "All namespaces" }).click();
+  await expect(page.getByTestId("helm-detail")).toHaveCount(0);
+  await expect(view.getByTestId("helm-table")).toBeVisible();
+  await expect(view.getByTestId("helm-release-web")).toBeVisible();
+  expect(failures).toEqual([]);
+});
+
 async function screenshot(page: Page, name: string): Promise<void> {
   const directory = path.join(process.cwd(), "..", "..", "output", "playwright");
   fs.mkdirSync(directory, { recursive: true });
