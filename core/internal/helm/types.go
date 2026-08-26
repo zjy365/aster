@@ -93,8 +93,10 @@ type UpgradeRequest struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
 	// RepoURL points at the chart repository hosting the chart. It is
-	// required because releases do not record their origin repository, so
-	// there is nothing to default it from.
+	// optional: empty reuses the chart stored in the release (values-only
+	// upgrade), since releases do not record their origin repository and
+	// there is nothing to default it from. Set it together with Chart to
+	// pull a fresh chart from a repository.
 	RepoURL string `json:"repoUrl"`
 	Chart   string `json:"chart"`
 	Version string `json:"version,omitempty"`

@@ -376,8 +376,9 @@ export interface HelmUpgradeRequest {
   namespace: string;
   name: string;
   /**
-   * Chart repository URL. Required because releases do not record their
-   * origin repository, so there is nothing to default it from.
+   * Chart repository URL. Empty reuses the chart stored in the release
+   * (values-only upgrade); set with chart to pull a fresh chart from a
+   * repository, since releases do not record their origin repository.
    */
   repoUrl: string;
   chart: string;

@@ -269,7 +269,10 @@ func (s *Service) Upgrade(ctx context.Context, request UpgradeRequest) (UpgradeR
 		client.Version = request.Version
 		resolved, err := s.loadChart(client.ChartPathOptions, request.Chart)
 		if err != nil {
-			return UpgradeResponse{}, err
+			// Charts resolve through the user's local helm settings
+			// (repositories.yaml and credentials), so a lookup failure usually
+			// means the repository was never configured locally.
+			return UpgradeResponse{}, fmt.Errorf("pull chart %q from %q: %w; verify the repository is added to your local helm config (helm repo add)", request.Chart, request.RepoURL, err)
 		}
 		loaded = resolved
 	}
