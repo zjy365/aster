@@ -4184,14 +4184,6 @@ button.overview-card:focus-visible {
   font-family: inherit;
 }
 
-.helm-message {
-  padding: 7px 16px;
-  border-bottom: 1px solid var(--border);
-  color: var(--healthy);
-  background: color-mix(in srgb, var(--healthy) 8%, var(--surface));
-  font-size: 11px;
-}
-
 .load-more.helm-danger {
   color: var(--failed);
 }
@@ -4348,6 +4340,24 @@ button.overview-card:focus-visible {
 .helm-upgrade-values-editor {
   min-height: 320px;
   max-height: 45vh;
+}
+
+.helm-upgrade-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--failed) 35%, transparent);
+  border-radius: 8px;
+  color: var(--failed);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.helm-upgrade-error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 /* ---- Log viewer (xterm surface) ---- */

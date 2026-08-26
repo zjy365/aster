@@ -579,7 +579,6 @@ export default function App() {
               detailLoading={helm.detailLoading}
               detailError={helm.detailError}
               busy={helm.busy}
-              message={helm.message}
               onRefresh={helm.refresh}
               onSelect={(name, releaseNamespace) => void helm.select(name, releaseNamespace)}
               onUninstall={(name) => void helm.uninstall(name)}

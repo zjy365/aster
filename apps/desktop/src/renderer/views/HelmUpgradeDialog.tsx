@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CircleArrowUp } from "lucide-react";
+import { CircleArrowUp, LoaderCircle, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ export interface HelmUpgradeDialogProps {
   onOpenChange(open: boolean): void;
   detail: HelmReleaseDetail;
   busy: boolean;
-  onUpgrade(input: HelmUpgradeInput): Promise<boolean>;
+  onUpgrade(input: HelmUpgradeInput): Promise<string | null>;
 }
 
 /**
@@ -33,7 +33,9 @@ export interface HelmUpgradeDialogProps {
  * Submission is a two-step review, mirroring the resource mutation flow:
  * edit the values, review the diff against the release's current values,
  * then confirm. Values replace the release's current values wholesale;
- * clearing the field resets to the chart defaults.
+ * clearing the field resets to the chart defaults. While the upgrade runs
+ * the dialog cannot be dismissed; a failure is shown in place so the user
+ * can adjust and retry.
  */
 export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade }: HelmUpgradeDialogProps) {
   const [repoUrl, setRepoUrl] = useState("");
@@ -41,6 +43,7 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
   const [version, setVersion] = useState(detail.chartVersion);
   const [values, setValues] = useState(detail.values ?? "");
   const [reviewing, setReviewing] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -49,23 +52,36 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
     setVersion(detail.chartVersion);
     setValues(detail.values ?? "");
     setReviewing(false);
+    setError("");
   }, [open, detail]);
 
   const reuseChart = !repoUrl.trim();
 
   const submit = async () => {
-    const ok = await onUpgrade({
+    setError("");
+    const failure = await onUpgrade({
       name: detail.name,
       repoUrl: repoUrl.trim(),
       chart: chart.trim(),
       version: version.trim() || undefined,
       values,
     });
-    if (ok) onOpenChange(false);
+    if (failure) {
+      setError(failure);
+      return;
+    }
+    onOpenChange(false);
+  };
+
+  // An upgrade in flight must not be dismissed: the request keeps running
+  // server-side, so closing would only hide its outcome.
+  const handleOpenChange = (next: boolean) => {
+    if (busy) return;
+    onOpenChange(next);
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="helm-upgrade-dialog" data-testid="helm-upgrade-dialog">
         <DialogHeader>
           <DialogTitle>Upgrade {detail.name}</DialogTitle>
@@ -84,7 +100,7 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
                 : `Pulls chart ${chart.trim()} ${version.trim() || "(latest)"} from ${repoUrl.trim()} and replaces the values.`}
             </div>
             <MutationDiffView
-              name={`${detail.name}-values.yaml`}
+              name={`${detail.name}-values`}
               beforeYaml={detail.values ?? ""}
               afterYaml={values}
               className="mutation-review-diff"
@@ -154,6 +170,13 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
           </div>
         )}
 
+        {error ? (
+          <div className="helm-upgrade-error" data-testid="helm-upgrade-error" role="alert">
+            <TriangleAlert aria-hidden="true" className="size-4" />
+            <span>{error}</span>
+          </div>
+        ) : null}
+
         <DialogFooter>
           {reviewing ? (
             <>
@@ -165,8 +188,12 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
                 disabled={busy}
                 onClick={() => void submit()}
               >
-                <CircleArrowUp data-icon="inline-start" />
-                Confirm upgrade
+                {busy ? (
+                  <LoaderCircle aria-hidden="true" className="spin size-3.5" />
+                ) : (
+                  <CircleArrowUp data-icon="inline-start" />
+                )}
+                {busy ? "Upgrading…" : "Confirm upgrade"}
               </Button>
             </>
           ) : (

@@ -167,12 +167,14 @@ pub async fn helm_releases_uninstall(state: State<'_, AppState>, request: Value)
 
 #[tauri::command]
 pub async fn helm_releases_rollback(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
-    state.core.post("/v1/helm/releases/rollback", request).await
+    // Rollback re-applies a stored manifest and can outlast the 30s default.
+    state.core.post_long("/v1/helm/releases/rollback", request).await
 }
 
 #[tauri::command]
 pub async fn helm_releases_upgrade(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
-    state.core.post("/v1/helm/releases/upgrade", request).await
+    // Upgrades re-apply manifests and can outlast the 30s default.
+    state.core.post_long("/v1/helm/releases/upgrade", request).await
 }
 
 #[tauri::command]

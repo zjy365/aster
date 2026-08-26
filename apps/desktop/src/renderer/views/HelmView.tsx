@@ -16,12 +16,11 @@ export interface HelmViewProps {
   detailLoading: boolean;
   detailError: string;
   busy: boolean;
-  message: string;
   onRefresh(): void;
   onSelect(name: string, namespace: string): void;
   onUninstall(name: string): void;
   onRollback(name: string, revision?: number): void;
-  onUpgrade(input: HelmUpgradeInput): Promise<boolean>;
+  onUpgrade(input: HelmUpgradeInput): Promise<string | null>;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -49,7 +48,6 @@ export function HelmView({
   detailLoading,
   detailError,
   busy,
-  message,
   onRefresh,
   onSelect,
   onUninstall,
@@ -72,12 +70,6 @@ export function HelmView({
           </div>
         </div>
       )}
-
-      {message ? (
-        <div className="helm-message" data-testid="helm-message" role="status">
-          {message}
-        </div>
-      ) : null}
 
       {selected ? (
         <ReleaseDetail
@@ -191,7 +183,7 @@ function ReleaseDetail({
   busy: boolean;
   onUninstall(name: string): void;
   onRollback(name: string, revision?: number): void;
-  onUpgrade(input: HelmUpgradeInput): Promise<boolean>;
+  onUpgrade(input: HelmUpgradeInput): Promise<string | null>;
 }) {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [tab, setTab] = useState<HelmDetailTab>("overview");

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HelmReleaseDetail, HelmReleaseSummary, HelmUpgradeRequest } from "../../shared/types";
+import { toast } from "@/components/ui/toast";
 import { desktop } from "../lib/desktop";
 
 export interface UseHelmOptions {
@@ -18,7 +19,6 @@ export interface HelmState {
   detailLoading: boolean;
   detailError: string;
   busy: boolean;
-  message: string;
   /** Bumps on every explicit refresh so the list effect re-fetches. */
   generation: number;
   refresh(): void;
@@ -26,8 +26,8 @@ export interface HelmState {
   clear(): void;
   uninstall(name: string): Promise<void>;
   rollback(name: string, revision?: number): Promise<void>;
-  /** Resolves true when the upgrade succeeded so the dialog can close. */
-  upgrade(input: HelmUpgradeInput): Promise<boolean>;
+  /** Resolves null on success so the dialog can close, or the error message. */
+  upgrade(input: HelmUpgradeInput): Promise<string | null>;
 }
 
 /**
@@ -44,7 +44,6 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
   const [generation, setGeneration] = useState(0);
   const request = useRef(0);
 
@@ -102,11 +101,10 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     const ns = selected?.namespace || namespace;
     if (!contextId || !ns || busy) return;
     setBusy(true);
-    setMessage("");
     setDetailError("");
     try {
       await desktop.helm.uninstall({ contextId, namespace: ns, name });
-      setMessage(`Release "${name}" uninstalled`);
+      toast.add({ title: `Release "${name}" uninstalled`, type: "success" });
       setSelected(undefined);
       refresh();
     } catch (cause) {
@@ -120,11 +118,10 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     const ns = selected?.namespace || namespace;
     if (!contextId || !ns || busy) return;
     setBusy(true);
-    setMessage("");
     setDetailError("");
     try {
       await desktop.helm.rollback({ contextId, namespace: ns, name, revision });
-      setMessage(`Release "${name}" rolled back${revision ? ` to revision ${revision}` : " to the previous revision"}`);
+      toast.add({ title: `Release "${name}" rolled back${revision ? ` to revision ${revision}` : " to the previous revision"}`, type: "success" });
       refresh();
     } catch (cause) {
       setDetailError(cause instanceof Error ? cause.message : String(cause));
@@ -133,21 +130,23 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     }
   }, [contextId, namespace, selected, busy, refresh]);
 
-  const upgrade = useCallback(async (input: HelmUpgradeInput): Promise<boolean> => {
+  const upgrade = useCallback(async (input: HelmUpgradeInput): Promise<string | null> => {
     const ns = selected?.namespace || namespace;
-    if (!contextId || !ns || busy) return false;
+    if (!contextId || !ns || busy) return "Another operation is already in progress";
     setBusy(true);
-    setMessage("");
     setDetailError("");
     try {
       const response = await desktop.helm.upgrade({ contextId, namespace: ns, ...input });
-      setMessage(`Release "${input.name}" upgraded to revision ${response.revision}`);
+      toast.add({ title: `Release "${input.name}" upgraded to revision ${response.revision}`, type: "success" });
       await select(input.name, ns);
       refresh();
-      return true;
+      return null;
     } catch (cause) {
-      setDetailError(cause instanceof Error ? cause.message : String(cause));
-      return false;
+      // Returned so the open dialog can show it; detailError keeps it visible
+      // on the detail view after the dialog closes.
+      const failure = cause instanceof Error ? cause.message : String(cause);
+      setDetailError(failure);
+      return failure;
     } finally {
       setBusy(false);
     }
@@ -161,7 +160,6 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
     detailLoading,
     detailError,
     busy,
-    message,
     generation,
     refresh,
     select,

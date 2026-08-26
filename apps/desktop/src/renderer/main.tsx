@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import App from "./App";
 import { applyStoredTheme } from "./hooks/useTheme";
@@ -13,7 +14,9 @@ applyStoredTheme();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <TooltipProvider delay={500} timeout={250}>
-      <App />
+      <Toaster>
+        <App />
+      </Toaster>
     </TooltipProvider>
   </StrictMode>,
 );

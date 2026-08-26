@@ -233,7 +233,15 @@ const MOCK_DESKTOP_API = `
       }),
       uninstall: async () => undefined,
       rollback: async () => undefined,
-      upgrade: async () => ({ revision: 4 }),
+      upgrade: async (request) => {
+        // A real upgrade takes time; the delay keeps the busy state
+        // observable, and the marker exercises the failure path.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        if ((request.values || "").includes("cluster-is-down")) {
+          throw new Error("simulated upgrade failure");
+        }
+        return { revision: 4 };
+      },
     },
     resources: {
       list: async (request) => pageOf(request),
@@ -1093,13 +1101,48 @@ test("helm view lists releases and opens a detail", async ({ page }) => {
   await expectNoOverflow(page, "helm upgrade review 1280x800");
   await screenshot(page, "helm-upgrade-1280");
   await upgradeDialog.getByTestId("helm-upgrade-submit").click();
-  await expect(view.getByTestId("helm-message")).toContainText("upgraded to revision 4");
+  // While the upgrade runs the confirm button shows progress and the dialog
+  // refuses to be dismissed; on success it closes by itself.
+  await expect(upgradeDialog.getByTestId("helm-upgrade-submit")).toContainText("Upgrading");
+  await page.keyboard.press("Escape");
+  await expect(upgradeDialog).toBeVisible();
   await expect(upgradeDialog).not.toBeVisible();
+  // The success surfaces as a toast that dismisses itself instead of a
+  // banner lingering on the view.
+  const toast = page.locator('[data-slot="toast"]', { hasText: "upgraded to revision 4" });
+  await expect(toast).toBeVisible();
+  await screenshot(page, "helm-upgrade-toast-1280");
+  await expect(toast).toHaveCount(0, { timeout: 10_000 });
 
   // The unified toolbar back returns to the release list; the helm tab stays active.
   await page.getByTestId("toolbar-back").click();
   await expect(page.getByTestId("helm-table")).toBeVisible();
   await expect(view.getByTestId("helm-release-broken")).toBeVisible();
+  expect(failures).toEqual([]);
+});
+
+test("helm upgrade failure keeps the dialog open with the error", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("tool-nav-helm").click();
+  const view = page.getByTestId("helm-view");
+  await view.getByTestId("helm-release-web").click();
+  await page.getByTestId("helm-detail").getByTestId("helm-upgrade").click();
+  const dialog = page.getByTestId("helm-upgrade-dialog");
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByTestId("helm-upgrade-values").fill("cluster-is-down: true");
+  await dialog.getByTestId("helm-upgrade-review").click();
+  await dialog.getByTestId("helm-upgrade-submit").click();
+  // The failure surfaces inside the dialog — not on the detail view hidden
+  // behind it — and the dialog stays open so the values can be adjusted and
+  // retried. No success toast is posted.
+  await expect(dialog.getByTestId("helm-upgrade-error")).toContainText("simulated upgrade failure");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('[data-slot="toast"]')).toHaveCount(0);
   expect(failures).toEqual([]);
 });
 
