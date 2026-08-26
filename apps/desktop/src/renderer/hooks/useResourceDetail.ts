@@ -83,24 +83,36 @@ export function useResourceDetail({ contextId, kind, namespace, generation, item
     }
   }, [items, selected]);
 
-  useEffect(() => {
-    if (!selected || !contextId) return;
-    const tag = objectTag(selected);
-    if (detailFor.current === tag) return;
+  // Fetches the object and adopts the returned row. Shared by the follow effect
+  // (on selection change) and refetch (on explicit refresh / applied write).
+  const fetchDetail = useCallback(async (row: ResourceRow) => {
+    if (!contextId) return undefined;
     const request = ++detailRequest.current;
-    setDetail(undefined);
-    setDetailError("");
-    void desktop.resources.get({
-      contextId,
-      resourceKind: kind,
-      namespace: selected.namespace,
-      name: selected.name,
-    }).then((response) => {
-      if (request !== detailRequest.current) return;
+    try {
+      const response = await desktop.resources.get({
+        contextId,
+        resourceKind: kind,
+        namespace: row.namespace,
+        name: row.name,
+      });
+      if (request !== detailRequest.current) return undefined;
       detailFor.current = objectTag(response.row);
       setDetail(response);
-    }).catch((cause) => request === detailRequest.current && setDetailError(messageOf(cause)));
-  }, [contextId, kind, selected]);
+      setDetailError("");
+      return response;
+    } catch (cause) {
+      if (request === detailRequest.current) setDetailError(messageOf(cause));
+      return undefined;
+    }
+  }, [contextId, kind]);
+
+  useEffect(() => {
+    if (!selected || !contextId) return;
+    if (detailFor.current === objectTag(selected)) return;
+    setDetail(undefined);
+    setDetailError("");
+    void fetchDetail(selected);
+  }, [contextId, kind, selected, fetchDetail]);
 
   const select = useCallback((row: ResourceRow) => setSelected(row), []);
   const clear = useCallback(() => {
@@ -113,28 +125,13 @@ export function useResourceDetail({ contextId, kind, namespace, generation, item
   const refetch = useCallback(async () => {
     const current = selectedRef.current;
     if (!current || !contextId) return;
-    const request = ++detailRequest.current;
     setRefreshing(true);
-    try {
-      const response = await desktop.resources.get({
-        contextId,
-        resourceKind: kind,
-        namespace: current.namespace,
-        name: current.name,
-      });
-      if (request !== detailRequest.current) return;
-      detailFor.current = objectTag(response.row);
-      setDetail(response);
-      setDetailError("");
-      // Adopting the fresh row re-fires the fetch effect above; the tag guard
-      // turns that into a no-op instead of a duplicate get.
-      setSelected(response.row);
-    } catch (cause) {
-      if (request === detailRequest.current) setDetailError(messageOf(cause));
-    } finally {
-      if (request === detailRequest.current) setRefreshing(false);
-    }
-  }, [contextId, kind]);
+    // Fetch straight through: the follow effect's tag guard would skip the get
+    // when the snapshot already matches, but an explicit refresh must re-read.
+    const response = await fetchDetail(current);
+    if (response) setSelected(response.row);
+    setRefreshing(false);
+  }, [contextId, fetchDetail]);
 
   return { selected, detail, detailError, refreshing, select, clear, refetch };
 }

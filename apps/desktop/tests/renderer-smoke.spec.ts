@@ -234,7 +234,10 @@ const MOCK_DESKTOP_API = `
     resources: {
       list: async (request) => pageOf(request),
       get: async (request) => {
-        const fresh = row(request.resourceKind, 0, request.resourceKind.namespaced);
+        // The list may open any row, not just index 0; derive the index from
+        // the requested name so the returned uid matches the selected row.
+        const index = Number(request.name.slice(request.resourceKind.resource.length + 1)) || 0;
+        const fresh = row(request.resourceKind, index, request.resourceKind.namespaced);
         let yaml = request.resourceKind.kind === "Deployment"
           ? deploymentYaml(request.name)
           : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
