@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { HelmReleaseDetail } from "../../shared/types";
+import { MutationDiffView } from "../detail/MutationDiffView";
 import type { HelmUpgradeInput } from "../hooks/useHelm";
 
 export interface HelmUpgradeDialogProps {
@@ -23,16 +24,23 @@ export interface HelmUpgradeDialogProps {
 }
 
 /**
- * Upgrade form for an installed release. The repo URL cannot be defaulted
- * because releases do not record their origin repository, so the user always
- * confirms it. Values are prefilled with the release's current values and
- * replace them wholesale; clearing the field resets to chart defaults.
+ * Upgrade form for an installed release. The repo URL stays empty for the
+ * common values-only upgrade: the release stores its chart's full contents,
+ * so the core reuses that chart instead of re-pulling one (releases never
+ * record their origin repository). Filling a repo URL switches to pulling
+ * the named chart (and optional version) from that repository.
+ *
+ * Submission is a two-step review, mirroring the resource mutation flow:
+ * edit the values, review the diff against the release's current values,
+ * then confirm. Values replace the release's current values wholesale;
+ * clearing the field resets to the chart defaults.
  */
 export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade }: HelmUpgradeDialogProps) {
   const [repoUrl, setRepoUrl] = useState("");
   const [chart, setChart] = useState(detail.chart);
   const [version, setVersion] = useState(detail.chartVersion);
   const [values, setValues] = useState(detail.values ?? "");
+  const [reviewing, setReviewing] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -40,7 +48,10 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
     setChart(detail.chart);
     setVersion(detail.chartVersion);
     setValues(detail.values ?? "");
+    setReviewing(false);
   }, [open, detail]);
+
+  const reuseChart = !repoUrl.trim();
 
   const submit = async () => {
     const ok = await onUpgrade({
@@ -55,75 +66,124 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="create-resource-dialog" data-testid="helm-upgrade-dialog">
+      <DialogContent className="helm-upgrade-dialog" data-testid="helm-upgrade-dialog">
         <DialogHeader>
           <DialogTitle>Upgrade {detail.name}</DialogTitle>
           <DialogDescription>
-            Values below replace the release&apos;s current values entirely. Clear them to reset to the chart defaults.
+            {reviewing
+              ? "Review the values diff before applying. Confirming creates a new revision."
+              : "Values below replace the release's current values entirely. Clear them to reset to the chart defaults."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="helm-upgrade-fields">
-          <label className="helm-upgrade-field">
-            <span>Repository URL</span>
-            <input
-              className="helm-upgrade-input"
-              data-testid="helm-upgrade-repo-url"
-              disabled={busy}
-              onChange={(event) => setRepoUrl(event.target.value)}
-              placeholder="https://charts.bitnami.com/bitnami"
-              spellCheck={false}
-              value={repoUrl}
+        {reviewing ? (
+          <>
+            <div className="mutation-review-status" data-testid="helm-upgrade-summary">
+              {reuseChart
+                ? `Reuses the installed chart ${detail.chart} ${detail.chartVersion} — only the values change.`
+                : `Pulls chart ${chart.trim()} ${version.trim() || "(latest)"} from ${repoUrl.trim()} and replaces the values.`}
+            </div>
+            <MutationDiffView
+              name={`${detail.name}-values.yaml`}
+              beforeYaml={detail.values ?? ""}
+              afterYaml={values}
+              className="mutation-review-diff"
+              testId="helm-upgrade-diff"
+              ariaLabel="Values diff"
             />
-          </label>
-          <div className="helm-upgrade-row">
+          </>
+        ) : (
+          <div className="helm-upgrade-fields">
             <label className="helm-upgrade-field">
-              <span>Chart</span>
+              <span>Repository URL (optional — leave empty to reuse the installed chart)</span>
               <input
                 className="helm-upgrade-input"
-                data-testid="helm-upgrade-chart"
+                data-testid="helm-upgrade-repo-url"
                 disabled={busy}
-                onChange={(event) => setChart(event.target.value)}
+                onChange={(event) => setRepoUrl(event.target.value)}
+                placeholder="https://charts.bitnami.com/bitnami"
                 spellCheck={false}
-                value={chart}
+                value={repoUrl}
               />
             </label>
-            <label className="helm-upgrade-field">
-              <span>Chart version</span>
-              <input
-                className="helm-upgrade-input"
-                data-testid="helm-upgrade-version"
-                disabled={busy}
-                onChange={(event) => setVersion(event.target.value)}
-                placeholder="latest"
-                spellCheck={false}
-                value={version}
-              />
-            </label>
+            <div className="helm-upgrade-row">
+              <label className="helm-upgrade-field">
+                <span>Chart</span>
+                <input
+                  className="helm-upgrade-input"
+                  data-testid="helm-upgrade-chart"
+                  disabled={busy || reuseChart}
+                  onChange={(event) => setChart(event.target.value)}
+                  spellCheck={false}
+                  value={chart}
+                />
+              </label>
+              <label className="helm-upgrade-field">
+                <span>Chart version</span>
+                <input
+                  className="helm-upgrade-input"
+                  data-testid="helm-upgrade-version"
+                  disabled={busy || reuseChart}
+                  onChange={(event) => setVersion(event.target.value)}
+                  placeholder="latest"
+                  spellCheck={false}
+                  value={version}
+                />
+              </label>
+            </div>
+            <div className="helm-upgrade-columns">
+              <div className="helm-upgrade-field">
+                <span>Chart defaults (read-only)</span>
+                <pre className="helm-upgrade-defaults" data-testid="helm-upgrade-defaults">
+                  {detail.chartValues || "This chart ships no default values."}
+                </pre>
+              </div>
+              <div className="helm-upgrade-field">
+                <span>Your values</span>
+                <textarea
+                  aria-label="Upgrade values YAML"
+                  className="resource-yaml-editor helm-upgrade-values-editor"
+                  data-testid="helm-upgrade-values"
+                  onChange={(event) => setValues(event.target.value)}
+                  readOnly={busy}
+                  spellCheck={false}
+                  value={values}
+                />
+              </div>
+            </div>
           </div>
-          <textarea
-            aria-label="Upgrade values YAML"
-            className="resource-yaml-editor create-resource-editor"
-            data-testid="helm-upgrade-values"
-            onChange={(event) => setValues(event.target.value)}
-            readOnly={busy}
-            spellCheck={false}
-            value={values}
-          />
-        </div>
+        )}
 
         <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            data-testid="helm-upgrade-submit"
-            disabled={busy || !repoUrl.trim() || !chart.trim()}
-            onClick={() => void submit()}
-          >
-            <CircleArrowUp data-icon="inline-start" />
-            Upgrade release
-          </Button>
+          {reviewing ? (
+            <>
+              <Button variant="outline" disabled={busy} onClick={() => setReviewing(false)}>
+                Back to edit
+              </Button>
+              <Button
+                data-testid="helm-upgrade-submit"
+                disabled={busy}
+                onClick={() => void submit()}
+              >
+                <CircleArrowUp data-icon="inline-start" />
+                Confirm upgrade
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button
+                data-testid="helm-upgrade-review"
+                disabled={busy || (!reuseChart && !chart.trim())}
+                onClick={() => setReviewing(true)}
+              >
+                <CircleArrowUp data-icon="inline-start" />
+                Review changes
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

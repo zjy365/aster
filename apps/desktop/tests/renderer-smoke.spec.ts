@@ -223,6 +223,7 @@ const MOCK_DESKTOP_API = `
         updatedAt: "2026-08-01T00:00:00Z",
         description: "Install complete",
         values: "replicas: 2",
+        chartValues: "replicas: 1\\nimagePullPolicy: Always\\n",
         manifest: "apiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: web-cm\\n",
         truncated: false,
         history: [
@@ -1054,36 +1055,49 @@ test("helm view lists releases and opens a detail", async ({ page }) => {
   await expectNoOverflow(page, "helm list 1280x800");
   await screenshot(page, "helm-list-1280");
 
-  // Selecting a release opens the read view: values, manifest, history.
+  // Selecting a release opens the tabbed detail: a card-based overview with
+  // vitals, information, and revision history; values and manifest get tabs.
   await view.getByTestId("helm-release-web").click();
   const detail = page.getByTestId("helm-detail");
   await expect(detail).toBeVisible();
   await expect(detail).toContainText("web");
-  await expect(detail.getByTestId("helm-values")).toContainText("replicas");
-  await expect(detail.getByTestId("helm-manifest")).toContainText("ConfigMap");
+  await expect(detail.getByTestId("helm-vitals")).toContainText("1.2.3");
+  await expect(detail.getByTestId("helm-meta")).toContainText("Install complete");
   await expect(detail.getByTestId("helm-history")).toContainText("v3");
   await expect(detail.getByTestId("helm-rollback")).toBeVisible();
   await expect(detail.getByTestId("helm-uninstall")).toBeVisible();
   await expectNoOverflow(page, "helm detail 1280x800");
   await screenshot(page, "helm-detail-1280");
 
-  // Upgrade opens the form prefilled from the current release.
+  await detail.getByRole("tab", { name: "Values" }).click();
+  await expect(detail.getByTestId("helm-values")).toContainText("replicas");
+  await detail.getByRole("tab", { name: "Manifest" }).click();
+  await expect(detail.getByTestId("helm-manifest")).toContainText("ConfigMap");
+
+  // Upgrade is a two-step review: edit values, review the diff, confirm.
+  // Leaving the repository empty reuses the installed chart, so the chart
+  // and version inputs stay disabled.
   await detail.getByTestId("helm-upgrade").click();
   const upgradeDialog = page.getByTestId("helm-upgrade-dialog");
   await expect(upgradeDialog).toBeVisible();
   await expect(upgradeDialog.getByTestId("helm-upgrade-chart")).toHaveValue("web");
-  await expect(upgradeDialog.getByTestId("helm-upgrade-version")).toHaveValue("1.2.3");
+  await expect(upgradeDialog.getByTestId("helm-upgrade-chart")).toBeDisabled();
+  await expect(upgradeDialog.getByTestId("helm-upgrade-version")).toBeDisabled();
   await expect(upgradeDialog.getByTestId("helm-upgrade-values")).toHaveValue("replicas: 2");
-  await expect(upgradeDialog.getByTestId("helm-upgrade-submit")).toBeDisabled();
-  await upgradeDialog.getByTestId("helm-upgrade-repo-url").fill("https://charts.example.test");
-  await expectNoOverflow(page, "helm upgrade dialog 1280x800");
+  // Chart defaults sit read-only beside the editable values (Kite-style split).
+  await expect(upgradeDialog.getByTestId("helm-upgrade-defaults")).toContainText("replicas: 1");
+  await upgradeDialog.getByTestId("helm-upgrade-values").fill("replicas: 3");
+  await upgradeDialog.getByTestId("helm-upgrade-review").click();
+  await expect(upgradeDialog.getByTestId("helm-upgrade-summary")).toContainText("Reuses the installed chart");
+  await expect(upgradeDialog.getByTestId("helm-upgrade-diff")).toContainText("replicas");
+  await expectNoOverflow(page, "helm upgrade review 1280x800");
   await screenshot(page, "helm-upgrade-1280");
   await upgradeDialog.getByTestId("helm-upgrade-submit").click();
   await expect(view.getByTestId("helm-message")).toContainText("upgraded to revision 4");
   await expect(upgradeDialog).not.toBeVisible();
 
-  // Back returns to the release list; the helm tab stays active.
-  await detail.getByTestId("helm-back").click();
+  // The unified toolbar back returns to the release list; the helm tab stays active.
+  await page.getByTestId("toolbar-back").click();
   await expect(page.getByTestId("helm-table")).toBeVisible();
   await expect(view.getByTestId("helm-release-broken")).toBeVisible();
   expect(failures).toEqual([]);

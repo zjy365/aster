@@ -1,6 +1,6 @@
-import { ArrowLeft, CircleArrowUp, LoaderCircle, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
+import { CircleArrowUp, LoaderCircle, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import type { HelmReleaseDetail, HelmReleaseSummary } from "../../shared/types";
 import type { HelmUpgradeInput } from "../hooks/useHelm";
 import { formatAge } from "../lib/format";
@@ -19,7 +19,6 @@ export interface HelmViewProps {
   message: string;
   onRefresh(): void;
   onSelect(name: string, namespace: string): void;
-  onBack(): void;
   onUninstall(name: string): void;
   onRollback(name: string, revision?: number): void;
   onUpgrade(input: HelmUpgradeInput): Promise<boolean>;
@@ -53,25 +52,26 @@ export function HelmView({
   message,
   onRefresh,
   onSelect,
-  onBack,
   onUninstall,
   onRollback,
   onUpgrade,
 }: HelmViewProps) {
   return (
     <section aria-label="Helm releases" className="helm-pane" data-testid="helm-view">
-      <div className="pane-heading">
-        <div>
-          <h1>Releases</h1>
-          <p>Helm · {contextName ? `${contextName} · ` : ""}{namespace}</p>
+      {selected ? null : (
+        <div className="pane-heading">
+          <div>
+            <h1>Releases</h1>
+            <p>Helm · {contextName ? `${contextName} · ` : ""}{namespace}</p>
+          </div>
+          <div className="resource-summary">
+            <span>{releases.length} loaded</span>
+            <button className="load-more" data-testid="helm-refresh" disabled={loading || busy} onClick={onRefresh} type="button">
+              Refresh
+            </button>
+          </div>
         </div>
-        <div className="resource-summary">
-          <span>{releases.length} loaded</span>
-          <button className="load-more" data-testid="helm-refresh" disabled={loading || busy} onClick={onRefresh} type="button">
-            Refresh
-          </button>
-        </div>
-      </div>
+      )}
 
       {message ? (
         <div className="helm-message" data-testid="helm-message" role="status">
@@ -81,11 +81,11 @@ export function HelmView({
 
       {selected ? (
         <ReleaseDetail
+          key={`${selected.namespace}/${selected.name}`}
           detail={selected}
           detailLoading={detailLoading}
           detailError={detailError}
           busy={busy}
-          onBack={onBack}
           onUninstall={onUninstall}
           onRollback={onRollback}
           onUpgrade={onUpgrade}
@@ -174,12 +174,13 @@ function ReleaseTable({
   );
 }
 
+type HelmDetailTab = "overview" | "values" | "manifest";
+
 function ReleaseDetail({
   detail,
   detailLoading,
   detailError,
   busy,
-  onBack,
   onUninstall,
   onRollback,
   onUpgrade,
@@ -188,24 +189,15 @@ function ReleaseDetail({
   detailLoading: boolean;
   detailError: string;
   busy: boolean;
-  onBack(): void;
   onUninstall(name: string): void;
   onRollback(name: string, revision?: number): void;
   onUpgrade(input: HelmUpgradeInput): Promise<boolean>;
 }) {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [tab, setTab] = useState<HelmDetailTab>("overview");
   return (
     <div className="helm-detail" data-testid="helm-detail">
       <header className="resource-detail-header">
-        <Button
-          aria-label="Back to releases"
-          data-testid="helm-back"
-          onClick={onBack}
-          size="icon"
-          variant="ghost"
-        >
-          <ArrowLeft />
-        </Button>
         <div className="resource-detail-identity">
           <span className="resource-detail-breadcrumb">
             Helm · {detail.namespace} · {detail.chart} {detail.chartVersion}
@@ -260,13 +252,29 @@ function ReleaseDetail({
           <span>Loading release…</span>
         </div>
       ) : (
-        <>
-          <ReleaseMeta detail={detail} />
-          <RevisionHistory history={detail.history} />
-          <CodeBlock title="Values" body={detail.values} placeholder="No custom values" dataTestid="helm-values" />
-          <CodeBlock title="Manifest" body={detail.manifest} placeholder="No manifest" dataTestid="helm-manifest" truncated={detail.truncated} />
-          <CodeBlock title="Notes" body={detail.notes} placeholder="No notes" dataTestid="helm-notes" />
-        </>
+        <Tabs
+          className="resource-detail-tabs"
+          value={tab}
+          onValueChange={(value) => setTab(value as HelmDetailTab)}
+        >
+          <TabsList className="resource-detail-tab-list" aria-label="Release details">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="values">Values</TabsTrigger>
+            <TabsTrigger value="manifest">Manifest</TabsTrigger>
+          </TabsList>
+
+          <div className="resource-detail-scroll">
+            <TabsContent value="overview">
+              <ReleaseOverview detail={detail} />
+            </TabsContent>
+            <TabsContent value="values">
+              <CodeBlock title="Values" body={detail.values} placeholder="No custom values" dataTestid="helm-values" />
+            </TabsContent>
+            <TabsContent value="manifest">
+              <CodeBlock title="Manifest" body={detail.manifest} placeholder="No manifest" dataTestid="helm-manifest" truncated={detail.truncated} />
+            </TabsContent>
+          </div>
+        </Tabs>
       )}
       <HelmUpgradeDialog
         open={upgradeOpen}
@@ -279,24 +287,60 @@ function ReleaseDetail({
   );
 }
 
-function ReleaseMeta({ detail }: { detail: HelmReleaseDetail }) {
+/** Overview speaks the resource detail's card language: a vitals strip of
+ * headline facts, then bordered cards for information, history, and notes. */
+function ReleaseOverview({ detail }: { detail: HelmReleaseDetail }) {
   return (
-    <div className="helm-meta-grid" data-testid="helm-meta">
-      <Meta label="Status" value={detail.status} />
-      <Meta label="Revision" value={String(detail.version)} />
-      <Meta label="Chart" value={`${detail.chart} ${detail.chartVersion}`} />
-      <Meta label="App version" value={detail.appVersion || "—"} />
-      <Meta label="Updated" value={detail.updatedAt ? formatAge(detail.updatedAt) : "—"} />
-      {detail.description ? <Meta label="Description" value={detail.description} /> : null}
+    <div className="resource-overview" data-aside="off" data-testid="helm-overview">
+      <dl className="resource-vitals" data-testid="helm-vitals">
+        <div>
+          <dd>
+            <span className={`status-dot ${statusTone(detail.status)}`} aria-hidden="true" />
+            {detail.status}
+          </dd>
+          <dt>Status</dt>
+        </div>
+        <div><dd>{detail.version}</dd><dt>Revision</dt></div>
+        <div><dd>{detail.chartVersion}</dd><dt>Chart version</dt></div>
+        <div><dd>{detail.appVersion || "—"}</dd><dt>App version</dt></div>
+        <div><dd>{detail.updatedAt ? formatAge(detail.updatedAt) : "—"}</dd><dt>Updated</dt></div>
+      </dl>
+
+      <div className="resource-overview-body">
+        <div className="resource-overview-main">
+          <section className="resource-detail-section">
+            <div className="resource-section-heading">
+              <h2>Release information</h2>
+            </div>
+            <dl className="resource-definition-list" data-testid="helm-meta">
+              <Definition label="Chart" value={detail.chart} />
+              <Definition label="Namespace" value={detail.namespace} />
+              <Definition label="Updated" value={detail.updatedAt ? formatAge(detail.updatedAt) : "—"} />
+              {detail.description ? <Definition label="Description" value={detail.description} /> : null}
+            </dl>
+          </section>
+
+          <RevisionHistory history={detail.history} />
+
+          {detail.notes ? (
+            <section className="resource-detail-section" data-testid="helm-notes">
+              <div className="resource-section-heading">
+                <h2>Notes</h2>
+              </div>
+              <pre className="helm-code-body">{detail.notes}</pre>
+            </section>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
+function Definition({ label, value }: { label: string; value: string }) {
   return (
-    <div className="helm-meta">
-      <span className="helm-meta-label">{label}</span>
-      <span className="helm-meta-value">{value}</span>
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
     </div>
   );
 }
@@ -304,12 +348,17 @@ function Meta({ label, value }: { label: string; value: string }) {
 function RevisionHistory({ history }: { history: HelmReleaseSummary[] }) {
   const revisions = [...history].sort((a, b) => b.version - a.version);
   return (
-    <div className="helm-revisions" data-testid="helm-history">
-      <h2>Revision history</h2>
+    <section className="resource-detail-section">
+      <div className="resource-section-heading">
+        <h2>
+          Revision history{" "}
+          <span className="resource-section-count">{revisions.length}</span>
+        </h2>
+      </div>
       {revisions.length === 0 ? (
         <div className="helm-revisions-empty">No history</div>
       ) : (
-        <ul>
+        <ul className="helm-revisions" data-testid="helm-history">
           {revisions.map((item) => (
             <li key={item.version}>
               <span className="tabular">v{item.version}</span>
@@ -320,7 +369,7 @@ function RevisionHistory({ history }: { history: HelmReleaseSummary[] }) {
           ))}
         </ul>
       )}
-    </div>
+    </section>
   );
 }
 

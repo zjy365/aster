@@ -344,6 +344,8 @@ export interface HelmReleaseDetail extends HelmReleaseSummary {
   notes?: string;
   values?: string;
   manifest?: string;
+  /** The chart's default values.yaml as stored in the release. */
+  chartValues?: string;
   /** True when the core truncated values or manifest to the size cap. */
   truncated?: boolean;
   history: HelmReleaseSummary[];
