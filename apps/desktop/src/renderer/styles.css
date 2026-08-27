@@ -1706,16 +1706,6 @@ h2 {
   background: var(--surface);
 }
 
-/* The card holding the scale affordance (Desired) reacts as a whole. */
-.resource-vitals > div:has(.resource-vital-action) {
-  transition: border-color 120ms ease, background-color 120ms ease;
-}
-
-.resource-vitals > div:has(.resource-vital-action):hover {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-}
-
 .resource-vitals dd {
   display: flex;
   align-items: center;
@@ -1731,28 +1721,6 @@ h2 {
 
 .resource-vitals dd[data-tone="positive"] { color: var(--positive); }
 .resource-vitals dd[data-tone="caution"] { color: var(--caution); }
-
-/* Clickable vitals (Desired → scale) keep the same type; only the hover
-   color reveals the affordance. */
-.resource-vital-action {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-
-.resource-vital-action:hover {
-  color: var(--primary);
-}
-
-.resource-vital-action:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
 
 .resource-vitals dt {
   color: var(--text-secondary);

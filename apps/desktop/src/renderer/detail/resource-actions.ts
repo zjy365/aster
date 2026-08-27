@@ -1,4 +1,4 @@
-import { Container, RotateCw, Scale3d, Trash2 } from "lucide-react";
+import { Container, FileCode2, RotateCw, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 /**
@@ -7,7 +7,7 @@ import type { LucideIcon } from "lucide-react";
  * to the shared command registry: keep the shape declarative so row context
  * menus and the palette can consume the same descriptors later.
  */
-export type ResourceActionId = "scale" | "image" | "restart" | "delete";
+export type ResourceActionId = "image" | "restart" | "edit" | "delete";
 
 export interface ResourceActionDescriptor {
   id: ResourceActionId;
@@ -22,17 +22,6 @@ export interface ResourceActionDescriptor {
 }
 
 const ROLLABLE_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet"]);
-/** A DaemonSet's replica count is derived from matching nodes, so it is not scalable. */
-const SCALABLE_KINDS = new Set(["Deployment", "StatefulSet"]);
-
-const SCALE: ResourceActionDescriptor = {
-  id: "scale",
-  label: "Scale",
-  icon: Scale3d,
-  danger: false,
-  needsInput: true,
-  shortcut: "S",
-};
 
 const UPDATE_IMAGE: ResourceActionDescriptor = {
   id: "image",
@@ -52,6 +41,19 @@ const RESTART: ResourceActionDescriptor = {
   shortcut: "R",
 };
 
+/**
+ * Full-YAML editing is the universal write path: it stays anchored immediately
+ * left of Delete so its position is identical across every kind.
+ */
+const EDIT: ResourceActionDescriptor = {
+  id: "edit",
+  label: "Edit",
+  icon: FileCode2,
+  danger: false,
+  needsInput: false,
+  shortcut: "E",
+};
+
 const DELETE: ResourceActionDescriptor = {
   id: "delete",
   label: "Delete",
@@ -63,8 +65,9 @@ const DELETE: ResourceActionDescriptor = {
 
 export function resourceActionsFor(kind: string): ResourceActionDescriptor[] {
   const actions: ResourceActionDescriptor[] = [];
-  if (SCALABLE_KINDS.has(kind)) actions.push(SCALE);
   if (ROLLABLE_KINDS.has(kind)) actions.push(UPDATE_IMAGE, RESTART);
+  // Secrets stay read-only: their data never leaves the core, so no Edit anchor.
+  if (kind !== "Secret") actions.push(EDIT);
   actions.push(DELETE);
   return actions;
 }
