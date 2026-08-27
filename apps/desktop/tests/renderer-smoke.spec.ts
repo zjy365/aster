@@ -689,8 +689,13 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
     el.scrollLeft = 0;
   });
   await expectNoOverflow(page, "yaml editor long line 1280x800");
+  // The snapshot is generated on macOS, but CI renders the same @fontsource
+  // JetBrains Mono through FreeType, so subpixel antialiasing differs by a few
+  // percent on text edges. Absorb that cross-platform delta without hiding
+  // layout drift, which moves orders of magnitude more pixels.
   await expect(editor).toHaveScreenshot("yaml-editor-nowrap.png", {
     animations: "disabled",
+    maxDiffPixelRatio: 0.05,
   });
   await screenshot(page, "detail-yaml-editor-nowrap-1280");
   expect(failures).toEqual([]);
