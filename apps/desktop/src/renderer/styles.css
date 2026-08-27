@@ -548,29 +548,31 @@ h2 {
 
 .context-health {
   position: absolute;
-  top: -2px;
-  right: -2px;
+  top: 0;
+  right: 0;
+  transform: translate(35%, -35%);
   display: inline-flex;
   align-items: center;
   cursor: default;
+  pointer-events: auto;
 }
 
 .context-health-dot {
   display: block;
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   /* Ring in the row background keeps the dot legible over the tinted icon. */
-  box-shadow: 0 0 0 2px var(--surface);
+  box-shadow: 0 0 0 1.5px var(--surface);
   transition: box-shadow 120ms ease;
 }
 
 .context-card:hover:not(:disabled) .context-health-dot {
-  box-shadow: 0 0 0 2px var(--surface-hover);
+  box-shadow: 0 0 0 1.5px var(--surface-hover);
 }
 
 .context-card[data-selected="true"] .context-health-dot {
-  box-shadow: 0 0 0 2px var(--selection);
+  box-shadow: 0 0 0 1.5px var(--selection);
 }
 
 .context-health[data-state="ok"] .context-health-dot {
