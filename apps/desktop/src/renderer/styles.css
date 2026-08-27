@@ -1181,6 +1181,21 @@ h2 {
   padding: 0;
 }
 
+.namespace-combobox-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 12px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.namespace-combobox-loading svg {
+  width: 12px;
+  height: 12px;
+}
+
 .namespace-combobox-footer {
   padding: 6px 10px;
   border-top: 1px solid var(--border);

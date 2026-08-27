@@ -534,6 +534,7 @@ export default function App() {
         <UnifiedToolbar
           namespaces={namespaces.namespaces}
           namespacesTruncated={namespaces.truncated}
+          namespacesLoading={namespaces.loading}
           namespace={namespaces.namespace}
           onNamespaceOpen={namespaces.load}
           onNamespaceChange={namespaces.setNamespace}

@@ -7,6 +7,8 @@ export interface NamespacesState {
   namespaces: NamespaceInfo[];
   /** True when the core capped the namespace list; pickers should say so. */
   truncated: boolean;
+  /** True while the lazy first fetch is in flight; pickers show a loading row. */
+  loading: boolean;
   namespace: string;
   setNamespace(namespace: string): void;
   /** Lazily fetches the namespace list on first use (pickers, ⌘K). */
@@ -27,6 +29,7 @@ export function useNamespaces(
 ): NamespacesState {
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([]);
   const [truncated, setTruncated] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [namespace, setNamespace] = useState("");
   const [loaded, setLoaded] = useState(false);
   const loadingRef = useRef(false);
@@ -39,6 +42,7 @@ export function useNamespaces(
     loadingRef.current = false;
     setNamespaces([]);
     setTruncated(false);
+    setLoading(false);
     setLoaded(false);
     if (!contextId) {
       setNamespace("");
@@ -54,11 +58,13 @@ export function useNamespaces(
   const load = useCallback(() => {
     if (!contextId || loaded || loadingRef.current) return;
     loadingRef.current = true;
+    setLoading(true);
     const generation = generationRef.current;
     desktop.namespaces.list(contextId)
       .then((result) => {
         if (generation !== generationRef.current) return;
         loadingRef.current = false;
+        setLoading(false);
         setNamespaces(result.namespaces);
         setTruncated(result.truncated);
         setLoaded(true);
@@ -68,9 +74,10 @@ export function useNamespaces(
         // "All namespaces" rather than showing a broken partial list.
         if (generation !== generationRef.current) return;
         loadingRef.current = false;
+        setLoading(false);
         onError(messageOf(cause));
       });
   }, [contextId, loaded, onError]);
 
-  return { namespaces, truncated, namespace, setNamespace, load };
+  return { namespaces, truncated, loading, namespace, setNamespace, load };
 }

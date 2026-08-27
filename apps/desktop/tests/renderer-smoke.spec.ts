@@ -1176,6 +1176,40 @@ test("context picker keeps the brand visible when many contexts scroll", async (
   expect(failures).toEqual([]);
 });
 
+test("namespace picker shows a loading row while the list loads", async ({ page }) => {
+  // On a large cluster the lazy first fetch takes seconds; the picker must
+  // say it is loading instead of sitting on a misleading empty list.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  const loading = page.getByTestId("namespace-loading");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText("Loading namespaces");
+  // The no-match empty state never stands in for the in-flight fetch.
+  await expect(page.locator(".namespace-combobox-empty")).not.toContainText("No matching namespaces");
+  await screenshot(page, "namespace-picker-loading");
+
+  // Once the fetch lands the loading row leaves and real items appear.
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await expect(loading).toHaveCount(0);
+  expect(failures).toEqual([]);
+});
+
 test("namespace picker refetches the list after each context switch", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });

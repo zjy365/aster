@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronsUpDown,
   Command,
+  LoaderCircle,
   Moon,
   RefreshCw,
   Search,
@@ -42,6 +43,8 @@ export interface UnifiedToolbarProps {
   namespaces: NamespaceInfo[];
   /** True when the core capped the namespace list; the picker footer says so. */
   namespacesTruncated?: boolean;
+  /** True while the lazy first fetch runs; the picker shows a loading row. */
+  namespacesLoading?: boolean;
   /** Called when the namespace picker opens; the list loads lazily on first use. */
   onNamespaceOpen?(): void;
   namespace: string;
@@ -75,6 +78,7 @@ interface NamespaceItem {
 export function UnifiedToolbar({
   namespaces,
   namespacesTruncated = false,
+  namespacesLoading = false,
   onNamespaceOpen,
   namespace,
   onNamespaceChange,
@@ -177,6 +181,14 @@ export function UnifiedToolbar({
                 <Combobox.Empty className="namespace-combobox-empty">
                   No matching namespaces
                 </Combobox.Empty>
+                {namespacesLoading && (
+                  // The first fetch can take seconds on a large cluster; say so
+                  // instead of leaving the list looking empty.
+                  <div className="namespace-combobox-loading" data-testid="namespace-loading">
+                    <LoaderCircle aria-hidden="true" className="spin" />
+                    Loading namespaces…
+                  </div>
+                )}
                 <Combobox.List className="namespace-combobox-list">
                   {(item: NamespaceItem) => {
                     if (item.value === null) return renderNamespaceItem(item, ALL_NAMESPACES_VALUE);
