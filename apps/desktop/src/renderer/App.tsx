@@ -542,7 +542,7 @@ export default function App() {
           query={helmActive || overviewActive ? "" : resources.query}
           onQueryChange={helmActive || overviewActive ? () => undefined : resources.setQuery}
           queryInputRef={searchRef}
-          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : detail.selected ? detail.refreshing : resources.loading}
+          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : detail.selected ? detail.refreshing : resources.loading || resources.revalidating}
           onRefresh={refreshActive}
           theme={theme}
           onThemeChange={setTheme}
@@ -593,6 +593,7 @@ export default function App() {
                 <h1>{pluralize(kind.kind)}</h1>
                 <p>{kind.category} · {contexts.activeContext?.name || "Kubernetes"}
                   {resources.snapshotOnly ? " · All namespaces (snapshot, refresh to update)" : ""}
+                  {resources.revalidating ? " · Refreshing…" : ""}
                 </p>
               </div>
               <div className="resource-summary">

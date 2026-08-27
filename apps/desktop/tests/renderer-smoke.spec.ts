@@ -1248,6 +1248,74 @@ test("namespace picker refetches the list after each context switch", async ({ p
   expect(failures).toEqual([]);
 });
 
+test("switching back to a namespace restores the cached snapshot instantly", async ({ page }) => {
+  // Delay every watch snapshot by 600ms so the cold path's full-pane loading
+  // state is observable; a cached revisit must skip it entirely.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: {
+        resources: {
+          watch(
+            request: unknown,
+            listener: (batch: { kind: string }) => void,
+          ): () => void;
+        };
+      };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const watch = desktop.resources.watch.bind(desktop.resources);
+      desktop.resources.watch = (request, listener) => {
+        const timers: ReturnType<typeof setTimeout>[] = [];
+        const stop = watch(request, (batch) => {
+          if (batch.kind !== "snapshot") {
+            listener(batch);
+            return;
+          }
+          timers.push(setTimeout(() => listener(batch), 600));
+        });
+        return () => {
+          stop();
+          timers.forEach(clearTimeout);
+        };
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const loadingState = page.locator(".table-state", { hasText: "Loading resources" });
+  const namespaceItem = (name: string) =>
+    page.locator(".namespace-combobox-item", { hasText: name });
+
+  // Cold first visit to the default namespace: spinner, then rows.
+  await expect(loadingState).toBeVisible();
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+
+  // Cold first visit to kube-system: the full-pane spinner returns.
+  await page.getByTestId("namespace-select").click();
+  await namespaceItem("kube-system").click();
+  await expect(loadingState).toBeVisible();
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+
+  // Switching back to default is a revisit: retained rows render at once and
+  // the loading state never appears, while the heading reports the refresh.
+  await page.getByTestId("namespace-select").click();
+  await namespaceItem("default").click();
+  await expect(loadingState).toHaveCount(0);
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0");
+  const heading = page.locator(".pane-heading");
+  await expect(heading).toContainText("Refreshing");
+
+  // The fresh snapshot lands and the refresh indicator clears.
+  await expect(heading).not.toContainText("Refreshing", { timeout: 15_000 });
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0");
+  await screenshot(page, "namespace-revisit-cached");
+  expect(failures).toEqual([]);
+});
+
 test("helm view lists releases across namespaces when the picker is on All namespaces", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });

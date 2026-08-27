@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ResourceKind, ResourceListResponse, ResourceRow, ResourceWatchBatch } from "../../shared/types";
 import { applyResourceWatchBatches } from "../lib/resource-watch";
+import { readResourceListSnapshot, resourceListCacheKey, writeResourceListSnapshot } from "../lib/resource-list-cache";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
@@ -20,6 +21,8 @@ export interface ResourceListState {
   list: ResourceListResponse;
   loading: boolean;
   loadingMore: boolean;
+  /** True while cached rows show and a fresh snapshot runs behind them. */
+  revalidating: boolean;
   query: string;
   setQuery(query: string): void;
   visibleRows: ResourceRow[];
@@ -52,12 +55,18 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
   const [list, setList] = useState<ResourceListResponse>({ items: [] });
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
   const [query, setQuery] = useState("");
   const [generation, setGeneration] = useState(0);
   const listRequest = useRef(0);
   const watchQueue = useRef<ResourceWatchBatch[]>([]);
   const watchHasSnapshot = useRef(false);
   const watchFlushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Latest list, so the scope-change cleanup can retain it as a snapshot.
+  const listRef = useRef(list);
+  useEffect(() => {
+    listRef.current = list;
+  }, [list]);
   const liveWatch = watchEnabled(kind, namespace, enabled);
 
   const loadMore = useCallback(async () => {
@@ -89,11 +98,25 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
   useEffect(() => {
     if (!contextId || !coreReady || !enabled) return;
     ++listRequest.current;
-    setLoading(true);
     setError("");
-    setList({ items: [] });
     watchQueue.current = [];
     watchHasSnapshot.current = false;
+
+    // Only watched (namespace-scoped) views retain snapshots; cluster-wide
+    // snapshot-only scopes keep their manual-refresh behavior untouched.
+    const cacheKey = liveWatch ? resourceListCacheKey(contextId, kind.id, namespace, labelSelector) : "";
+    const cached = cacheKey ? readResourceListSnapshot(cacheKey) : undefined;
+    if (cached?.items.length) {
+      // Stale-while-revalidate: revisit renders the retained snapshot at once
+      // and the fresh snapshot + watch replaces it in place below.
+      setList(cached);
+      setLoading(false);
+      setRevalidating(true);
+    } else {
+      setLoading(true);
+      setRevalidating(false);
+      setList({ items: [] });
+    }
 
     // Cluster-wide namespaced lists are snapshot-only (see watchEnabled): the
     // initial page is fetched, watch never starts, and refresh re-fetches.
@@ -125,6 +148,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     }, (batch) => {
       if (batch.kind === "error") {
         setLoading(false);
+        setRevalidating(false);
         if (!watchHasSnapshot.current) setError(batch.message);
         return;
       }
@@ -136,7 +160,10 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
         const batches = watchQueue.current;
         watchQueue.current = [];
         setList((current) => applyResourceWatchBatches(current, batches));
+        // The flush only runs once fresh batches arrive, so any retained
+        // snapshot has now been replaced by live data.
         setLoading(false);
+        setRevalidating(false);
       }, 24);
     });
 
@@ -146,6 +173,10 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
       if (watchFlushTimer.current !== undefined) {
         clearTimeout(watchFlushTimer.current);
         watchFlushTimer.current = undefined;
+      }
+      // Retain the leaving view's latest rows for the next revisit.
+      if (cacheKey && listRef.current.items.length) {
+        writeResourceListSnapshot(cacheKey, listRef.current);
       }
     };
   }, [contextId, namespace, kind, coreReady, enabled, labelSelector, generation, setError, liveWatch]);
@@ -167,6 +198,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     list,
     loading,
     loadingMore,
+    revalidating,
     query,
     setQuery,
     visibleRows,
