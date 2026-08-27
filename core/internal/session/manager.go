@@ -29,6 +29,9 @@ type Manager struct {
 	loader      *Loader
 	factory     dynamicFactory
 	coreFactory func(*rest.Config) (kubernetes.Interface, error)
+	// serverVersion performs the /version probe behind Health; replaceable in
+	// tests so probes never need a live API server.
+	serverVersion func(*rest.Config) (string, error)
 
 	mu               sync.Mutex
 	clients          map[string]dynamic.Interface
@@ -70,6 +73,7 @@ func newManager(loader *Loader, factory dynamicFactory) *Manager {
 		loader:           loader,
 		factory:          factory,
 		coreFactory:      func(config *rest.Config) (kubernetes.Interface, error) { return kubernetes.NewForConfig(config) },
+		serverVersion:    defaultServerVersion,
 		clients:          make(map[string]dynamic.Interface),
 		coreClients:      make(map[string]kubernetes.Interface),
 		discoveryClients: make(map[string]discovery.DiscoveryInterface),

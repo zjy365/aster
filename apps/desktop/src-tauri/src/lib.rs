@@ -100,6 +100,7 @@ pub fn run() {
             commands::app_open_external,
             commands::core_status,
             commands::contexts_list,
+            commands::contexts_health,
             commands::sources_report,
             commands::sources_rename,
             commands::namespaces_list,

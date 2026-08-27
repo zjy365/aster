@@ -119,6 +119,7 @@ const api: DesktopApi = {
   },
   contexts: {
     list: async () => (await coreGet("/v1/contexts")).contexts ?? [],
+    health: async (contextIds) => (await corePost("/v1/contexts/health", { contextIds })).health ?? [],
     sourcesReport: () => coreGet("/v1/sources"),
     renameConflict: async (request) => { await corePost("/v1/sources/rename", request); },
   },
