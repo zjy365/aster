@@ -431,33 +431,35 @@ function ContextPicker({
                     onDoubleClick={() => connect(context)}
                     onKeyDown={(event) => handleOptionKeyDown(event, context)}
                   >
-                    <span className="kubernetes-mark" aria-hidden="true">
-                      <Boxes />
+                    <span className="context-card-icon">
+                      <span className="kubernetes-mark" aria-hidden="true">
+                        <Boxes />
+                      </span>
+                      {healthState && (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span
+                                className="context-health"
+                                data-state={healthState}
+                                data-testid={`context-health-${context.id}`}
+                                aria-label={healthLabel}
+                                onClick={(event) => event.stopPropagation()}
+                                onDoubleClick={(event) => event.stopPropagation()}
+                              />
+                            }
+                          >
+                            <span className="context-health-dot" aria-hidden="true" />
+                          </TooltipTrigger>
+                          <TooltipContent className="block max-w-sm leading-relaxed break-all">
+                            {healthLabel}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                     </span>
                     <span className="context-card-copy">
                       <strong>{context.name}</strong>
                       <span className="context-card-sub">
-                        {healthState && (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span
-                                  className="context-health"
-                                  data-state={healthState}
-                                  data-testid={`context-health-${context.id}`}
-                                  aria-label={healthLabel}
-                                  onClick={(event) => event.stopPropagation()}
-                                  onDoubleClick={(event) => event.stopPropagation()}
-                                />
-                              }
-                            >
-                              <span className="context-health-dot" aria-hidden="true" />
-                            </TooltipTrigger>
-                            <TooltipContent className="block max-w-sm leading-relaxed break-all">
-                              {healthLabel}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
                         <span className="context-card-cluster">
                           {context.cluster || "Kubernetes cluster"}
                         </span>
