@@ -44,6 +44,22 @@ export interface ContextInfo {
   error?: string;
 }
 
+/**
+ * Reachability probe result for one context, from the core's
+ * POST /v1/contexts/health. Advisory only: an "error" status never blocks
+ * connecting, since a cluster can reject /version yet serve real requests.
+ */
+export interface ContextHealth {
+  id: string;
+  status: "ok" | "error";
+  latencyMs?: number;
+  version?: string;
+  message?: string;
+}
+
+/** Renderer-side health for a row: absent until its probe resolves. */
+export type ContextHealthMap = Record<string, ContextHealth>;
+
 export interface AsterSettings {
   kubeconfigSources: string[];
   /**
@@ -485,6 +501,11 @@ export interface DesktopApi {
   };
   contexts: {
     list(): Promise<ContextInfo[]>;
+    /**
+     * Probes API server reachability for the given contexts. Resolves after
+     * the slowest probe (bounded per-context by the core's probe timeout).
+     */
+    health(contextIds: string[]): Promise<ContextHealth[]>;
     sourcesReport(): Promise<SourcesReport>;
     /**
      * Resolves a kubeconfig name collision by renaming the colliding entry

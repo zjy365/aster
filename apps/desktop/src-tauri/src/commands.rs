@@ -40,6 +40,11 @@ pub async fn contexts_list(state: State<'_, AppState>) -> Result<Value, String> 
 }
 
 #[tauri::command]
+pub async fn contexts_health(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/contexts/health", request).await
+}
+
+#[tauri::command]
 pub async fn sources_report(state: State<'_, AppState>) -> Result<Value, String> {
     state.core.get("/v1/sources").await
 }

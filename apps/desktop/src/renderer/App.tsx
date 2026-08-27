@@ -493,6 +493,8 @@ export default function App() {
         layout={contexts.contextLayout}
         loading={contexts.contextsLoading}
         error={contexts.contextsError}
+        health={contexts.contextHealth}
+        healthProbing={contexts.healthProbing}
         onQueryChange={contexts.setContextQuery}
         onLayoutChange={contexts.setContextLayout}
         onSelect={contexts.setContextChoice}

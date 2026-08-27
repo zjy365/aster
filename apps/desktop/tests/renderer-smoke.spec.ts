@@ -150,6 +150,10 @@ const MOCK_DESKTOP_API = `
     },
     contexts: {
       list: async () => contexts,
+      // prod is unreachable so both dot states show up in the picker tests.
+      health: async (ids) => ids.map((id) => id === "prod"
+        ? { id, status: "error", message: "dial tcp 10.0.0.2:443: i/o timeout" }
+        : { id, status: "ok", latencyMs: 12, version: "v1.30.1" }),
       sourcesReport: async () => ({
         chain: [{ path: "/Users/fixture/.kube/config", kind: "file", files: 1, contexts: 2, default: true }],
         configured: [],
@@ -382,6 +386,27 @@ test("context picker renders without overflow at both viewports", async ({ page 
   await page.setViewportSize({ width: 900, height: 640 });
   await expectNoOverflow(page, "context picker 900x640");
   await screenshot(page, "picker-900");
+  expect(failures).toEqual([]);
+});
+
+test("context picker shows cluster reachability status", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  const ok = page.getByTestId("context-health-dev");
+  await expect(ok).toBeVisible();
+  await expect(ok).toHaveAttribute("data-state", "ok");
+  await expect(ok).toHaveAttribute("aria-label", "Reachable · v1.30.1 · 12 ms");
+
+  const down = page.getByTestId("context-health-prod");
+  await expect(down).toBeVisible();
+  await expect(down).toHaveAttribute("data-state", "error");
+  await expect(down).toHaveAttribute("aria-label", "Unreachable: dial tcp 10.0.0.2:443: i/o timeout");
+  // An unreachable cluster stays selectable: the status is advisory.
+  await expect(page.getByTestId("context-option-prod")).toBeEnabled();
+
+  await expectNoOverflow(page, "context picker health 1280x800");
   expect(failures).toEqual([]);
 });
 
