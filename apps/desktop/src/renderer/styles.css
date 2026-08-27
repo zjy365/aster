@@ -548,9 +548,8 @@ h2 {
 
 .context-health {
   position: absolute;
-  top: 0;
-  right: 0;
-  transform: translate(35%, -35%);
+  top: -3px;
+  right: -3px;
   display: inline-flex;
   align-items: center;
   cursor: default;
