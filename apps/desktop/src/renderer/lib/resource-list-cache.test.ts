@@ -22,6 +22,10 @@ function snapshot(name: string): ResourceListResponse {
   };
 }
 
+function emptySnapshot(): ResourceListResponse {
+  return { items: [], resourceVersion: "7" };
+}
+
 beforeEach(() => clearResourceListSnapshots());
 
 describe("resourceListCacheKey", () => {
@@ -41,6 +45,11 @@ describe("snapshot LRU", () => {
     expect(readResourceListSnapshot(key)).toBeUndefined();
     writeResourceListSnapshot(key, snapshot("a"));
     expect(readResourceListSnapshot(key)?.items[0]?.name).toBe("a");
+  });
+
+  it("reads back an empty snapshot as a valid loaded view", () => {
+    writeResourceListSnapshot("empty", emptySnapshot());
+    expect(readResourceListSnapshot("empty")).toEqual(emptySnapshot());
   });
 
   it("evicts the least recently revisited view beyond eight entries", () => {

@@ -9,6 +9,8 @@ export interface NamespacesState {
   truncated: boolean;
   /** True while the lazy first fetch is in flight; pickers show a loading row. */
   loading: boolean;
+  /** True after the lazy inventory has completed successfully, including empty results. */
+  loaded: boolean;
   namespace: string;
   setNamespace(namespace: string): void;
   /** Lazily fetches the namespace list on first use (pickers, ⌘K). */
@@ -79,5 +81,5 @@ export function useNamespaces(
       });
   }, [contextId, loaded, onError]);
 
-  return { namespaces, truncated, loading, namespace, setNamespace, load };
+  return { namespaces, truncated, loading, loaded, namespace, setNamespace, load };
 }

@@ -535,6 +535,7 @@ export default function App() {
           namespaces={namespaces.namespaces}
           namespacesTruncated={namespaces.truncated}
           namespacesLoading={namespaces.loading}
+          namespacesLoaded={namespaces.loaded}
           namespace={namespaces.namespace}
           onNamespaceOpen={namespaces.load}
           onNamespaceChange={namespaces.setNamespace}

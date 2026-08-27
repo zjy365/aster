@@ -45,6 +45,8 @@ export interface UnifiedToolbarProps {
   namespacesTruncated?: boolean;
   /** True while the lazy first fetch runs; the picker shows a loading row. */
   namespacesLoading?: boolean;
+  /** True after the lazy namespace inventory completed successfully. */
+  namespacesLoaded?: boolean;
   /** Called when the namespace picker opens; the list loads lazily on first use. */
   onNamespaceOpen?(): void;
   namespace: string;
@@ -79,6 +81,7 @@ export function UnifiedToolbar({
   namespaces,
   namespacesTruncated = false,
   namespacesLoading = false,
+  namespacesLoaded = false,
   onNamespaceOpen,
   namespace,
   onNamespaceChange,
@@ -178,9 +181,11 @@ export function UnifiedToolbar({
                   <Search aria-hidden="true" />
                   <Combobox.Input placeholder="Filter namespaces" data-testid="namespace-filter" />
                 </div>
-                <Combobox.Empty className="namespace-combobox-empty">
-                  No matching namespaces
-                </Combobox.Empty>
+                {!namespacesLoading && namespacesLoaded && (
+                  <Combobox.Empty className="namespace-combobox-empty">
+                    No matching namespaces
+                  </Combobox.Empty>
+                )}
                 {namespacesLoading && (
                   // The first fetch can take seconds on a large cluster; say so
                   // instead of leaving the list looking empty.

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ResourceKind, ResourceListResponse, ResourceRow, ResourceWatchBatch } from "../../shared/types";
 import { applyResourceWatchBatches } from "../lib/resource-watch";
-import { readResourceListSnapshot, resourceListCacheKey, writeResourceListSnapshot } from "../lib/resource-list-cache";
+import { readResourceListSnapshot, resourceListCacheKey, writeResourceListSnapshot, clearResourceListSnapshots } from "../lib/resource-list-cache";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
@@ -59,14 +59,20 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
   const [query, setQuery] = useState("");
   const [generation, setGeneration] = useState(0);
   const listRequest = useRef(0);
+  const watchSubscription = useRef(0);
+  const cacheContext = useRef(contextId);
   const watchQueue = useRef<ResourceWatchBatch[]>([]);
   const watchHasSnapshot = useRef(false);
   const watchFlushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Latest list, so the scope-change cleanup can retain it as a snapshot.
   const listRef = useRef(list);
   useEffect(() => {
+    if (cacheContext.current !== contextId) {
+      clearResourceListSnapshots();
+      cacheContext.current = contextId;
+    }
     listRef.current = list;
-  }, [list]);
+  }, [contextId, list]);
   const liveWatch = watchEnabled(kind, namespace, enabled);
 
   const loadMore = useCallback(async () => {
@@ -106,7 +112,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     // snapshot-only scopes keep their manual-refresh behavior untouched.
     const cacheKey = liveWatch ? resourceListCacheKey(contextId, kind.id, namespace, labelSelector) : "";
     const cached = cacheKey ? readResourceListSnapshot(cacheKey) : undefined;
-    if (cached?.items.length) {
+    if (cached) {
       // Stale-while-revalidate: revisit renders the retained snapshot at once
       // and the fresh snapshot + watch replaces it in place below.
       setList(cached);
@@ -139,6 +145,8 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
       return () => { active = false; };
     }
 
+    const subscription = ++watchSubscription.current;
+    let active = true;
     const stop = desktop.resources.watch({
       contextId,
       resourceKind: kind,
@@ -146,6 +154,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
       ...(labelSelector ? { labelSelector } : {}),
       limit: 100,
     }, (batch) => {
+      if (!active || subscription !== watchSubscription.current) return;
       if (batch.kind === "error") {
         setLoading(false);
         setRevalidating(false);
@@ -157,6 +166,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
       if (watchFlushTimer.current !== undefined) return;
       watchFlushTimer.current = setTimeout(() => {
         watchFlushTimer.current = undefined;
+        if (!active || subscription !== watchSubscription.current) return;
         const batches = watchQueue.current;
         watchQueue.current = [];
         setList((current) => applyResourceWatchBatches(current, batches));
@@ -168,6 +178,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     });
 
     return () => {
+      active = false;
       stop();
       watchQueue.current = [];
       if (watchFlushTimer.current !== undefined) {
@@ -175,7 +186,7 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
         watchFlushTimer.current = undefined;
       }
       // Retain the leaving view's latest rows for the next revisit.
-      if (cacheKey && listRef.current.items.length) {
+      if (cacheKey && watchHasSnapshot.current) {
         writeResourceListSnapshot(cacheKey, listRef.current);
       }
     };

@@ -45,12 +45,12 @@ const MOCK_DESKTOP_API = `
     ["devbox.example.com", "v1", "widgets", "Widget", false],
   ].map(([group, version, resource, kind, namespaced]) => ({ group, version, resource, kind, namespaced }));
 
-  const row = (kind, index, namespaced) => ({
+  const row = (kind, index, namespaced, namespace = namespaced ? "default" : "") => ({
     uid: kind.id + "-uid-" + index,
     apiVersion: kind.group ? kind.group + "/" + kind.version : kind.version,
     kind: kind.kind,
     name: kind.resource + "-" + index,
-    namespace: namespaced ? "default" : "",
+    namespace,
     resourceVersion: "1000",
     createdAt: "2026-08-01T00:00:00Z",
     status: "Running",
@@ -65,8 +65,9 @@ const MOCK_DESKTOP_API = `
     const index = request.continueToken ? Number(request.continueToken) : 0;
     const start = index * PAGE;
     const items = [];
+    const namespace = request.namespace || (request.resourceKind.namespaced ? "default" : "");
     for (let i = start; i < Math.min(start + PAGE, TOTAL); i++) {
-      items.push(row(request.resourceKind, i, request.resourceKind.namespaced));
+      items.push(row(request.resourceKind, i, request.resourceKind.namespaced, namespace));
     }
     const next = start + PAGE < TOTAL ? String(index + 1) : undefined;
     return {
@@ -249,7 +250,8 @@ const MOCK_DESKTOP_API = `
         // The list may open any row, not just index 0; derive the index from
         // the requested name so the returned uid matches the selected row.
         const index = Number(request.name.slice(request.resourceKind.resource.length + 1)) || 0;
-        const fresh = row(request.resourceKind, index, request.resourceKind.namespaced);
+        const namespace = request.namespace || (request.resourceKind.namespaced ? "default" : "");
+        const fresh = row(request.resourceKind, index, request.resourceKind.namespaced, namespace);
         let yaml = request.resourceKind.kind === "Deployment"
           ? deploymentYaml(request.name)
           : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
@@ -1252,30 +1254,65 @@ test("switching back to a namespace restores the cached snapshot instantly", asy
   // Delay every watch snapshot by 600ms so the cold path's full-pane loading
   // state is observable; a cached revisit must skip it entirely.
   await page.addInitScript(() => {
+    type FixtureRow = Record<string, unknown>;
+    type FixtureBatch = {
+      subscriptionId?: string;
+      kind: "snapshot" | "delta" | "error";
+      items?: FixtureRow[];
+      events?: unknown[];
+      [key: string]: unknown;
+    };
     const desktop = (window as unknown as {
       __ASTER_DESKTOP__?: {
         resources: {
           watch(
-            request: unknown,
-            listener: (batch: { kind: string }) => void,
+            request: { namespace?: string },
+            listener: (batch: FixtureBatch) => void,
           ): () => void;
         };
       };
     }).__ASTER_DESKTOP__;
     if (desktop) {
       const watch = desktop.resources.watch.bind(desktop.resources);
+      let watchSerial = 0;
       desktop.resources.watch = (request, listener) => {
+        const serial = ++watchSerial;
         const timers: ReturnType<typeof setTimeout>[] = [];
         const stop = watch(request, (batch) => {
           if (batch.kind !== "snapshot") {
             listener(batch);
             return;
           }
-          timers.push(setTimeout(() => listener(batch), 600));
+          timers.push(setTimeout(() => {
+            const next: FixtureBatch = { ...batch, items: (batch.items ?? []).map((item) => ({ ...item })) };
+            if (serial === 3 && next.items?.[0]) {
+              next.items[0] = { ...next.items[0], name: "fresh-default" };
+            }
+            listener(next);
+          }, 600));
         });
         return () => {
           stop();
           timers.forEach(clearTimeout);
+          // Simulate a delayed delta from the stopped subscription. The hook
+          // must reject it after switching to another namespace.
+          setTimeout(() => listener({
+            subscriptionId: "stale-" + serial,
+            kind: "delta",
+            events: [{
+              type: "added",
+              row: {
+                uid: "late-" + serial,
+                apiVersion: "apps/v1",
+                kind: "Deployment",
+                name: "late-" + serial,
+                namespace: request.namespace || "default",
+                resourceVersion: "stale",
+                createdAt: "2026-08-01T00:00:00Z",
+                status: "Stale",
+              },
+            }],
+          } as FixtureBatch), 100);
         };
       };
     }
@@ -1309,9 +1346,15 @@ test("switching back to a namespace restores the cached snapshot instantly", asy
   const heading = page.locator(".pane-heading");
   await expect(heading).toContainText("Refreshing");
 
-  // The fresh snapshot lands and the refresh indicator clears.
+  // A delayed event from the stopped kube-system subscription must not cross
+  // into the default view while its fresh snapshot is pending.
+  await page.waitForTimeout(150);
+  await expect(grid).not.toContainText("late-2");
+
+  // The fresh snapshot replaces the retained rows in place.
   await expect(heading).not.toContainText("Refreshing", { timeout: 15_000 });
-  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0");
+  await expect(grid.getByRole("row").nth(1)).toContainText("fresh-default");
+  await expect(grid).not.toContainText("late-2");
   await screenshot(page, "namespace-revisit-cached");
   expect(failures).toEqual([]);
 });
