@@ -7,6 +7,11 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4173",
   },
+  expect: {
+    toHaveScreenshot: {
+      pathTemplate: "{testDir}/{testFileDir}/{testFileName}-snapshots/{arg}{ext}",
+    },
+  },
   webServer: {
     command: "pnpm build:renderer && pnpm vite preview --host 127.0.0.1 --port 4173 --strictPort",
     url: "http://127.0.0.1:4173",

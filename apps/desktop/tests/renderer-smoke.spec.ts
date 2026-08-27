@@ -672,15 +672,15 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
   const editor = detail.getByTestId("resource-yaml-editor");
   await expect(editor).toBeVisible();
   await expect(editor).toHaveAttribute("wrap", "off");
+  await expect
+    .poll(() => editor.evaluate((el) => getComputedStyle(el).whiteSpace))
+    .toBe("pre");
 
-  // The fixture fits the editor width, so nothing scrolls yet; a long
-  // unbroken line (like kubectl's last-applied-configuration annotation)
-  // must overflow horizontally, staying one visual line that scrolls.
-  expect(await editor.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   const longLine =
-    "    kubectl.kubernetes.io/last-applied-configuration: " +
-    '{"apiVersion":"apps/v1","kind":"Deployment","spec":{"replicas":2,"template":{"spec":{"containers":[{"name":"web","image":"nginx:1.27"}]}}}}';
-  await editor.fill((await editor.inputValue()) + "\n" + longLine);
+    "      apiVersion: apps/v1 kind: Deployment metadata: name: embedded workload spec: " +
+    "replicas: 2 template: spec: containers: name: web image: nginx:1.27 ".repeat(4).trim();
+  const blockScalar = `embedded.yaml: |\n${longLine}`;
+  await editor.fill((await editor.inputValue()) + "\n" + blockScalar);
   expect(await editor.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
 
   // Park the scroll at the long line so the screenshot shows it intact.
@@ -689,6 +689,9 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
     el.scrollLeft = 0;
   });
   await expectNoOverflow(page, "yaml editor long line 1280x800");
+  await expect(editor).toHaveScreenshot("yaml-editor-nowrap.png", {
+    animations: "disabled",
+  });
   await screenshot(page, "detail-yaml-editor-nowrap-1280");
   expect(failures).toEqual([]);
 });
