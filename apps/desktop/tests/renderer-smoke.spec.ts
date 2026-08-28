@@ -163,6 +163,13 @@ const MOCK_DESKTOP_API = `
       applyKubeconfigSources: async () => undefined,
       pickKubeconfigFile: async () => null,
       pickKubeconfigFolder: async () => null,
+      importKubeconfigContent: async (name, content) => {
+        window.__asterImportedKubeconfig = { name, content };
+        if (!content.includes("kind: Config")) {
+          throw new Error("the pasted text does not look like a kubeconfig (missing apiVersion/kind: Config)");
+        }
+        return "/managed/kubeconfigs/" + (name.trim() || "dev-admin") + ".yaml";
+      },
     },
     discovery: { list: async () => discovery },
     namespaces: {
@@ -998,6 +1005,71 @@ test("settings opens as a page and returns to the picker", async ({ page }) => {
   await expect(page.getByTestId("context-option-prod")).toBeVisible();
 });
 
+test("paste import stages a kubeconfig source in settings", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByTestId("context-picker-settings").click();
+  const settings = page.getByTestId("settings-page");
+  await settings.getByTestId("settings-tab-kubeconfig").click();
+
+  await settings.getByTestId("settings-paste-kubeconfig").click();
+  const dialog = page.getByTestId("paste-kubeconfig-dialog");
+  await expect(dialog).toBeVisible();
+
+  // A paste that is not a kubeconfig is rejected in place; nothing is staged.
+  await dialog.getByTestId("paste-kubeconfig-content").fill("foo: bar");
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog.getByTestId("paste-kubeconfig-error")).toContainText("does not look like a kubeconfig");
+  await expect(dialog).toBeVisible();
+
+  // A valid paste with a name stages the stored path as a pending source.
+  await dialog.getByTestId("paste-kubeconfig-content").fill(
+    ["apiVersion: v1", "kind: Config", "contexts:", "- name: prod-eu", "  context:", "    cluster: prod", "    user: admin"].join("\n"),
+  );
+  await dialog.getByTestId("paste-kubeconfig-name").fill("prod-eu");
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog).not.toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterImportedKubeconfig?: { name: string } }).__asterImportedKubeconfig?.name))
+    .toBe("prod-eu");
+  await expect(settings.getByTestId("settings-source-list")).toContainText("/managed/kubeconfigs/prod-eu.yaml");
+  await expect(settings.getByTestId("settings-apply")).toBeEnabled();
+
+  await expectNoOverflow(page, "paste kubeconfig import");
+  await screenshot(page, "settings-paste-import");
+  expect(failures).toEqual([]);
+});
+
+test("paste import from the picker empty state", async ({ page }) => {
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as { __ASTER_DESKTOP__?: { contexts: Record<string, unknown> } }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.contexts.list = async () => [];
+      desktop.contexts.sourcesReport = async () => ({ chain: [], configured: [] });
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  // The empty state leads with paste import; applying restarts the (mocked)
+  // core, the dialog closes, and the picker stays honest about zero contexts.
+  await expect(page.getByTestId("context-picker-empty")).toContainText("No contexts found");
+  await page.getByTestId("context-picker-empty-paste").click();
+  const dialog = page.getByTestId("paste-kubeconfig-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId("paste-kubeconfig-content").fill(
+    ["apiVersion: v1", "kind: Config", "contexts:", "- name: dev", "  context:", "    cluster: dev", "    user: dev"].join("\n"),
+  );
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByTestId("context-picker-empty")).toBeVisible();
+  await expectNoOverflow(page, "picker empty-state paste import");
+  await screenshot(page, "picker-empty-paste");
+  expect(failures).toEqual([]);
+});
+
 test("settings opens with no kubeconfig at all", async ({ page }) => {
   // A machine with no kubeconfig: the core reports zero contexts and an empty
   // standard chain (the wire contract is [], never null — a null here once
@@ -1212,7 +1284,7 @@ test("namespace picker shows a loading row while the list loads", async ({ page 
   expect(failures).toEqual([]);
 });
 
-test("namespace picker refetches the list after each context switch", async ({ page }) => {
+test("namespace lists stay isolated per cluster across switches", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
@@ -1241,12 +1313,101 @@ test("namespace picker refetches the list after each context switch", async ({ p
   await expect(namespaceItem("kube-system")).toHaveCount(0);
   await page.keyboard.press("Escape");
 
-  // Back to dev: the list must load again (regression: it stayed empty).
+  // Back to dev: the retained dev list renders at once from the cache; it is
+  // never dev's prod data (the cross-cluster isolation this test guards).
   await page.getByTestId("change-context").click();
   await connectToDev(page);
   await openPicker();
   await expect(namespaceItem("kube-system")).toBeVisible();
   await screenshot(page, "namespace-picker-after-context-switch");
+  expect(failures).toEqual([]);
+});
+
+test("switching back to a cluster reuses the cached namespace list without refetching", async ({ page }) => {
+  // Regression: A→B→A must not re-fetch A's inventory. Count list() calls.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      (window as unknown as { __namespaceListCalls?: number }).__namespaceListCalls = 0;
+      desktop.namespaces.list = async (contextId: string) => {
+        (window as unknown as { __namespaceListCalls: number }).__namespaceListCalls += 1;
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const openPicker = async () => {
+    await page.getByTestId("namespace-select").click();
+    await expect(page.getByTestId("namespace-filter")).toBeVisible();
+  };
+  const namespaceItem = (name: string) =>
+    page.locator(".namespace-combobox-item", { hasText: name });
+  const calls = () => page.evaluate(() => (window as unknown as { __namespaceListCalls?: number }).__namespaceListCalls ?? 0);
+
+  // Cold visit to dev: one fetch.
+  await openPicker();
+  await expect(namespaceItem("kube-system")).toBeVisible();
+  await page.keyboard.press("Escape");
+  expect(await calls()).toBe(1);
+
+  // Switch to prod: prod fetches its own list (dev's is never reused).
+  await page.getByTestId("change-context").click();
+  const prod = page.getByTestId("context-option-prod");
+  await prod.click();
+  await prod.dblclick();
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await openPicker();
+  await expect(namespaceItem("default")).toBeVisible();
+  await expect(namespaceItem("kube-system")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  expect(await calls()).toBe(2);
+
+  // Back to dev: the cached list renders at once and no fetch happens.
+  await page.getByTestId("change-context").click();
+  await connectToDev(page);
+  await openPicker();
+  await expect(namespaceItem("kube-system")).toBeVisible();
+  expect(await calls()).toBe(2);
+  await screenshot(page, "namespace-cluster-cache-reuse");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker commits a typed namespace with Enter before the list loads", async ({ page }) => {
+  // A user who knows the exact namespace must not wait for the inventory. The
+  // fixture delays the first fetch so the direct-Enter path is observable.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Open the picker, type a namespace that is not in the (still loading) list,
+  // and press Enter: the picker switches scope without waiting.
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await expect(filter).toBeVisible();
+  await filter.fill("ns-abcdefg");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toContainText("ns-abcdefg");
+  await screenshot(page, "namespace-enter-commit");
   expect(failures).toEqual([]);
 });
 

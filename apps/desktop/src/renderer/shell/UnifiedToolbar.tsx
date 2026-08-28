@@ -110,6 +110,9 @@ export function UnifiedToolbar({
   ], [namespaces]);
   const selectedNamespace = namespaceItems.find((item) => item.value === (namespace || null)) ?? null;
   const [namespaceQuery, setNamespaceQuery] = useState("");
+  // The popup is controlled so a direct-Enter commit (below) can close it even
+  // when the typed value is not a list row Base UI would auto-select.
+  const [namespaceOpen, setNamespaceOpen] = useState(false);
   // Progressive narrowing: a short prefix on a huge cluster matches tens of
   // thousands of names — rendering 100 of them is noise. The hint shows the
   // exact match count instead, and concrete rows appear as the user types.
@@ -120,6 +123,19 @@ export function UnifiedToolbar({
   const namespaceFooter = namespaceSearch.narrowed
     ? `${namespaceSearch.total.toLocaleString()} namespaces match — keep typing to narrow`
     : null;
+
+  // Direct-Enter: the user knows the exact namespace (e.g. "ns-abcdefg") and
+  // should not wait for the whole inventory to load. kubernetes/dashboard's
+  // selector does the same: Enter commits the raw input value without a list
+  // hit. An exact loaded name is committed the same way — onNamespaceChange
+  // is the handler Base UI's row selection would call, so the behaviour is
+  // equivalent to selecting the row.
+  const commitNamespaceInput = () => {
+    const value = namespaceQuery.trim();
+    if (!value) return;
+    onNamespaceChange(value);
+    setNamespaceOpen(false);
+  };
 
   return (
     <header
@@ -156,10 +172,12 @@ export function UnifiedToolbar({
           limit={NAMESPACE_MATCH_LIMIT}
           onInputValueChange={(inputValue) => setNamespaceQuery(inputValue)}
           onOpenChange={(open) => {
+            setNamespaceOpen(open);
             if (open) onNamespaceOpen?.();
             if (!open) setNamespaceQuery("");
           }}
           onValueChange={(item) => onNamespaceChange(item?.value ?? "")}
+          open={namespaceOpen}
           value={selectedNamespace}
         >
           <Combobox.Trigger
@@ -168,7 +186,10 @@ export function UnifiedToolbar({
             data-testid="namespace-select"
           >
             <span className="namespace-select-value">
-              <Combobox.Value placeholder="All namespaces" />
+              {/* Rendered from the hook state, not Combobox.Value: a direct-Enter
+                  commit can select a namespace that is not a list item, and
+                  Combobox.Value would fall back to the placeholder for it. */}
+              {namespace || "All namespaces"}
             </span>
             <Combobox.Icon className="namespace-select-icon">
               <ChevronsUpDown aria-hidden="true" />
@@ -179,7 +200,21 @@ export function UnifiedToolbar({
               <Combobox.Popup aria-label="Select namespace" className="namespace-combobox-popup">
                 <div className="namespace-combobox-search">
                   <Search aria-hidden="true" />
-                  <Combobox.Input placeholder="Filter namespaces" data-testid="namespace-filter" />
+                  <Combobox.Input
+                    placeholder="Filter namespaces"
+                    data-testid="namespace-filter"
+                    onKeyDown={(event) => {
+                      // Direct-Enter must win over Base UI's built-in Enter
+                      // handling (which only closes the popup when no list row
+                      // is highlighted). Stop propagation so its internal
+                      // handler never sees the key.
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        commitNamespaceInput();
+                      }
+                    }}
+                  />
                 </div>
                 {!namespacesLoading && namespacesLoaded && (
                   <Combobox.Empty className="namespace-combobox-empty">
