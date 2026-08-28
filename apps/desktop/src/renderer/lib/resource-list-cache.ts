@@ -8,6 +8,9 @@ import type { ResourceListResponse } from "../../shared/types";
  * Renderer memory only: no Go-side cache, no informers, nothing persists
  * across launches — the lazy, scoped-to-explicit-views boundary is kept.
  */
+// The retained unit is a view (kind × namespace × selector), not a
+// namespace: a plain A↔B switch across two kinds already holds 4 entries, so
+// 8 covers roughly 2 namespaces × 4 kinds before eviction.
 const MAX_ENTRIES = 8;
 
 export function resourceListCacheKey(
@@ -41,7 +44,7 @@ export function writeResourceListSnapshot(key: string, snapshot: ResourceListRes
   }
 }
 
-/** Test hook: drop every retained snapshot. */
+/** Drops every retained snapshot. Called on context switch (and by tests). */
 export function clearResourceListSnapshots(): void {
   snapshots.clear();
 }

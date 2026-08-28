@@ -35,6 +35,7 @@ function makeState(overrides: Partial<CommandPaletteState> = {}): CommandPalette
     ],
     activeKindId: "deployments",
     namespaces,
+    namespacesLoading: false,
     namespacesTruncated: false,
     activeNamespace: "default",
     theme: "system",
@@ -89,6 +90,21 @@ describe("buildCommandItems", () => {
     expect(namespaceItems.map((item) => item.id)).toEqual(["namespace:all", "namespace:more"]);
     expect(namespaceItems[1].disabled).toBe(true);
     expect(namespaceItems[1].label).toContain("200,000+ namespaces");
+  });
+
+  it("shows a disabled loading row while the first namespace fetch is in flight", () => {
+    const items = buildCommandItems(makeState({ namespaces: [], namespacesLoading: true }));
+    const namespaceItems = items.filter((item) => item.group === "namespaces");
+    // Only "All namespaces" + the loading placeholder; an empty list must not
+    // read as "no namespaces" (issue #15).
+    expect(namespaceItems.map((item) => item.id)).toEqual(["namespace:all", "namespace:loading"]);
+    expect(namespaceItems[1].disabled).toBe(true);
+    expect(namespaceItems[1].label).toBe("Loading namespaces…");
+    // Unrelated commands stay available during the load.
+    expect(items.some((item) => item.group === "appearance")).toBe(true);
+
+    const loaded = buildCommandItems(makeState({ namespacesLoading: false }));
+    expect(loaded.some((item) => item.id === "namespace:loading")).toBe(false);
   });
 
   it("lists nested subgroup items with their own label as hint", () => {

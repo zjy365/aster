@@ -370,6 +370,7 @@ export default function App() {
       resourceGroups,
       activeKindId: kind.id,
       namespaces: namespaces.namespaces,
+      namespacesLoading: namespaces.loading,
       namespacesTruncated: namespaces.truncated,
       activeNamespace: namespaces.namespace,
       theme,
@@ -378,7 +379,7 @@ export default function App() {
     // with object-scoped commands under a "Selected object" group.
     if (detail.selected) return [...objectCommandItems(detail.selected), ...base];
     return base;
-  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.namespace, theme, detail.selected]);
+  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.loading, namespaces.namespace, theme, detail.selected]);
 
   const executePaletteCommand = useCallback((action: CommandAction) => {
     switch (action.type) {
