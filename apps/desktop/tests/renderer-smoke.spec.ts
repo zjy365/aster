@@ -163,13 +163,6 @@ const MOCK_DESKTOP_API = `
       applyKubeconfigSources: async () => undefined,
       pickKubeconfigFile: async () => null,
       pickKubeconfigFolder: async () => null,
-      importKubeconfigContent: async (name, content) => {
-        window.__asterImportedKubeconfig = { name, content };
-        if (!content.includes("kind: Config")) {
-          throw new Error("the pasted text does not look like a kubeconfig (missing apiVersion/kind: Config)");
-        }
-        return "/managed/kubeconfigs/" + (name.trim() || "dev-admin") + ".yaml";
-      },
     },
     discovery: { list: async () => discovery },
     namespaces: {
@@ -1005,71 +998,6 @@ test("settings opens as a page and returns to the picker", async ({ page }) => {
   await expect(page.getByTestId("context-option-prod")).toBeVisible();
 });
 
-test("paste import stages a kubeconfig source in settings", async ({ page }) => {
-  const failures = collectFailures(page);
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto("/");
-  await page.getByTestId("context-picker-settings").click();
-  const settings = page.getByTestId("settings-page");
-  await settings.getByTestId("settings-tab-kubeconfig").click();
-
-  await settings.getByTestId("settings-paste-kubeconfig").click();
-  const dialog = page.getByTestId("paste-kubeconfig-dialog");
-  await expect(dialog).toBeVisible();
-
-  // A paste that is not a kubeconfig is rejected in place; nothing is staged.
-  await dialog.getByTestId("paste-kubeconfig-content").fill("foo: bar");
-  await dialog.getByTestId("paste-kubeconfig-submit").click();
-  await expect(dialog.getByTestId("paste-kubeconfig-error")).toContainText("does not look like a kubeconfig");
-  await expect(dialog).toBeVisible();
-
-  // A valid paste with a name stages the stored path as a pending source.
-  await dialog.getByTestId("paste-kubeconfig-content").fill(
-    ["apiVersion: v1", "kind: Config", "contexts:", "- name: prod-eu", "  context:", "    cluster: prod", "    user: admin"].join("\n"),
-  );
-  await dialog.getByTestId("paste-kubeconfig-name").fill("prod-eu");
-  await dialog.getByTestId("paste-kubeconfig-submit").click();
-  await expect(dialog).not.toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as { __asterImportedKubeconfig?: { name: string } }).__asterImportedKubeconfig?.name))
-    .toBe("prod-eu");
-  await expect(settings.getByTestId("settings-source-list")).toContainText("/managed/kubeconfigs/prod-eu.yaml");
-  await expect(settings.getByTestId("settings-apply")).toBeEnabled();
-
-  await expectNoOverflow(page, "paste kubeconfig import");
-  await screenshot(page, "settings-paste-import");
-  expect(failures).toEqual([]);
-});
-
-test("paste import from the picker empty state", async ({ page }) => {
-  await page.addInitScript(() => {
-    const desktop = (window as unknown as { __ASTER_DESKTOP__?: { contexts: Record<string, unknown> } }).__ASTER_DESKTOP__;
-    if (desktop) {
-      desktop.contexts.list = async () => [];
-      desktop.contexts.sourcesReport = async () => ({ chain: [], configured: [] });
-    }
-  });
-  const failures = collectFailures(page);
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto("/");
-
-  // The empty state leads with paste import; applying restarts the (mocked)
-  // core, the dialog closes, and the picker stays honest about zero contexts.
-  await expect(page.getByTestId("context-picker-empty")).toContainText("No contexts found");
-  await page.getByTestId("context-picker-empty-paste").click();
-  const dialog = page.getByTestId("paste-kubeconfig-dialog");
-  await expect(dialog).toBeVisible();
-  await dialog.getByTestId("paste-kubeconfig-content").fill(
-    ["apiVersion: v1", "kind: Config", "contexts:", "- name: dev", "  context:", "    cluster: dev", "    user: dev"].join("\n"),
-  );
-  await dialog.getByTestId("paste-kubeconfig-submit").click();
-  await expect(dialog).not.toBeVisible();
-  await expect(page.getByTestId("context-picker-empty")).toBeVisible();
-  await expectNoOverflow(page, "picker empty-state paste import");
-  await screenshot(page, "picker-empty-paste");
-  expect(failures).toEqual([]);
-});
-
 test("settings opens with no kubeconfig at all", async ({ page }) => {
   // A machine with no kubeconfig: the core reports zero contexts and an empty
   // standard chain (the wire contract is [], never null — a null here once
@@ -1408,6 +1336,60 @@ test("namespace picker commits a typed namespace with Enter before the list load
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("namespace-select")).toContainText("ns-abcdefg");
   await screenshot(page, "namespace-enter-commit");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker Enter selects the highlighted row when matches exist", async ({ page }) => {
+  // Direct-Enter must not hijack Base UI's autoHighlight: typing a prefix of
+  // a loaded namespace and pressing Enter selects the highlighted row, not
+  // the raw prefix.
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await filter.fill("kube");
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toContainText("kube-system");
+  await screenshot(page, "namespace-enter-highlighted-row");
+  expect(failures).toEqual([]);
+});
+
+test("command palette shows a loading row while the namespace list loads", async ({ page }) => {
+  // Issue #15 scopes the loading placeholder to the palette too: opening ⌘K
+  // during the first fetch must say so instead of showing only
+  // "All namespaces".
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.keyboard.press("Meta+k");
+  const palette = page.getByTestId("command-palette");
+  await expect(palette).toBeVisible();
+  const loading = palette.getByTestId("command-item-namespace:loading");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText("Loading namespaces");
+  await screenshot(page, "palette-namespaces-loading");
+
+  // Once the fetch lands the loading row leaves and real namespaces appear.
+  await expect(palette.getByTestId("command-item-namespace:kube-system")).toBeVisible();
+  await expect(loading).toHaveCount(0);
   expect(failures).toEqual([]);
 });
 

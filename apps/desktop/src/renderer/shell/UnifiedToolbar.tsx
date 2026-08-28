@@ -127,9 +127,9 @@ export function UnifiedToolbar({
   // Direct-Enter: the user knows the exact namespace (e.g. "ns-abcdefg") and
   // should not wait for the whole inventory to load. kubernetes/dashboard's
   // selector does the same: Enter commits the raw input value without a list
-  // hit. An exact loaded name is committed the same way — onNamespaceChange
-  // is the handler Base UI's row selection would call, so the behaviour is
-  // equivalent to selecting the row.
+  // hit. It only fires when no concrete row is selectable (list loading or
+  // zero matches) — with rows on screen, Enter belongs to Base UI's
+  // autoHighlight, which selects the highlighted row instead.
   const commitNamespaceInput = () => {
     const value = namespaceQuery.trim();
     if (!value) return;
@@ -204,15 +204,16 @@ export function UnifiedToolbar({
                     placeholder="Filter namespaces"
                     data-testid="namespace-filter"
                     onKeyDown={(event) => {
-                      // Direct-Enter must win over Base UI's built-in Enter
-                      // handling (which only closes the popup when no list row
-                      // is highlighted). Stop propagation so its internal
-                      // handler never sees the key.
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        commitNamespaceInput();
-                      }
+                      // Yield to Base UI whenever a concrete row is selectable:
+                      // with autoHighlight, Enter must select the highlighted
+                      // row (e.g. "kube-system" for the prefix "kube-s"), not
+                      // commit the raw prefix. Direct-Enter only takes over
+                      // when there is nothing to select — the list is still
+                      // loading or the filter matched nothing.
+                      if (event.key !== "Enter" || namespaceSearch.shown.length > 0) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      commitNamespaceInput();
                     }}
                   />
                 </div>
