@@ -76,9 +76,10 @@ const MOCK_DESKTOP_API = `
     };
   };
 
-  // Records the last applied scale so the object get reflects the write — the
-  // watch fixture only ever ships the rv-1000 snapshot, like a lagging stream.
-  let scaledReplicas = null;
+  // Records the replicas from the last applied YAML edit so the object get
+  // reflects the write — the watch fixture only ever ships the rv-1000
+  // snapshot, like a lagging stream.
+  let appliedReplicas = null;
 
   // A realistic Deployment object: selector, strategy, conditions, and
   // annotations feed the overview's structured sections and the pods scope.
@@ -257,10 +258,10 @@ const MOCK_DESKTOP_API = `
         let yaml = request.resourceKind.kind === "Deployment"
           ? deploymentYaml(request.name)
           : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
-        if (scaledReplicas !== null && request.resourceKind.kind === "Deployment") {
-          fresh.desired = scaledReplicas;
+        if (appliedReplicas !== null && request.resourceKind.kind === "Deployment") {
+          fresh.desired = appliedReplicas;
           fresh.resourceVersion = "1002";
-          yaml = yaml.replace("  replicas: 2", "  replicas: " + scaledReplicas);
+          yaml = yaml.replace("  replicas: 2", "  replicas: " + appliedReplicas);
         }
         return { row: fresh, yaml };
       },
@@ -317,15 +318,14 @@ const MOCK_DESKTOP_API = `
         if (!request.dryRun && request.resourceVersion && request.resourceVersion !== "1001") {
           throw new Error("resource version conflict: expected " + request.resourceVersion + ", got 1001");
         }
-        if (!request.dryRun && request.operation === "scale") {
-          scaledReplicas = request.replicas;
+        if (!request.dryRun && request.operation === "yaml" && request.resourceKind.kind === "Deployment") {
+          const match = /  replicas: (\\d+)/.exec(request.yaml || "");
+          if (match) appliedReplicas = Number(match[1]);
         }
-        // Mirror the API server: a scale dry-run echoes the would-be object,
+        // Mirror the API server: a YAML dry-run echoes the would-be object,
         // including server-managed bumps (generation) the review diff filters out.
-        const yaml = request.dryRun && request.operation === "scale" && request.resourceKind.kind === "Deployment"
-          ? deploymentYaml(request.name)
-              .replace("  replicas: 2", "  replicas: " + request.replicas)
-              .replace("  namespace: default", "  namespace: default\\n  generation: 2")
+        const yaml = request.dryRun && request.operation === "yaml" && request.resourceKind.kind === "Deployment"
+          ? (request.yaml || "").replace("  namespace: default", "  namespace: default\\n  generation: 2")
           : request.operation === "create"
             ? request.yaml
             : undefined;
@@ -642,9 +642,9 @@ test("resource detail opens and preserves layout", async ({ page }) => {
 
   // Object-scoped actions live in the identity header, above the fold.
   const actions = page.getByTestId("resource-detail-actions");
-  await expect(actions.getByTestId("resource-action-scale")).toBeVisible();
   await expect(actions.getByTestId("resource-action-image")).toBeVisible();
   await expect(actions.getByTestId("resource-action-restart")).toBeVisible();
+  await expect(actions.getByTestId("resource-action-edit")).toBeVisible();
   await expect(actions.getByTestId("delete-resource")).toBeVisible();
   // Wide layout resolves actions inline, so the More menu stays out of the tree.
   await expect(page.getByTestId("resource-actions-more")).toBeHidden();
@@ -726,7 +726,7 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
   expect(failures).toEqual([]);
 });
 
-test("detail reflects an applied scale and survives manual refresh", async ({ page }) => {
+test("detail reflects an applied YAML edit and survives manual refresh", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
@@ -742,13 +742,19 @@ test("detail reflects an applied scale and survives manual refresh", async ({ pa
   const vitals = page.getByTestId("resource-vitals");
   await expect(vitals).toContainText("2/2");
 
-  // Scale 2 → 3 through the dry-run review. The mock's list watch never ships
-  // the write (rv-1000 snapshot only), so the update must come from the
-  // post-apply refetch, and the stale snapshot must not downgrade it back.
-  await page.getByTestId("resource-action-scale").click();
-  await page.getByLabel("Desired replicas").fill("3");
-  await page.getByTestId("operation-prepare-dry-run").click();
+  // Edit replicas 2 → 3 through the header Edit action and the dry-run review.
+  // The mock's list watch never ships the write (rv-1000 snapshot only), so the
+  // update must come from the post-apply refetch, and the stale snapshot must
+  // not downgrade it back.
+  await page.getByTestId("resource-action-edit").click();
+  const editor = detail.getByTestId("resource-yaml-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill((await editor.inputValue()).replace("  replicas: 2", "  replicas: 3"));
+  await detail.getByTestId("yaml-prepare-dry-run").click();
   await page.getByTestId("mutation-apply").click();
+
+  // The edit flow leaves us on the YAML tab; the replica counters live on Overview.
+  await detail.getByRole("tab", { name: "Overview" }).click();
   await expect(vitals).toContainText("2/3", { timeout: 15_000 });
 
   // A manual refresh re-fetches the object in place instead of dropping back
@@ -756,8 +762,8 @@ test("detail reflects an applied scale and survives manual refresh", async ({ pa
   await page.keyboard.press("F5");
   await expect(detail).toBeVisible();
   await expect(vitals).toContainText("2/3");
-  await expectNoOverflow(page, "detail after scale and refresh 1280x800");
-  await screenshot(page, "detail-scale-refresh-1280");
+  await expectNoOverflow(page, "detail after edit and refresh 1280x800");
+  await screenshot(page, "detail-edit-refresh-1280");
   expect(failures).toEqual([]);
 });
 
@@ -772,11 +778,11 @@ test("mutation review renders a collapsed GitHub-style diff", async ({ page }) =
   await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
   await firstRow.click();
 
-  await page.getByTestId("resource-action-scale").click();
-  const scaleDialog = page.getByTestId("resource-operation-dialog");
-  await expect(scaleDialog).toBeVisible();
-  await scaleDialog.getByLabel("Desired replicas").fill("5");
-  await scaleDialog.getByTestId("operation-prepare-dry-run").click();
+  await page.getByTestId("resource-action-edit").click();
+  const editor = page.getByTestId("resource-yaml-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill((await editor.inputValue()).replace("  replicas: 2", "  replicas: 5"));
+  await page.getByTestId("yaml-prepare-dry-run").click();
 
   const dialog = page.getByTestId("mutation-review-dialog");
   await expect(dialog).toBeVisible({ timeout: 15_000 });
@@ -794,6 +800,64 @@ test("mutation review renders a collapsed GitHub-style diff", async ({ page }) =
   // snapshot (1000) — the mock rejects anything else with a conflict.
   await dialog.getByTestId("mutation-apply").click();
   await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+  expect(failures).toEqual([]);
+});
+
+test("header Edit is the universal update entry on non-workload kinds", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("resource-nav-configmaps").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("configmaps-0", { timeout: 15_000 });
+  await firstRow.click();
+
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+  // No guided verbs for a ConfigMap: Edit anchors the safe group, then Delete.
+  const actions = page.getByTestId("resource-detail-actions");
+  await expect(actions.getByTestId("resource-action-edit")).toBeVisible();
+  await expect(actions.getByTestId("delete-resource")).toBeVisible();
+  await expect(actions.getByTestId("resource-action-image")).toBeHidden();
+  await expect(actions.getByTestId("resource-action-restart")).toBeHidden();
+
+  // The header Edit action jumps straight into the YAML editor.
+  await actions.getByTestId("resource-action-edit").click();
+  await expect(detail.getByTestId("resource-yaml-editor")).toBeVisible();
+  await expectNoOverflow(page, "configmap detail edit 1280x800");
+  await screenshot(page, "configmap-detail-edit-1280");
+  expect(failures).toEqual([]);
+});
+
+test("object shortcuts drive the header actions", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
+  await firstRow.click();
+
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+
+  // E opens the YAML editor (and switches to the YAML tab).
+  await page.keyboard.press("e");
+  await expect(detail.getByTestId("resource-yaml-editor")).toBeVisible();
+  await detail.getByRole("button", { name: "View" }).click();
+  await expect(detail.getByTestId("resource-yaml-view")).toBeVisible();
+
+  // ⌘⌫ stages a delete dry-run; cancel it instead of applying.
+  await page.keyboard.press("Meta+Backspace");
+  const review = page.getByTestId("mutation-review-dialog");
+  await expect(review).toBeVisible({ timeout: 15_000 });
+  await review.getByRole("button", { name: "Cancel" }).click();
+  await expect(review).not.toBeVisible();
   expect(failures).toEqual([]);
 });
 
@@ -872,12 +936,13 @@ test("detail actions collapse into one More menu on a narrow window", async ({ p
 
   await expect(page.getByTestId("resource-detail-view")).toBeVisible({ timeout: 15_000 });
   // Safe actions fold away; the destructive action is never buried in a menu.
-  await expect(page.getByTestId("resource-action-scale")).toBeHidden();
+  await expect(page.getByTestId("resource-action-edit")).toBeHidden();
   await expect(page.getByTestId("delete-resource")).toBeVisible();
 
   await page.getByTestId("resource-actions-more").click();
-  await expect(page.getByTestId("resource-action-menu-scale")).toBeVisible();
+  await expect(page.getByTestId("resource-action-menu-image")).toBeVisible();
   await expect(page.getByTestId("resource-action-menu-restart")).toBeVisible();
+  await expect(page.getByTestId("resource-action-menu-edit")).toBeVisible();
   await page.keyboard.press("Escape");
 
   await expectNoOverflow(page, "detail 1000x800");

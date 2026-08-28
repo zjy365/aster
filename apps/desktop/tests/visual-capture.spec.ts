@@ -63,13 +63,13 @@ test("capture workbench surfaces in both themes", async ({ page }) => {
   await expect(page.locator(".resource-yaml-view, .shiki-host").first()).toBeVisible();
   await shot(page, "yaml-dark-1440");
 
-  // Mutation review (scale flow shows the dry-run dialog)
-  await page.getByRole("button", { name: "Scale" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
-  await shot(page, "scale-dialog-dark-1440");
-  await dialog.getByLabel("Desired replicas").fill("5");
-  await dialog.getByTestId("operation-prepare-dry-run").click();
+  // Mutation review (YAML edit flow shows the dry-run dialog)
+  await page.getByTestId("resource-action-edit").click();
+  const editor = page.getByTestId("resource-yaml-editor");
+  await expect(editor).toBeVisible();
+  await shot(page, "yaml-editor-dark-1440");
+  await editor.fill((await editor.inputValue()).replace("  replicas: 2", "  replicas: 5"));
+  await page.getByTestId("yaml-prepare-dry-run").click();
   const review = page.getByTestId("mutation-review-dialog");
   await expect(review).toBeVisible();
   await expect(review.locator(".mutation-review-diff")).toContainText("replicas: 5");
