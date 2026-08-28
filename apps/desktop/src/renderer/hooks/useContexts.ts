@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ContextInfo, CoreStatus } from "../../shared/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ContextHealthMap, ContextInfo, CoreStatus } from "../../shared/types";
 import { filterContexts, retainedContextChoice, type ContextLayout } from "../lib/context-picker";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
@@ -17,6 +17,10 @@ export interface ContextsState {
   contextLayout: ContextLayout;
   contextsLoading: boolean;
   contextsError: string;
+  /** Per-context reachability, filled in asynchronously after each list load. */
+  contextHealth: ContextHealthMap;
+  /** True while a health probe round is in flight (rows show a checking dot). */
+  healthProbing: boolean;
   activeContext?: ContextInfo;
   chosenContext?: ContextInfo;
   visibleContexts: ContextInfo[];
@@ -47,12 +51,19 @@ export function useContexts(core: CoreStatus): ContextsState {
   const [contextLayout, setContextLayout] = useState<ContextLayout>("list");
   const [contextsLoading, setContextsLoading] = useState(false);
   const [contextsError, setContextsError] = useState("");
+  const [contextHealth, setContextHealth] = useState<ContextHealthMap>({});
+  const [healthProbing, setHealthProbing] = useState(false);
+  // Guards against a slow list/probe round overwriting a newer one (Refresh
+  // while a previous probe is still waiting on a dead cluster).
+  const loadSeq = useRef(0);
 
   const loadContexts = useCallback(async () => {
     setContextsLoading(true);
     setContextsError("");
+    const seq = ++loadSeq.current;
     try {
       const next = await desktop.contexts.list();
+      if (loadSeq.current !== seq) return;
       setContexts(next);
       setContextChoice((current) => {
         // Preselect the last connected context across launches; connecting
@@ -64,10 +75,34 @@ export function useContexts(core: CoreStatus): ContextsState {
         }
         return preferred;
       });
+      // The list is usable now; probes below must not hold the loading
+      // spinner (a dead cluster waits out its probe timeout).
+      setContextsLoading(false);
+      // Reachability probes are advisory and run after the list renders.
+      // Contexts with a static config error are skipped — they cannot dial.
+      const probeIds = next.filter((item) => !item.error).map((item) => item.id);
+      setContextHealth({});
+      if (!probeIds.length) {
+        setHealthProbing(false);
+        return;
+      }
+      setHealthProbing(true);
+      try {
+        const health = await desktop.contexts.health(probeIds);
+        if (loadSeq.current !== seq) return;
+        setContextHealth(Object.fromEntries(health.map((entry) => [entry.id, entry])));
+      } catch {
+        // A failed probe round just clears the checking dots; the list itself
+        // is already usable, so this stays silent.
+        if (loadSeq.current === seq) setContextHealth({});
+      } finally {
+        if (loadSeq.current === seq) setHealthProbing(false);
+      }
     } catch (cause) {
+      if (loadSeq.current !== seq) return;
       setContextsError(messageOf(cause));
     } finally {
-      setContextsLoading(false);
+      if (loadSeq.current === seq) setContextsLoading(false);
     }
   }, []);
 
@@ -89,6 +124,8 @@ export function useContexts(core: CoreStatus): ContextsState {
     contextLayout,
     contextsLoading,
     contextsError,
+    contextHealth,
+    healthProbing,
     activeContext,
     chosenContext,
     visibleContexts,

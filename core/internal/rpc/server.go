@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ const maxRequestBody = 1 << 20
 
 type contextService interface {
 	Contexts() ([]session.ContextInfo, error)
+	Health(ctx context.Context, ids []string) []session.ContextHealth
 	SourceReports() session.SourcesReport
 	RenameEntry(path, kind, name, newName string) error
 }
@@ -37,6 +39,7 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("GET /v1/contexts", server.listContexts)
+	mux.HandleFunc("POST /v1/contexts/health", server.contextsHealth)
 	mux.HandleFunc("GET /v1/sources", server.listSources)
 	mux.HandleFunc("POST /v1/sources/rename", server.renameSource)
 	mux.HandleFunc("GET /v1/namespaces", server.listNamespaces)
@@ -95,6 +98,23 @@ func (s *Server) listContexts(writer http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) listSources(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, s.contexts.SourceReports())
+}
+
+// contextHealthRequest asks the core to probe API server reachability for each
+// listed context (the picker's cluster status dots).
+type contextHealthRequest struct {
+	ContextIDs []string `json:"contextIds"`
+}
+
+func (s *Server) contextsHealth(writer http.ResponseWriter, request *http.Request) {
+	var value contextHealthRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateContextHealthRequest(value)) {
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"health": s.contexts.Health(request.Context(), value.ContextIDs)})
 }
 
 // renameSourceRequest asks the core to resolve a kubeconfig name collision by

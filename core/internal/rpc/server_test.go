@@ -30,6 +30,14 @@ func (f fakeContexts) Contexts() ([]session.ContextInfo, error) {
 	return f.values, nil
 }
 
+func (f fakeContexts) Health(_ context.Context, ids []string) []session.ContextHealth {
+	results := make([]session.ContextHealth, len(ids))
+	for index, id := range ids {
+		results[index] = session.ContextHealth{ID: id, Status: "ok", Version: "v1.30.0"}
+	}
+	return results
+}
+
 func (fakeContexts) SourceReports() session.SourcesReport {
 	return session.SourcesReport{}
 }
@@ -245,6 +253,41 @@ func TestServerValidatesHelmRequests(t *testing.T) {
 	server.Handler().ServeHTTP(response, missingChart)
 	if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestServerContextsHealth(t *testing.T) {
+	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok := httptest.NewRequest(http.MethodPost, "/v1/contexts/health", bytes.NewBufferString(`{"contextIds":["dev","prod"]}`))
+	ok.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, ok)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Health []session.ContextHealth `json:"health"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Health) != 2 || body.Health[0].ID != "dev" || body.Health[0].Status != "ok" || body.Health[1].ID != "prod" {
+		t.Fatalf("unexpected health payload: %+v", body.Health)
+	}
+
+	for _, payload := range []string{`{}`, `{"contextIds":[]}`, `{"contextIds":[""]}`} {
+		invalid := httptest.NewRequest(http.MethodPost, "/v1/contexts/health", bytes.NewBufferString(payload))
+		invalid.Header.Set("Authorization", "Bearer token")
+		response = httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, invalid)
+		if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
+			t.Fatalf("payload %s: status=%d body=%s", payload, response.Code, response.Body.String())
+		}
 	}
 }
 

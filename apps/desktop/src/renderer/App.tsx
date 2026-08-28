@@ -494,6 +494,8 @@ export default function App() {
         layout={contexts.contextLayout}
         loading={contexts.contextsLoading}
         error={contexts.contextsError}
+        health={contexts.contextHealth}
+        healthProbing={contexts.healthProbing}
         onQueryChange={contexts.setContextQuery}
         onLayoutChange={contexts.setContextLayout}
         onSelect={contexts.setContextChoice}
@@ -686,10 +688,18 @@ export default function App() {
               onApplyMutation={async () => {
                 // A successful write re-fetches the object right away instead
                 // of waiting for the list watch (absent in snapshot-only
-                // scopes). Delete removes the object; the list-follow logic
-                // closes the detail when the row disappears.
+                // scopes). Delete instead closes the detail and refreshes the
+                // list: snapshot-only scopes get no watch delta, so the row
+                // would never disappear on its own.
                 const isDelete = mutation.pendingMutation?.operation === "delete";
-                if (await mutation.applyPendingMutation() && !isDelete) void detail.refetch();
+                if (await mutation.applyPendingMutation()) {
+                  if (isDelete) {
+                    detail.clear();
+                    resources.refresh();
+                  } else {
+                    void detail.refetch();
+                  }
+                }
               }}
               onCancelMutation={mutation.cancelMutation}
               onNavigateRelated={openResource}

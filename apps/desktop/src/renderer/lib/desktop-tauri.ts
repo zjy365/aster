@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AppCommand,
   AsterSettings,
+  ContextHealth,
   ContextInfo,
   CoreStatus,
   DesktopApi,
@@ -105,6 +106,10 @@ export function createTauriDesktopApi(): DesktopApi {
       list: async () => {
         const value = await invoke<{ contexts: ContextInfo[] }>("contexts_list");
         return value.contexts;
+      },
+      health: async (contextIds) => {
+        const value = await invoke<{ health: ContextHealth[] }>("contexts_health", { request: { contextIds } });
+        return value.health;
       },
       sourcesReport: () => invoke<SourcesReport>("sources_report"),
       renameConflict: async (request) => {
