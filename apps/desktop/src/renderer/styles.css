@@ -4424,6 +4424,66 @@ button.overview-card:focus-visible {
   margin-top: 2px;
 }
 
+/* ---- Paste kubeconfig dialog ---- */
+
+.paste-kubeconfig-dialog {
+  width: min(640px, calc(100vw - 40px));
+  max-width: 640px;
+}
+
+.paste-kubeconfig-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.paste-kubeconfig-content {
+  min-height: 240px;
+  max-height: 45vh;
+}
+
+.paste-kubeconfig-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.paste-kubeconfig-name {
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.paste-kubeconfig-name:focus {
+  border-color: var(--focus);
+}
+
+.paste-kubeconfig-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--failed) 35%, transparent);
+  border-radius: 8px;
+  color: var(--failed);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.paste-kubeconfig-error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 /* ---- Log viewer (xterm surface) ---- */
 
 .log-viewer {

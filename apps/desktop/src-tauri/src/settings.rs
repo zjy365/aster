@@ -7,7 +7,8 @@ use serde::Serialize;
 /// Application settings on disk (~/.config/aster/config.yaml, honoring
 /// XDG_CONFIG_HOME). Port of src/main/settings.ts: the schema is a strict
 /// whitelist and kubeconfig sources are path references — file contents
-/// never enter the renderer and are never copied.
+/// never enter the renderer. One exception: paste-imported kubeconfigs are
+/// copied into an app-managed directory by design (see kubeconfig_import.rs).
 const MAX_SOURCES: usize = 64;
 const MAX_PATH_LENGTH: usize = 2048;
 
@@ -38,12 +39,7 @@ impl SettingsFile {
     }
 
     pub fn default_path() -> Self {
-        let base = std::env::var("XDG_CONFIG_HOME")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"));
-        Self::new(base.join("aster").join("config.yaml"))
+        Self::new(crate::kubeconfig_import::config_base_dir().join("config.yaml"))
     }
 
     pub fn read(&self) -> AsterSettings {

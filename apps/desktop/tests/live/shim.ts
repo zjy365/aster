@@ -128,6 +128,8 @@ const api: DesktopApi = {
     setKubeconfigSources: (sources, includeStandardChain) => Promise.resolve({ kubeconfigSources: sources, includeStandardChain }),
     pickKubeconfigFile: () => Promise.resolve(null),
     pickKubeconfigFolder: () => Promise.resolve(null),
+    // Paste import writes through the shell filesystem; there is no shell here.
+    importKubeconfigContent: () => Promise.reject(new Error("paste import is only available in the desktop app")),
     applyKubeconfigSources: () => Promise.resolve(),
   },
   discovery: {

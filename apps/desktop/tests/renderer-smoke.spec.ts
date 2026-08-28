@@ -166,6 +166,13 @@ const MOCK_DESKTOP_API = `
       applyKubeconfigSources: async () => undefined,
       pickKubeconfigFile: async () => null,
       pickKubeconfigFolder: async () => null,
+      importKubeconfigContent: async (name, content) => {
+        window.__asterImportedKubeconfig = { name, content };
+        if (!content.includes("kind: Config")) {
+          throw new Error("the pasted text does not look like a kubeconfig (missing apiVersion/kind: Config)");
+        }
+        return "/managed/kubeconfigs/" + (name.trim() || "dev-admin") + ".yaml";
+      },
     },
     discovery: { list: async () => discovery },
     namespaces: {
@@ -1067,6 +1074,71 @@ test("settings opens as a page and returns to the picker", async ({ page }) => {
   await settings.getByTestId("settings-back").click();
   await expect(page.getByTestId("context-picker")).toBeVisible();
   await expect(page.getByTestId("context-option-prod")).toBeVisible();
+});
+
+test("paste import stages a kubeconfig source in settings", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByTestId("context-picker-settings").click();
+  const settings = page.getByTestId("settings-page");
+  await settings.getByTestId("settings-tab-kubeconfig").click();
+
+  await settings.getByTestId("settings-paste-kubeconfig").click();
+  const dialog = page.getByTestId("paste-kubeconfig-dialog");
+  await expect(dialog).toBeVisible();
+
+  // A paste that is not a kubeconfig is rejected in place; nothing is staged.
+  await dialog.getByTestId("paste-kubeconfig-content").fill("foo: bar");
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog.getByTestId("paste-kubeconfig-error")).toContainText("does not look like a kubeconfig");
+  await expect(dialog).toBeVisible();
+
+  // A valid paste with a name stages the stored path as a pending source.
+  await dialog.getByTestId("paste-kubeconfig-content").fill(
+    ["apiVersion: v1", "kind: Config", "contexts:", "- name: prod-eu", "  context:", "    cluster: prod", "    user: admin"].join("\n"),
+  );
+  await dialog.getByTestId("paste-kubeconfig-name").fill("prod-eu");
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog).not.toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterImportedKubeconfig?: { name: string } }).__asterImportedKubeconfig?.name))
+    .toBe("prod-eu");
+  await expect(settings.getByTestId("settings-source-list")).toContainText("/managed/kubeconfigs/prod-eu.yaml");
+  await expect(settings.getByTestId("settings-apply")).toBeEnabled();
+
+  await expectNoOverflow(page, "paste kubeconfig import");
+  await screenshot(page, "settings-paste-import");
+  expect(failures).toEqual([]);
+});
+
+test("paste import from the picker empty state", async ({ page }) => {
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as { __ASTER_DESKTOP__?: { contexts: Record<string, unknown> } }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.contexts.list = async () => [];
+      desktop.contexts.sourcesReport = async () => ({ chain: [], configured: [] });
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  // The empty state leads with paste import; applying restarts the (mocked)
+  // core, the dialog closes, and the picker stays honest about zero contexts.
+  await expect(page.getByTestId("context-picker-empty")).toContainText("No contexts found");
+  await page.getByTestId("context-picker-empty-paste").click();
+  const dialog = page.getByTestId("paste-kubeconfig-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId("paste-kubeconfig-content").fill(
+    ["apiVersion: v1", "kind: Config", "contexts:", "- name: dev", "  context:", "    cluster: dev", "    user: dev"].join("\n"),
+  );
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByTestId("context-picker-empty")).toBeVisible();
+  await expectNoOverflow(page, "picker empty-state paste import");
+  await screenshot(page, "picker-empty-paste");
+  expect(failures).toEqual([]);
 });
 
 test("settings opens with no kubeconfig at all", async ({ page }) => {
