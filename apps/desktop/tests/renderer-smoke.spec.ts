@@ -45,12 +45,12 @@ const MOCK_DESKTOP_API = `
     ["devbox.example.com", "v1", "widgets", "Widget", false],
   ].map(([group, version, resource, kind, namespaced]) => ({ group, version, resource, kind, namespaced }));
 
-  const row = (kind, index, namespaced) => ({
+  const row = (kind, index, namespaced, namespace = namespaced ? "default" : "") => ({
     uid: kind.id + "-uid-" + index,
     apiVersion: kind.group ? kind.group + "/" + kind.version : kind.version,
     kind: kind.kind,
     name: kind.resource + "-" + index,
-    namespace: namespaced ? "default" : "",
+    namespace,
     resourceVersion: "1000",
     createdAt: "2026-08-01T00:00:00Z",
     status: "Running",
@@ -65,8 +65,9 @@ const MOCK_DESKTOP_API = `
     const index = request.continueToken ? Number(request.continueToken) : 0;
     const start = index * PAGE;
     const items = [];
+    const namespace = request.namespace || (request.resourceKind.namespaced ? "default" : "");
     for (let i = start; i < Math.min(start + PAGE, TOTAL); i++) {
-      items.push(row(request.resourceKind, i, request.resourceKind.namespaced));
+      items.push(row(request.resourceKind, i, request.resourceKind.namespaced, namespace));
     }
     const next = start + PAGE < TOTAL ? String(index + 1) : undefined;
     return {
@@ -254,7 +255,8 @@ const MOCK_DESKTOP_API = `
         // The list may open any row, not just index 0; derive the index from
         // the requested name so the returned uid matches the selected row.
         const index = Number(request.name.slice(request.resourceKind.resource.length + 1)) || 0;
-        const fresh = row(request.resourceKind, index, request.resourceKind.namespaced);
+        const namespace = request.namespace || (request.resourceKind.namespaced ? "default" : "");
+        const fresh = row(request.resourceKind, index, request.resourceKind.namespaced, namespace);
         let yaml = request.resourceKind.kind === "Deployment"
           ? deploymentYaml(request.name)
           : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
@@ -1314,7 +1316,41 @@ test("context picker keeps the brand visible when many contexts scroll", async (
   expect(failures).toEqual([]);
 });
 
-test("namespace picker refetches the list after each context switch", async ({ page }) => {
+test("namespace picker shows a loading row while the list loads", async ({ page }) => {
+  // On a large cluster the lazy first fetch takes seconds; the picker must
+  // say it is loading instead of sitting on a misleading empty list.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  const loading = page.getByTestId("namespace-loading");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText("Loading namespaces");
+  // The no-match empty state never stands in for the in-flight fetch.
+  await expect(page.locator(".namespace-combobox-empty")).not.toContainText("No matching namespaces");
+  await screenshot(page, "namespace-picker-loading");
+
+  // Once the fetch lands the loading row leaves and real items appear.
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await expect(loading).toHaveCount(0);
+  expect(failures).toEqual([]);
+});
+
+test("namespace lists stay isolated per cluster across switches", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
@@ -1343,12 +1379,264 @@ test("namespace picker refetches the list after each context switch", async ({ p
   await expect(namespaceItem("kube-system")).toHaveCount(0);
   await page.keyboard.press("Escape");
 
-  // Back to dev: the list must load again (regression: it stayed empty).
+  // Back to dev: the retained dev list renders at once from the cache; it is
+  // never dev's prod data (the cross-cluster isolation this test guards).
   await page.getByTestId("change-context").click();
   await connectToDev(page);
   await openPicker();
   await expect(namespaceItem("kube-system")).toBeVisible();
   await screenshot(page, "namespace-picker-after-context-switch");
+  expect(failures).toEqual([]);
+});
+
+test("switching back to a cluster reuses the cached namespace list without refetching", async ({ page }) => {
+  // Regression: A→B→A must not re-fetch A's inventory. Count list() calls.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      (window as unknown as { __namespaceListCalls?: number }).__namespaceListCalls = 0;
+      desktop.namespaces.list = async (contextId: string) => {
+        (window as unknown as { __namespaceListCalls: number }).__namespaceListCalls += 1;
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const openPicker = async () => {
+    await page.getByTestId("namespace-select").click();
+    await expect(page.getByTestId("namespace-filter")).toBeVisible();
+  };
+  const namespaceItem = (name: string) =>
+    page.locator(".namespace-combobox-item", { hasText: name });
+  const calls = () => page.evaluate(() => (window as unknown as { __namespaceListCalls?: number }).__namespaceListCalls ?? 0);
+
+  // Cold visit to dev: one fetch.
+  await openPicker();
+  await expect(namespaceItem("kube-system")).toBeVisible();
+  await page.keyboard.press("Escape");
+  expect(await calls()).toBe(1);
+
+  // Switch to prod: prod fetches its own list (dev's is never reused).
+  await page.getByTestId("change-context").click();
+  const prod = page.getByTestId("context-option-prod");
+  await prod.click();
+  await prod.dblclick();
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await openPicker();
+  await expect(namespaceItem("default")).toBeVisible();
+  await expect(namespaceItem("kube-system")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  expect(await calls()).toBe(2);
+
+  // Back to dev: the cached list renders at once and no fetch happens.
+  await page.getByTestId("change-context").click();
+  await connectToDev(page);
+  await openPicker();
+  await expect(namespaceItem("kube-system")).toBeVisible();
+  expect(await calls()).toBe(2);
+  await screenshot(page, "namespace-cluster-cache-reuse");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker commits a typed namespace with Enter before the list loads", async ({ page }) => {
+  // A user who knows the exact namespace must not wait for the inventory. The
+  // fixture delays the first fetch so the direct-Enter path is observable.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Open the picker, type a namespace that is not in the (still loading) list,
+  // and press Enter: the picker switches scope without waiting.
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await expect(filter).toBeVisible();
+  await filter.fill("ns-abcdefg");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toContainText("ns-abcdefg");
+  await screenshot(page, "namespace-enter-commit");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker Enter selects the highlighted row when matches exist", async ({ page }) => {
+  // Direct-Enter must not hijack Base UI's autoHighlight: typing a prefix of
+  // a loaded namespace and pressing Enter selects the highlighted row, not
+  // the raw prefix.
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await filter.fill("kube");
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toContainText("kube-system");
+  await screenshot(page, "namespace-enter-highlighted-row");
+  expect(failures).toEqual([]);
+});
+
+test("command palette shows a loading row while the namespace list loads", async ({ page }) => {
+  // Issue #15 scopes the loading placeholder to the palette too: opening ⌘K
+  // during the first fetch must say so instead of showing only
+  // "All namespaces".
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.keyboard.press("Meta+k");
+  const palette = page.getByTestId("command-palette");
+  await expect(palette).toBeVisible();
+  const loading = palette.getByTestId("command-item-namespace:loading");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText("Loading namespaces");
+  await screenshot(page, "palette-namespaces-loading");
+
+  // Once the fetch lands the loading row leaves and real namespaces appear.
+  await expect(palette.getByTestId("command-item-namespace:kube-system")).toBeVisible();
+  await expect(loading).toHaveCount(0);
+  expect(failures).toEqual([]);
+});
+
+test("switching back to a namespace restores the cached snapshot instantly", async ({ page }) => {
+  // Delay every watch snapshot by 600ms so the cold path's full-pane loading
+  // state is observable; a cached revisit must skip it entirely.
+  await page.addInitScript(() => {
+    type FixtureRow = Record<string, unknown>;
+    type FixtureBatch = {
+      subscriptionId?: string;
+      kind: "snapshot" | "delta" | "error";
+      items?: FixtureRow[];
+      events?: unknown[];
+      [key: string]: unknown;
+    };
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: {
+        resources: {
+          watch(
+            request: { namespace?: string },
+            listener: (batch: FixtureBatch) => void,
+          ): () => void;
+        };
+      };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const watch = desktop.resources.watch.bind(desktop.resources);
+      let watchSerial = 0;
+      desktop.resources.watch = (request, listener) => {
+        const serial = ++watchSerial;
+        const timers: ReturnType<typeof setTimeout>[] = [];
+        const stop = watch(request, (batch) => {
+          if (batch.kind !== "snapshot") {
+            listener(batch);
+            return;
+          }
+          timers.push(setTimeout(() => {
+            const next: FixtureBatch = { ...batch, items: (batch.items ?? []).map((item) => ({ ...item })) };
+            if (serial === 3 && next.items?.[0]) {
+              next.items[0] = { ...next.items[0], name: "fresh-default" };
+            }
+            listener(next);
+          }, 600));
+        });
+        return () => {
+          stop();
+          timers.forEach(clearTimeout);
+          // Simulate a delayed delta from the stopped subscription. The hook
+          // must reject it after switching to another namespace.
+          setTimeout(() => listener({
+            subscriptionId: "stale-" + serial,
+            kind: "delta",
+            events: [{
+              type: "added",
+              row: {
+                uid: "late-" + serial,
+                apiVersion: "apps/v1",
+                kind: "Deployment",
+                name: "late-" + serial,
+                namespace: request.namespace || "default",
+                resourceVersion: "stale",
+                createdAt: "2026-08-01T00:00:00Z",
+                status: "Stale",
+              },
+            }],
+          } as FixtureBatch), 100);
+        };
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const loadingState = page.locator(".table-state", { hasText: "Loading resources" });
+  const namespaceItem = (name: string) =>
+    page.locator(".namespace-combobox-item", { hasText: name });
+
+  // Cold first visit to the default namespace: spinner, then rows.
+  await expect(loadingState).toBeVisible();
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+
+  // Cold first visit to kube-system: the full-pane spinner returns.
+  await page.getByTestId("namespace-select").click();
+  await namespaceItem("kube-system").click();
+  await expect(loadingState).toBeVisible();
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+
+  // Switching back to default is a revisit: retained rows render at once and
+  // the loading state never appears, while the heading reports the refresh.
+  await page.getByTestId("namespace-select").click();
+  await namespaceItem("default").click();
+  await expect(loadingState).toHaveCount(0);
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0");
+  const heading = page.locator(".pane-heading");
+  await expect(heading).toContainText("Refreshing");
+
+  // A delayed event from the stopped kube-system subscription must not cross
+  // into the default view while its fresh snapshot is pending.
+  await page.waitForTimeout(150);
+  await expect(grid).not.toContainText("late-2");
+
+  // The fresh snapshot replaces the retained rows in place.
+  await expect(heading).not.toContainText("Refreshing", { timeout: 15_000 });
+  await expect(grid.getByRole("row").nth(1)).toContainText("fresh-default");
+  await expect(grid).not.toContainText("late-2");
+  await screenshot(page, "namespace-revisit-cached");
   expect(failures).toEqual([]);
 });
 

@@ -370,6 +370,7 @@ export default function App() {
       resourceGroups,
       activeKindId: kind.id,
       namespaces: namespaces.namespaces,
+      namespacesLoading: namespaces.loading,
       namespacesTruncated: namespaces.truncated,
       activeNamespace: namespaces.namespace,
       theme,
@@ -378,7 +379,7 @@ export default function App() {
     // with object-scoped commands under a "Selected object" group.
     if (detail.selected) return [...objectCommandItems(detail.selected), ...base];
     return base;
-  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.namespace, theme, detail.selected]);
+  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.loading, namespaces.namespace, theme, detail.selected]);
 
   const executePaletteCommand = useCallback((action: CommandAction) => {
     switch (action.type) {
@@ -536,6 +537,8 @@ export default function App() {
         <UnifiedToolbar
           namespaces={namespaces.namespaces}
           namespacesTruncated={namespaces.truncated}
+          namespacesLoading={namespaces.loading}
+          namespacesLoaded={namespaces.loaded}
           namespace={namespaces.namespace}
           onNamespaceOpen={namespaces.load}
           onNamespaceChange={namespaces.setNamespace}
@@ -543,7 +546,7 @@ export default function App() {
           query={helmActive || overviewActive ? "" : resources.query}
           onQueryChange={helmActive || overviewActive ? () => undefined : resources.setQuery}
           queryInputRef={searchRef}
-          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : detail.selected ? detail.refreshing : resources.loading}
+          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : detail.selected ? detail.refreshing : resources.loading || resources.revalidating}
           onRefresh={refreshActive}
           theme={theme}
           onThemeChange={setTheme}
@@ -594,6 +597,7 @@ export default function App() {
                 <h1>{pluralize(kind.kind)}</h1>
                 <p>{kind.category} · {contexts.activeContext?.name || "Kubernetes"}
                   {resources.snapshotOnly ? " · All namespaces (snapshot, refresh to update)" : ""}
+                  {resources.revalidating ? " · Refreshing…" : ""}
                 </p>
               </div>
               <div className="resource-summary">

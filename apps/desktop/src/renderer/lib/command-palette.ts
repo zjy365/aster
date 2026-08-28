@@ -53,6 +53,8 @@ export interface CommandPaletteState {
   resourceGroups: PaletteResourceGroup[];
   activeKindId: string;
   namespaces: NamespaceInfo[];
+  /** True while the first lazy namespace inventory fetch is in flight. */
+  namespacesLoading: boolean;
   /** True when the core capped the namespace list at the load cap. */
   namespacesTruncated: boolean;
   activeNamespace: string;
@@ -198,10 +200,23 @@ export function buildCommandItems(state: CommandPaletteState): CommandItem[] {
     action: { type: "select-namespace", namespace: "" },
   });
 
-  // Truncated (100k+ namespace cluster): the concrete list is noise — a short
-  // prefix matches tens of thousands of names. Show only a pointer to the top
-  // picker, which runs progressive prefix search over the full array.
-  if (state.namespacesTruncated) {
+  // Cold first load in flight: the list is still empty, so rendering nothing
+  // would read as "no namespaces". Show the same loading placeholder the top
+  // picker shows (issue #15); background revalidations never set this flag.
+  if (state.namespacesLoading) {
+    items.push({
+      id: "namespace:loading",
+      group: "namespaces",
+      label: "Loading namespaces…",
+      keywords: ["namespace", "loading"],
+      disabled: true,
+      action: { type: "select-namespace", namespace: "" },
+    });
+  } else if (state.namespacesTruncated) {
+    // Truncated (100k+ namespace cluster): the concrete list is noise — a
+    // short prefix matches tens of thousands of names. Show only a pointer to
+    // the top picker, which runs progressive prefix search over the full
+    // array.
     items.push({
       id: "namespace:more",
       group: "namespaces",
@@ -211,27 +226,27 @@ export function buildCommandItems(state: CommandPaletteState): CommandItem[] {
       action: { type: "select-namespace", namespace: "" },
     });
     return items;
-  }
-
-  for (const namespace of state.namespaces.slice(0, PALETTE_NAMESPACE_LIMIT)) {
-    items.push({
-      id: `namespace:${namespace.name}`,
-      group: "namespaces",
-      label: namespace.name,
-      keywords: ["namespace", namespace.name],
-      current: namespace.name === state.activeNamespace,
-      action: { type: "select-namespace", namespace: namespace.name },
-    });
-  }
-  if (state.namespaces.length > PALETTE_NAMESPACE_LIMIT) {
-    items.push({
-      id: "namespace:more",
-      group: "namespaces",
-      label: `First ${PALETTE_NAMESPACE_LIMIT} of ${state.namespaces.length.toLocaleString()} loaded — use the top picker to narrow`,
-      keywords: ["namespace", "more", "narrow"],
-      disabled: true,
-      action: { type: "select-namespace", namespace: "" },
-    });
+  } else {
+    for (const namespace of state.namespaces.slice(0, PALETTE_NAMESPACE_LIMIT)) {
+      items.push({
+        id: `namespace:${namespace.name}`,
+        group: "namespaces",
+        label: namespace.name,
+        keywords: ["namespace", namespace.name],
+        current: namespace.name === state.activeNamespace,
+        action: { type: "select-namespace", namespace: namespace.name },
+      });
+    }
+    if (state.namespaces.length > PALETTE_NAMESPACE_LIMIT) {
+      items.push({
+        id: "namespace:more",
+        group: "namespaces",
+        label: `First ${PALETTE_NAMESPACE_LIMIT} of ${state.namespaces.length.toLocaleString()} loaded — use the top picker to narrow`,
+        keywords: ["namespace", "more", "narrow"],
+        disabled: true,
+        action: { type: "select-namespace", namespace: "" },
+      });
+    }
   }
 
   for (const theme of ["system", "light", "dark"] as const) {
