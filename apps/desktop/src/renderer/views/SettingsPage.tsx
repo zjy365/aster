@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   AtSign,
   Boxes,
+  ClipboardPaste,
   FilePlus2,
   FolderOpen,
   Info,
@@ -19,6 +20,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PasteKubeconfigDialog } from "./PasteKubeconfigDialog";
 import {
   BUILT_IN_THEMES,
   getThemeDefinition,
@@ -52,6 +54,12 @@ export interface SettingsPageProps {
   onApply(sources: string[], includeStandardChain: boolean): Promise<void>;
   onPickFile(): Promise<string | null>;
   onPickFolder(): Promise<string | null>;
+  /**
+   * Imports pasted kubeconfig content via the shell and resolves to the
+   * stored path; the path is staged as a source here and only takes effect
+   * on Apply, exactly like a picked file.
+   */
+  onImportKubeconfig(name: string, content: string): Promise<string>;
   onCheckUpdates(): Promise<UpdaterSnapshot>;
   /** Opens an external URL in the system browser via the shell. */
   onOpenExternal(url: string): void;
@@ -86,10 +94,12 @@ const THEME_OPTIONS: { value: AppearanceTheme; label: string }[] = [
  * readable fixed-width column. The kubeconfig section keeps its contract —
  * the standard chain (default ~/.kube/config plus $KUBECONFIG) is a default,
  * not a privilege: the user can turn it off, and with no sources at all the
- * app simply has no clusters. User sources are path references only, files
- * are never copied or modified. Applying restarts the core and refreshes the
- * per-source report in place; the page stays open so the new counts are
- * visible.
+ * app simply has no clusters. User sources are path references; picked files
+ * are never copied or modified. Paste-imported kubeconfigs are the one
+ * exception: they exist only as text, so the shell stores a copy in its own
+ * managed directory (and deletes it when the source is removed and applied).
+ * Applying restarts the core and refreshes the per-source report in place;
+ * the page stays open so the new counts are visible.
  */
 export function SettingsPage({
   settings,
@@ -105,6 +115,7 @@ export function SettingsPage({
   onApply,
   onPickFile,
   onPickFolder,
+  onImportKubeconfig,
   onCheckUpdates,
   onOpenExternal,
   onBack,
@@ -116,6 +127,7 @@ export function SettingsPage({
   const [applied, setApplied] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [pathInput, setPathInput] = useState("");
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [updateState, setUpdateState] = useState<{ phase: "idle" | "checking" | "done"; message?: string }>({
     phase: "idle",
   });
@@ -144,6 +156,12 @@ export function SettingsPage({
   async function add(pick: () => Promise<string | null>) {
     const picked = await pick();
     if (picked && !sourcePaths.includes(picked)) setSourcePaths((current) => [...current, picked]);
+  }
+
+  async function importPasted(name: string, content: string) {
+    const path = await onImportKubeconfig(name, content);
+    if (!sourcePaths.includes(path)) setSourcePaths((current) => [...current, path]);
+    return path;
   }
 
   function addPath() {
@@ -410,6 +428,10 @@ export function SettingsPage({
                       <FolderOpen data-icon="inline-start" />
                       Add folder…
                     </Button>
+                    <Button variant="outline" disabled={busy} data-testid="settings-paste-kubeconfig" onClick={() => setPasteOpen(true)}>
+                      <ClipboardPaste data-icon="inline-start" />
+                      Paste…
+                    </Button>
                     <form
                       className="settings-path-form"
                       onSubmit={(event) => {
@@ -494,6 +516,7 @@ export function SettingsPage({
           </main>
         </div>
       </Tabs>
+      <PasteKubeconfigDialog open={pasteOpen} onOpenChange={setPasteOpen} onImport={importPasted} />
     </div>
   );
 }

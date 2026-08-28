@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Boxes,
   CheckCircle2,
+  ClipboardPaste,
   LayoutGrid,
   List as ListIcon,
   LoaderCircle,
@@ -38,6 +39,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { ContextLayout } from "../lib/context-picker";
+import { PasteKubeconfigDialog } from "./PasteKubeconfigDialog";
 
 interface ContextPickerProps {
   core: CoreStatus;
@@ -57,6 +59,11 @@ interface ContextPickerProps {
   onRefresh(): void;
   onConnect(contextId?: string): void;
   onOpenSettings(): void;
+  /**
+   * Imports pasted kubeconfig content and applies it immediately (the empty
+   * state has no settings page behind it), resolving to the stored path.
+   */
+  onPasteKubeconfig(name: string, content: string): Promise<string>;
   /** Renames a colliding entry inside its kubeconfig file, then reloads contexts. */
   onRenameConflict(request: RenameConflictRequest): Promise<void>;
 }
@@ -78,10 +85,12 @@ function ContextPicker({
   onRefresh,
   onConnect,
   onOpenSettings,
+  onPasteKubeconfig,
   onRenameConflict,
 }: ContextPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [conflictDialog, setConflictDialog] = useState<ContextInfo | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
   // Key of the conflict row whose rename form is open: path|kind|name.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -513,19 +522,29 @@ function ContextPicker({
                 description={
                   totalContexts
                     ? "Try another name or cluster."
-                    : "Add a kubeconfig file in Settings, then refresh."
+                    : "Paste a kubeconfig to import its clusters, or add a file in Settings."
                 }
                 action={
                   totalContexts ? undefined : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={onOpenSettings}
-                      data-testid="context-picker-empty-settings"
-                    >
-                      <Settings data-icon="inline-start" aria-hidden="true" />
-                      Open Settings
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        data-testid="context-picker-empty-paste"
+                        onClick={() => setPasteOpen(true)}
+                      >
+                        <ClipboardPaste data-icon="inline-start" aria-hidden="true" />
+                        Paste kubeconfig
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={onOpenSettings}
+                        data-testid="context-picker-empty-settings"
+                      >
+                        <Settings data-icon="inline-start" aria-hidden="true" />
+                        Open Settings
+                      </Button>
+                    </>
                   )
                 }
               />
@@ -556,6 +575,8 @@ function ContextPicker({
           </footer>
         </section>
       </main>
+
+      <PasteKubeconfigDialog open={pasteOpen} onOpenChange={setPasteOpen} onImport={onPasteKubeconfig} />
 
       <Dialog
         open={Boolean(conflictDialog)}

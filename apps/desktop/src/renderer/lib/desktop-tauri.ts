@@ -124,6 +124,7 @@ export function createTauriDesktopApi(): DesktopApi {
         invoke<void>("settings_apply_kubeconfig_sources", { sources, includeStandardChain }),
       pickKubeconfigFile: () => invoke<string | null>("settings_pick_kubeconfig_file"),
       pickKubeconfigFolder: () => invoke<string | null>("settings_pick_kubeconfig_folder"),
+      importKubeconfigContent: (name, content) => invoke<string>("import_kubeconfig_content", { name: name || null, content }),
     },
     discovery: {
       list: async (contextId) => discoveredResourceList(await invoke("discovery_list", { contextId })),

@@ -470,6 +470,7 @@ export default function App() {
         }}
         onPickFile={() => desktop.settings.pickKubeconfigFile()}
         onPickFolder={() => desktop.settings.pickKubeconfigFolder()}
+        onImportKubeconfig={(name, content) => desktop.settings.importKubeconfigContent(name, content)}
         onCheckUpdates={checkForUpdates}
         onOpenExternal={(url) => void desktop.app.openExternal(url)}
         onBack={() => {
@@ -504,6 +505,18 @@ export default function App() {
         onOpenSettings={() => {
           contexts.setSettingsFrom(contexts.view);
           contexts.setView("settings");
+        }}
+        onPasteKubeconfig={async (name, content) => {
+          // The picker empty state has no Apply step behind it: stage the
+          // imported path and apply immediately so the pasted clusters load.
+          const path = await desktop.settings.importKubeconfigContent(name, content);
+          const sources = settings.kubeconfigSources.includes(path)
+            ? settings.kubeconfigSources
+            : [...settings.kubeconfigSources, path];
+          await desktop.settings.applyKubeconfigSources(sources, settings.includeStandardChain);
+          setSettings({ kubeconfigSources: sources, includeStandardChain: settings.includeStandardChain });
+          await contexts.loadContexts();
+          return path;
         }}
         onRenameConflict={async (request) => {
           await desktop.contexts.renameConflict(request);

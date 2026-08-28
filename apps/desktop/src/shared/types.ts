@@ -518,6 +518,15 @@ export interface DesktopApi {
     setKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<AsterSettings>;
     pickKubeconfigFile(): Promise<string | null>;
     pickKubeconfigFolder(): Promise<string | null>;
+    /**
+     * Imports a pasted kubeconfig: the shell sniffs the content, writes it
+     * into the app-managed kubeconfig directory (mode 0600) and resolves to
+     * the written path, ready to be added as a source. Contents travel
+     * renderer → shell only and are never returned. Rejects with a
+     * human-readable reason when the text does not look like a kubeconfig.
+     * An empty name derives the file slug from the first context.
+     */
+    importKubeconfigContent(name: string, content: string): Promise<string>;
     applyKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<void>;
   };
   discovery: {
