@@ -124,7 +124,9 @@ export function ResourceDetailView({
     if (!row) return;
     const actions = new Set(resourceActionsFor(row.kind).map((action) => action.id));
     const onKey = (event: KeyboardEvent) => {
-      if (operationDialog || mutationBusy) return;
+      // pendingMutation: the dry-run review modal is up — re-firing a shortcut
+      // behind it would re-tab to YAML editing or overwrite the staged mutation.
+      if (operationDialog || mutationBusy || pendingMutation) return;
       const active = document.activeElement;
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
       // ⌘⌫ for delete (standard macOS destructive gesture). Checked before the
@@ -152,7 +154,7 @@ export function ResourceDetailView({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row, operationDialog, mutationBusy, onMutate]);
+  }, [row, operationDialog, mutationBusy, pendingMutation, onMutate]);
 
   // Workload facts parsed from the live YAML the core already shipped; powers
   // the conditions/strategy/selector rows, annotations, and the pods list.
