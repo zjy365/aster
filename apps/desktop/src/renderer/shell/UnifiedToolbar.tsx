@@ -104,17 +104,21 @@ export function UnifiedToolbar({
   const ThemeIcon = theme === "dark" ? Moon : theme === "light" ? Sun : SunMoon;
   // A null-valued first item is the "All namespaces" choice; the label map
   // keeps the raw value out of the trigger (Base UI renders values by default).
-  const namespaceItems = useMemo<NamespaceItem[]>(() => [
-    { value: null, label: "All namespaces" },
-    ...namespaces.map((item) => ({ value: item.name as string | null, label: item.name })),
-  ], [namespaces]);
-  const selectedNamespace = namespaceItems.find((item) => item.value === (namespace || null)) ?? null;
   const [namespaceQuery, setNamespaceQuery] = useState("");
   // IME composition text for the resource search. While it is non-null the
   // input displays the in-progress composition (a controlled input would
   // otherwise swallow it on the next render), but the query prop — and with it
   // the resource filter — stays on the last committed text.
   const [composingQuery, setComposingQuery] = useState<string | null>(null);
+  // The null row is offered only while the filter is empty: with a query, its
+  // "All namespaces" label would collide with a real namespace (e.g. "all") in
+  // Base UI's autoHighlight and let Enter pick cluster scope by mistake, and
+  // during loading it would sit highlighted above the direct-Enter commit.
+  const namespaceItems = useMemo<NamespaceItem[]>(() => [
+    ...(!namespaceQuery.trim() ? [{ value: null, label: "All namespaces" }] : []),
+    ...namespaces.map((item) => ({ value: item.name as string | null, label: item.name })),
+  ], [namespaces, namespaceQuery]);
+  const selectedNamespace = namespaceItems.find((item) => item.value === (namespace || null)) ?? null;
   // The popup is controlled so a direct-Enter commit (below) can close it even
   // when the typed value is not a list row Base UI would auto-select.
   const [namespaceOpen, setNamespaceOpen] = useState(false);
@@ -213,19 +217,29 @@ export function UnifiedToolbar({
                     placeholder="Filter namespaces"
                     data-testid="namespace-filter"
                     onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
                       // Yield to Base UI whenever a concrete row is selectable:
                       // with autoHighlight, Enter must select the highlighted
                       // row (e.g. "kube-system" for the prefix "kube-s"), not
-                      // commit the raw prefix. Direct-Enter only takes over
-                      // when there is nothing to select — the list is still
-                      // loading or the filter matched nothing.
-                      if (event.key !== "Enter" || namespaceSearch.shown.length > 0) return;
+                      // commit the raw prefix.
+                      if (namespaceSearch.shown.length > 0) return;
                       // The Enter that commits an IME composition reports
                       // key "Enter" with isComposing (keyCode 229); it belongs
                       // to the input method, never to the direct-Enter commit.
                       if (event.nativeEvent.isComposing) return;
                       event.preventDefault();
                       event.stopPropagation();
+                      // Empty filter with no rows: the list is still loading
+                      // (or the cluster has no namespaces) and the rendered
+                      // "All namespaces" row is the only selectable scope, so
+                      // commit the null scope directly instead of leaning on
+                      // Base UI's autoHighlight, which is unreliable while the
+                      // selection is not in the still-loading items.
+                      if (!namespaceQuery.trim()) {
+                        onNamespaceChange("");
+                        setNamespaceOpen(false);
+                        return;
+                      }
                       commitNamespaceInput();
                     }}
                   />
