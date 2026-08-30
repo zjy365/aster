@@ -1671,6 +1671,93 @@ test("toolbar inputs ignore IME composition until it commits", async ({ page }) 
   expect(failures).toEqual([]);
 });
 
+test("namespace picker Enter respects the All-namespaces row while loading", async ({ page }) => {
+  // The "All namespaces" row renders and auto-highlights with an empty filter
+  // even before the list loads. Enter must select that highlighted row (issue
+  // #23), not fall through to the dead direct-Enter commit — and a query that
+  // collides with the label ("all") must still commit raw while nothing is
+  // highlighted, because the null row is only offered with an empty filter.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const filter = page.getByTestId("namespace-filter");
+  await page.getByTestId("namespace-select").click();
+  await expect(filter).toBeVisible();
+  await expect(page.getByTestId("namespace-loading")).toBeVisible();
+
+  // Non-empty filter while loading: the null row is gone, nothing is
+  // highlighted, so direct-Enter commits the raw input.
+  await filter.fill("all");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toHaveText("all");
+  await expect(filter).toBeHidden();
+
+  // Reopen with an empty filter while the fetch is still in flight: the
+  // "All namespaces" row sits highlighted, so Enter selects it instead of
+  // being swallowed.
+  await page.getByTestId("namespace-select").click();
+  await expect(filter).toBeVisible();
+  await expect(page.getByTestId("namespace-loading")).toBeVisible();
+  await filter.click();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toHaveText("All namespaces");
+  await expect(filter).toBeHidden();
+  await screenshot(page, "namespace-enter-all-namespaces-row");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker Enter prefers a real namespace named all over cluster scope", async ({ page }) => {
+  // A cluster can have a namespace literally named "all". With a query typed,
+  // the null-valued "All namespaces" row must not shadow it in the list or
+  // autoHighlight (issue #23): Enter selects the namespace, not cluster scope.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.namespaces.list = async () => ({
+        namespaces: [
+          { name: "all", status: "Active" },
+          { name: "default", status: "Active" },
+          { name: "kube-system", status: "Active" },
+        ],
+        truncated: false,
+      });
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await filter.fill("all");
+  // The null row is filtered out with a query, so only the real namespace
+  // named "all" survives (hasText is case-insensitive, hence the anchor).
+  const rows = page.locator(".namespace-combobox-item");
+  await expect(rows.filter({ hasText: /^all$/ })).toBeVisible();
+  await expect(rows.filter({ hasText: "All namespaces" })).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toHaveText("all");
+  await screenshot(page, "namespace-enter-named-all");
+  expect(failures).toEqual([]);
+});
+
 test("command palette shows a loading row while the namespace list loads", async ({ page }) => {
   // Issue #15 scopes the loading placeholder to the palette too: opening ⌘K
   // during the first fetch must say so instead of showing only
