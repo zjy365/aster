@@ -110,6 +110,11 @@ export function UnifiedToolbar({
   ], [namespaces]);
   const selectedNamespace = namespaceItems.find((item) => item.value === (namespace || null)) ?? null;
   const [namespaceQuery, setNamespaceQuery] = useState("");
+  // IME composition text for the resource search. While it is non-null the
+  // input displays the in-progress composition (a controlled input would
+  // otherwise swallow it on the next render), but the query prop — and with it
+  // the resource filter — stays on the last committed text.
+  const [composingQuery, setComposingQuery] = useState<string | null>(null);
   // The popup is controlled so a direct-Enter commit (below) can close it even
   // when the typed value is not a list row Base UI would auto-select.
   const [namespaceOpen, setNamespaceOpen] = useState(false);
@@ -170,6 +175,10 @@ export function UnifiedToolbar({
           disabled={namespaceDisabled}
           items={namespaceItems}
           limit={NAMESPACE_MATCH_LIMIT}
+          // IME-safe: Base UI's input holds composition text back and only
+          // fires this for committed text (it calls setInputValue at
+          // compositionend). The direct-Enter keydown below needs its own
+          // isComposing guard because that handler is ours, not Base UI's.
           onInputValueChange={(inputValue) => setNamespaceQuery(inputValue)}
           onOpenChange={(open) => {
             setNamespaceOpen(open);
@@ -211,6 +220,10 @@ export function UnifiedToolbar({
                       // when there is nothing to select — the list is still
                       // loading or the filter matched nothing.
                       if (event.key !== "Enter" || namespaceSearch.shown.length > 0) return;
+                      // The Enter that commits an IME composition reports
+                      // key "Enter" with isComposing (keyCode 229); it belongs
+                      // to the input method, never to the direct-Enter commit.
+                      if (event.nativeEvent.isComposing) return;
                       event.preventDefault();
                       event.stopPropagation();
                       commitNamespaceInput();
@@ -257,11 +270,29 @@ export function UnifiedToolbar({
         <input
           aria-label="Filter current resources"
           data-testid="resource-search"
-          onChange={(event) => onQueryChange(event.target.value)}
+          onChange={(event) => {
+            // React fires onChange for every keystroke of an IME composition
+            // (e.g. pinyin "d'e's"); those intermediate strings must not drive
+            // the filter. The composition text is mirrored into local state so
+            // the controlled input still displays it.
+            if ((event.nativeEvent as InputEvent).isComposing) {
+              setComposingQuery(event.target.value);
+              return;
+            }
+            setComposingQuery(null);
+            onQueryChange(event.target.value);
+          }}
+          onCompositionEnd={(event) => {
+            // Commits once per composition; browsers that fire the final
+            // input event after compositionend commit again via onChange with
+            // the same text, which is idempotent.
+            setComposingQuery(null);
+            onQueryChange(event.currentTarget.value);
+          }}
           placeholder={searchPlaceholder}
           ref={queryInputRef}
           type="search"
-          value={query}
+          value={composingQuery ?? query}
         />
         <Badge aria-hidden="true" className="shortcut" variant="outline">
           <Command aria-hidden="true" className="size-2.5" />F

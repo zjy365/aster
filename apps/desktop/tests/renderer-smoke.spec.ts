@@ -1568,6 +1568,102 @@ test("namespace picker Enter selects the highlighted row when matches exist", as
   expect(failures).toEqual([]);
 });
 
+test("toolbar inputs ignore IME composition until it commits", async ({ page }) => {
+  // CJK input methods fire real input events for every composition keystroke
+  // (e.g. pinyin "d'e"); the toolbar must keep filtering on the last
+  // committed text and only apply the composition once it ends. The
+  // composition text itself must stay visible in both inputs.
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  // Anchor on the row's accessible name ("Select deployments-3 …"): raw
+  // textContent runs cells together, so neither substring nor \b can tell
+  // "deployments-3" apart from "deployments-31".
+  const row = (name: string) =>
+    grid.getByRole("row", { name: new RegExp(`^Select ${name} `) });
+
+  // Simulate an IME: compositionstart, then input events with isComposing,
+  // then a compositionend carrying the committed text. The value is set
+  // before compositionstart so controlled inputs observe it in the same
+  // order real keystrokes produce.
+  const startComposition = (testId: string, composition: string) =>
+    page.evaluate(([id, text]) => {
+      const input = document.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
+      input.value = text;
+      input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+      input.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data: text,
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+    }, [testId, composition]);
+  const commitComposition = (testId: string, committed: string) =>
+    page.evaluate(([id, text]) => {
+      const input = document.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
+      input.value = text;
+      input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: text }));
+    }, [testId, committed]);
+
+  await expect(row("deployments-0")).toBeVisible({ timeout: 15_000 });
+
+  // Resource search: the in-progress pinyin is displayed but never filters.
+  await startComposition("resource-search", "d'e");
+  const search = page.getByTestId("resource-search");
+  await expect(search).toHaveValue("d'e");
+  await expect(row("deployments-0")).toBeVisible();
+
+  // The committed text filters exactly once, when the composition ends.
+  await commitComposition("resource-search", "deployments-3");
+  await expect(search).toHaveValue("deployments-3");
+  await expect(row("deployments-3")).toBeVisible();
+  await expect(row("deployments-0")).toHaveCount(0);
+
+  // Namespace picker: composition text must not enter the prefix search.
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await expect(filter).toBeVisible();
+
+  // First commit a query that matches nothing, so the direct-Enter path is
+  // armed; then compose on top of it. The Enter that commits an IME
+  // composition (Chrome reports key "Enter", keyCode 229, isComposing) must
+  // not run that commit path or switch the namespace.
+  await commitComposition("namespace-filter", "zzz-no-match");
+  await expect(page.locator(".namespace-combobox-empty")).toContainText("No matching namespaces");
+  await startComposition("namespace-filter", "d'e");
+  await expect(filter).toHaveValue("d'e");
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('[data-testid="namespace-filter"]')!;
+    const enter = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+      key: "Enter",
+    });
+    Object.defineProperty(enter, "keyCode", { get: () => 229 });
+    Object.defineProperty(enter, "which", { get: () => 229 });
+    input.dispatchEvent(enter);
+  });
+  // The composition is still in progress: the picker stays open and the
+  // namespace is untouched — the IME's Enter must never commit the raw
+  // pinyin or the armed "zzz-no-match" query as the namespace.
+  await expect(filter).toBeVisible();
+  await expect(page.getByTestId("namespace-select")).toContainText("default");
+
+  // Ending the composition applies the committed text to the prefix search.
+  await commitComposition("namespace-filter", "kube");
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await expect(page.locator(".namespace-combobox-empty")).not.toContainText("No matching namespaces");
+  await filter.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toContainText("kube-system");
+  await screenshot(page, "toolbar-ime-composition");
+  expect(failures).toEqual([]);
+});
+
 test("command palette shows a loading row while the namespace list loads", async ({ page }) => {
   // Issue #15 scopes the loading placeholder to the palette too: opening ⌘K
   // during the first fetch must say so instead of showing only
