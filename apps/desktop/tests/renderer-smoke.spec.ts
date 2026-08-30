@@ -865,6 +865,13 @@ test("object shortcuts drive the header actions", async ({ page }) => {
   await page.keyboard.press("Meta+Backspace");
   const review = page.getByTestId("mutation-review-dialog");
   await expect(review).toBeVisible({ timeout: 15_000 });
+
+  // Single-letter shortcuts must be inert while the dry-run review modal is
+  // open: pressing "e" behind it must not re-tab to YAML editing.
+  await page.keyboard.press("e");
+  await expect(detail.getByTestId("resource-yaml-editor")).toHaveCount(0);
+  await expect(review).toBeVisible();
+
   await review.getByRole("button", { name: "Cancel" }).click();
   await expect(review).not.toBeVisible();
   expect(failures).toEqual([]);
