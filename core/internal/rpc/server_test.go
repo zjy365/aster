@@ -46,6 +46,45 @@ func (p rpcClientProvider) Client(string) (dynamic.Interface, error) {
 	return p.client, nil
 }
 
+type capturingPFProvider struct {
+	rpcClientProvider
+	captured context.Context
+	stop     func()
+}
+
+func (p *capturingPFProvider) PortForward(ctx context.Context, _, _, _ string, _, _ int64) (func(), int, error) {
+	p.captured = ctx
+	return p.stop, 43123, nil
+}
+
+func TestStartPortForwardDetachesFromRequestContext(t *testing.T) {
+	provider := &capturingPFProvider{
+		rpcClientProvider: rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())},
+		stop:              func() {},
+	}
+	service := resources.NewService(provider)
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/pods/portforward",
+		strings.NewReader(`{"contextId":"dev","namespace":"apps","name":"web","podPort":80}`))
+	request.Header.Set("Authorization", "Bearer token")
+	requestCtx, cancel := context.WithCancel(context.Background())
+	request = request.WithContext(requestCtx)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	cancel()
+	select {
+	case <-provider.captured.Done():
+		t.Fatal("forward context was cancelled when the start request ended")
+	default:
+	}
+}
+
 func TestServerRequiresTokenAndServesHealthAndContexts(t *testing.T) {
 	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
 	server, err := NewServer("token", fakeContexts{values: []session.ContextInfo{{ID: "dev", Name: "dev", Current: true}}}, service, helm.NewService(nil))

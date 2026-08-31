@@ -125,6 +125,22 @@ const MOCK_DESKTOP_API = `
     "      lastTransitionTime: \\"2026-08-01T00:00:05Z\\"",
   ].join("\\n");
 
+  // A Pod object with a declared TCP container port, the common forward path.
+  const podYaml = (name) => [
+    "apiVersion: v1",
+    "kind: Pod",
+    "metadata:",
+    "  name: " + name,
+    "  namespace: default",
+    "spec:",
+    "  containers:",
+    "    - name: app",
+    "      image: nginx:1.27",
+    "      ports:",
+    "        - containerPort: 80",
+    "          protocol: TCP",
+  ].join("\\n");
+
   window.__ASTER_DESKTOP__ = {
     platform: "darwin",
     app: {
@@ -252,7 +268,9 @@ const MOCK_DESKTOP_API = `
         const fresh = row(request.resourceKind, index, request.resourceKind.namespaced);
         let yaml = request.resourceKind.kind === "Deployment"
           ? deploymentYaml(request.name)
-          : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
+          : request.resourceKind.kind === "Pod"
+            ? podYaml(request.name)
+            : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
         if (scaledReplicas !== null && request.resourceKind.kind === "Deployment") {
           fresh.desired = scaledReplicas;
           fresh.resourceVersion = "1002";
@@ -303,7 +321,7 @@ const MOCK_DESKTOP_API = `
         return () => timers.forEach(clearTimeout);
       },
       exec: async () => ({ stdout: "", stderr: "" }),
-      portForwardStart: async () => ({ id: "pf-1", localPort: 12_345 }),
+      portForwardStart: async (request) => ({ id: "pf-1", localPort: request.localPort || 12_345 }),
       portForwardStop: async () => undefined,
       mutate: async (request) => {
         // Mirror the API server's optimistic concurrency: the live object sits
@@ -1310,3 +1328,63 @@ async function screenshot(page: Page, name: string): Promise<void> {
   // fade) so screenshots show the resting state, not a mid-fade frame.
   await page.screenshot({ path: path.join(directory, `renderer-${name}.png`), animations: "disabled" });
 }
+
+test("pod detail forwards a declared port and stops it", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("resource-nav-pods").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("pods-0", { timeout: 15_000 });
+  await firstRow.click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+
+  // Ports is its own tab, level with Overview and YAML.
+  await detail.getByRole("tab", { name: "Ports" }).click();
+  const section = page.getByTestId("port-forward-section");
+  await expect(section).toBeVisible({ timeout: 15_000 });
+  const portRow = section.getByTestId("port-forward-row").first();
+  await expect(portRow).toContainText("app");
+  await expect(portRow).toContainText("80/TCP");
+
+  // An empty local port falls back to a random free port first.
+  await portRow.getByTestId("port-forward-start").click();
+  await expect(portRow.getByTestId("port-forward-local")).toContainText("localhost:12345");
+
+  // The manual row's controls align vertically with the declared rows.
+  const rowGeometry = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll(".port-forward-row")];
+    return rows.map((row) => {
+      const rr = row.getBoundingClientRect();
+      return [...row.children].map((k) => {
+        const b = k.getBoundingClientRect();
+        return { tag: k.tagName, height: Math.round(b.height), topGap: Math.round(b.top - rr.top), bottomGap: Math.round(rr.bottom - b.bottom) };
+      });
+    });
+  });
+  const alignTolerance = 4;
+  for (const row of rowGeometry) {
+    for (const el of row) {
+      if (el.tag === "SPAN") continue;
+      expect(Math.abs(el.topGap - el.bottomGap), `row control ${el.tag} not vertically centered (${el.topGap}/${el.bottomGap})`).toBeLessThanOrEqual(alignTolerance);
+    }
+  }
+  await portRow.getByTestId("port-forward-stop").click();
+  await expect(portRow.getByTestId("port-forward-start")).toBeVisible();
+
+  // A custom local port binds exactly that port.
+  await portRow.getByLabel("Local port for app 80").fill("12346");
+  await portRow.getByTestId("port-forward-start").click();
+  await expect(portRow.getByTestId("port-forward-local")).toContainText("localhost:12346");
+
+  await portRow.getByTestId("port-forward-stop").click();
+  await expect(portRow.getByTestId("port-forward-start")).toBeVisible();
+
+  await expectNoOverflow(page, "pod detail port forward 1280x800");
+  await screenshot(page, "pod-detail-port-forward-1280");
+  expect(failures).toEqual([]);
+});

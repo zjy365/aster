@@ -54,3 +54,20 @@ func TestManagerCreatesClientsLazilyAndCachesThem(t *testing.T) {
 		t.Fatalf("config = %#v", captured)
 	}
 }
+
+func TestUpstreamURLScheme(t *testing.T) {
+	cases := []struct{ host, wantScheme string }{
+		{"https://127.0.0.1:6443", "https"},
+		{"http://127.0.0.1:8080", "http"},
+		{"127.0.0.1:8080", "https"},
+	}
+	for _, tc := range cases {
+		got := upstreamURL(tc.host, "apps", "web")
+		if got.Scheme != tc.wantScheme {
+			t.Errorf("host %q: scheme = %q, want %q", tc.host, got.Scheme, tc.wantScheme)
+		}
+		if got.Host != "127.0.0.1:6443" && got.Host != "127.0.0.1:8080" {
+			t.Errorf("host %q: unexpected host %q", tc.host, got.Host)
+		}
+	}
+}

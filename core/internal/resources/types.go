@@ -180,11 +180,21 @@ type PortForwardRequest struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
 	PodPort   int64  `json:"podPort"`
+	// Kind routes the forward: Pod forwards directly, Service resolves
+	// through EndpointSlices, and the workload kinds resolve through their
+	// pod selector. Mirrors "kubectl port-forward svc/x deploy/x pod/x".
+	Kind string `json:"kind,omitempty"`
+	// LocalPort binds the forward to a specific local port; 0 picks a random
+	// free port. This mirrors "kubectl port-forward 8080:80".
+	LocalPort int `json:"localPort,omitempty"`
 }
 
 type PortForwardResponse struct {
 	ID        string `json:"id"`
 	LocalPort int    `json:"localPort"`
+	// Pod carries the backing pod for service/workload forwards so the UI
+	// can show what actually terminates the connection.
+	Pod string `json:"pod,omitempty"`
 }
 
 type PortForwardStopRequest struct {
