@@ -15,7 +15,7 @@ type fakePFProvider struct {
 	stopCalls *int
 }
 
-func (f fakePFProvider) PortForward(context.Context, string, string, string, int64) (func(), int, error) {
+func (f fakePFProvider) PortForward(context.Context, string, string, string, int64, int64) (func(), int, error) {
 	return func() { *f.stopCalls++ }, 43123, nil
 }
 
