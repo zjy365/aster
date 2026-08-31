@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
+
+	"github.com/zjy365/aster/core/internal/version"
 )
 
 func TestManagerCreatesClientsLazilyAndCachesThem(t *testing.T) {
@@ -53,7 +55,7 @@ func TestManagerCreatesClientsLazilyAndCachesThem(t *testing.T) {
 	if first != second || created != 1 {
 		t.Fatalf("cache failed: same=%v created=%d", first == second, created)
 	}
-	if captured.UserAgent != "aster/0.1" || captured.QPS != 30 || captured.Burst != 60 {
+	if captured.UserAgent != version.UserAgent() || captured.QPS != 30 || captured.Burst != 60 {
 		t.Fatalf("config = %#v", captured)
 	}
 }

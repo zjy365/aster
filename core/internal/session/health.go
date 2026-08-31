@@ -8,6 +8,8 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/zjy365/aster/core/internal/version"
 )
 
 // ContextHealth is the reachability probe result for one context. Status is
@@ -82,7 +84,7 @@ func (m *Manager) probe(id string) ContextHealth {
 		return health
 	}
 	config.Timeout = healthTimeout
-	config.UserAgent = "aster/0.1"
+	config.UserAgent = version.UserAgent()
 	start := time.Now()
 	version, err := m.serverVersion(config)
 	if err != nil {
