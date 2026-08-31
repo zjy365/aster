@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AppCommand,
   AsterSettings,
+  ContextHealth,
   ContextInfo,
   CoreStatus,
   DesktopApi,
@@ -106,6 +107,10 @@ export function createTauriDesktopApi(): DesktopApi {
         const value = await invoke<{ contexts: ContextInfo[] }>("contexts_list");
         return value.contexts;
       },
+      health: async (contextIds) => {
+        const value = await invoke<{ health: ContextHealth[] }>("contexts_health", { request: { contextIds } });
+        return value.health;
+      },
       sourcesReport: () => invoke<SourcesReport>("sources_report"),
       renameConflict: async (request) => {
         await invoke("sources_rename", { request });
@@ -119,6 +124,7 @@ export function createTauriDesktopApi(): DesktopApi {
         invoke<void>("settings_apply_kubeconfig_sources", { sources, includeStandardChain }),
       pickKubeconfigFile: () => invoke<string | null>("settings_pick_kubeconfig_file"),
       pickKubeconfigFolder: () => invoke<string | null>("settings_pick_kubeconfig_folder"),
+      importKubeconfigContent: (name, content) => invoke<string>("import_kubeconfig_content", { name: name || null, content }),
     },
     discovery: {
       list: async (contextId) => discoveredResourceList(await invoke("discovery_list", { contextId })),

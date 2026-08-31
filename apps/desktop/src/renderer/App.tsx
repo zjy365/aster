@@ -370,6 +370,7 @@ export default function App() {
       resourceGroups,
       activeKindId: kind.id,
       namespaces: namespaces.namespaces,
+      namespacesLoading: namespaces.loading,
       namespacesTruncated: namespaces.truncated,
       activeNamespace: namespaces.namespace,
       theme,
@@ -378,7 +379,7 @@ export default function App() {
     // with object-scoped commands under a "Selected object" group.
     if (detail.selected) return [...objectCommandItems(detail.selected), ...base];
     return base;
-  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.namespace, theme, detail.selected]);
+  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.loading, namespaces.namespace, theme, detail.selected]);
 
   const executePaletteCommand = useCallback((action: CommandAction) => {
     switch (action.type) {
@@ -469,6 +470,7 @@ export default function App() {
         }}
         onPickFile={() => desktop.settings.pickKubeconfigFile()}
         onPickFolder={() => desktop.settings.pickKubeconfigFolder()}
+        onImportKubeconfig={(name, content) => desktop.settings.importKubeconfigContent(name, content)}
         onCheckUpdates={checkForUpdates}
         onOpenExternal={(url) => void desktop.app.openExternal(url)}
         onBack={() => {
@@ -493,6 +495,8 @@ export default function App() {
         layout={contexts.contextLayout}
         loading={contexts.contextsLoading}
         error={contexts.contextsError}
+        health={contexts.contextHealth}
+        healthProbing={contexts.healthProbing}
         onQueryChange={contexts.setContextQuery}
         onLayoutChange={contexts.setContextLayout}
         onSelect={contexts.setContextChoice}
@@ -501,6 +505,18 @@ export default function App() {
         onOpenSettings={() => {
           contexts.setSettingsFrom(contexts.view);
           contexts.setView("settings");
+        }}
+        onPasteKubeconfig={async (name, content) => {
+          // The picker empty state has no Apply step behind it: stage the
+          // imported path and apply immediately so the pasted clusters load.
+          const path = await desktop.settings.importKubeconfigContent(name, content);
+          const sources = settings.kubeconfigSources.includes(path)
+            ? settings.kubeconfigSources
+            : [...settings.kubeconfigSources, path];
+          await desktop.settings.applyKubeconfigSources(sources, settings.includeStandardChain);
+          setSettings({ kubeconfigSources: sources, includeStandardChain: settings.includeStandardChain });
+          await contexts.loadContexts();
+          return path;
         }}
         onRenameConflict={async (request) => {
           await desktop.contexts.renameConflict(request);
@@ -534,6 +550,8 @@ export default function App() {
         <UnifiedToolbar
           namespaces={namespaces.namespaces}
           namespacesTruncated={namespaces.truncated}
+          namespacesLoading={namespaces.loading}
+          namespacesLoaded={namespaces.loaded}
           namespace={namespaces.namespace}
           onNamespaceOpen={namespaces.load}
           onNamespaceChange={namespaces.setNamespace}
@@ -541,7 +559,7 @@ export default function App() {
           query={helmActive || overviewActive ? "" : resources.query}
           onQueryChange={helmActive || overviewActive ? () => undefined : resources.setQuery}
           queryInputRef={searchRef}
-          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : detail.selected ? detail.refreshing : resources.loading}
+          refreshing={helmActive ? helm.loading : overviewActive ? overview.loading : detail.selected ? detail.refreshing : resources.loading || resources.revalidating}
           onRefresh={refreshActive}
           theme={theme}
           onThemeChange={setTheme}
@@ -592,6 +610,7 @@ export default function App() {
                 <h1>{pluralize(kind.kind)}</h1>
                 <p>{kind.category} · {contexts.activeContext?.name || "Kubernetes"}
                   {resources.snapshotOnly ? " · All namespaces (snapshot, refresh to update)" : ""}
+                  {resources.revalidating ? " · Refreshing…" : ""}
                 </p>
               </div>
               <div className="resource-summary">

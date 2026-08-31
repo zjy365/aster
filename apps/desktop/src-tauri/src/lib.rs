@@ -1,5 +1,6 @@
 mod commands;
 mod core_client;
+mod kubeconfig_import;
 mod menu;
 mod settings;
 mod sidecar;
@@ -100,6 +101,7 @@ pub fn run() {
             commands::app_open_external,
             commands::core_status,
             commands::contexts_list,
+            commands::contexts_health,
             commands::sources_report,
             commands::sources_rename,
             commands::namespaces_list,
@@ -132,6 +134,7 @@ pub fn run() {
             commands::settings_apply_kubeconfig_sources,
             commands::settings_pick_kubeconfig_file,
             commands::settings_pick_kubeconfig_folder,
+            commands::import_kubeconfig_content,
             commands::save_text_file,
             commands::appearance_set_theme_source,
             commands::updater_state,

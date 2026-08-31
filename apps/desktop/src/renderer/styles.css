@@ -540,6 +540,70 @@ h2 {
   white-space: nowrap;
 }
 
+.context-card-icon {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.context-health {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+  pointer-events: auto;
+}
+
+.context-health-dot {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  /* Ring in the row background keeps the dot legible over the tinted icon. */
+  box-shadow: 0 0 0 1.5px var(--surface);
+  transition: box-shadow 120ms ease;
+}
+
+.context-card:hover:not(:disabled) .context-health-dot {
+  box-shadow: 0 0 0 1.5px var(--surface-hover);
+}
+
+.context-card[data-selected="true"] .context-health-dot {
+  box-shadow: 0 0 0 1.5px var(--selection);
+}
+
+.context-health[data-state="ok"] .context-health-dot {
+  background: var(--healthy);
+}
+
+.context-health[data-state="error"] .context-health-dot {
+  background: var(--failed);
+}
+
+.context-health[data-state="checking"] .context-health-dot {
+  background: var(--text-secondary);
+  opacity: 0.5;
+  animation: context-health-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes context-health-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-health[data-state="checking"] .context-health-dot {
+    animation: none;
+  }
+}
+
 .context-conflict-warning {
   display: inline-flex;
   flex-shrink: 0;
@@ -1181,6 +1245,21 @@ h2 {
   padding: 0;
 }
 
+.namespace-combobox-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 12px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.namespace-combobox-loading svg {
+  width: 12px;
+  height: 12px;
+}
+
 .namespace-combobox-footer {
   padding: 6px 10px;
   border-top: 1px solid var(--border);
@@ -1706,16 +1785,6 @@ h2 {
   background: var(--surface);
 }
 
-/* The card holding the scale affordance (Desired) reacts as a whole. */
-.resource-vitals > div:has(.resource-vital-action) {
-  transition: border-color 120ms ease, background-color 120ms ease;
-}
-
-.resource-vitals > div:has(.resource-vital-action):hover {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-}
-
 .resource-vitals dd {
   display: flex;
   align-items: center;
@@ -1731,28 +1800,6 @@ h2 {
 
 .resource-vitals dd[data-tone="positive"] { color: var(--positive); }
 .resource-vitals dd[data-tone="caution"] { color: var(--caution); }
-
-/* Clickable vitals (Desired → scale) keep the same type; only the hover
-   color reveals the affordance. */
-.resource-vital-action {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  cursor: pointer;
-}
-
-.resource-vital-action:hover {
-  color: var(--primary);
-}
-
-.resource-vital-action:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
 
 .resource-vitals dt {
   color: var(--text-secondary);
@@ -4356,6 +4403,66 @@ button.overview-card:focus-visible {
 }
 
 .helm-upgrade-error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ---- Paste kubeconfig dialog ---- */
+
+.paste-kubeconfig-dialog {
+  width: min(640px, calc(100vw - 40px));
+  max-width: 640px;
+}
+
+.paste-kubeconfig-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.paste-kubeconfig-content {
+  min-height: 240px;
+  max-height: 45vh;
+}
+
+.paste-kubeconfig-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.paste-kubeconfig-name {
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.paste-kubeconfig-name:focus {
+  border-color: var(--focus);
+}
+
+.paste-kubeconfig-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--failed) 35%, transparent);
+  border-radius: 8px;
+  color: var(--failed);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.paste-kubeconfig-error svg {
   flex-shrink: 0;
   margin-top: 2px;
 }

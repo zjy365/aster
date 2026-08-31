@@ -95,7 +95,7 @@ Aster is designed so your hands don't leave the keyboard. Menus are a fallback, 
 
 **Cluster overview** — nodes, pods, namespaces, and services at a glance, with ready-counts. Every card is a link into the list behind it.
 
-**Change things, carefully** — scale, update image, restart, create resources, and edit ConfigMap/YAML. Every write goes through a server-side dry-run, a semantic diff you have to read, a resource-version conflict check, and an explicit Apply. Every applied change is recorded in a local per-context operation journal (summaries only).
+**Change things, carefully** — update image, restart workloads, edit any writable object's YAML, create, and delete. Every write goes through a server-side dry-run, a semantic diff you have to read, a resource-version conflict check, and an explicit Apply. Every applied change is recorded in a local per-context operation journal (summaries only).
 
 ## What it deliberately does not do
 

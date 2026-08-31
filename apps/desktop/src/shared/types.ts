@@ -44,6 +44,22 @@ export interface ContextInfo {
   error?: string;
 }
 
+/**
+ * Reachability probe result for one context, from the core's
+ * POST /v1/contexts/health. Advisory only: an "error" status never blocks
+ * connecting, since a cluster can reject /version yet serve real requests.
+ */
+export interface ContextHealth {
+  id: string;
+  status: "ok" | "error";
+  latencyMs?: number;
+  version?: string;
+  message?: string;
+}
+
+/** Renderer-side health for a row: absent until its probe resolves. */
+export type ContextHealthMap = Record<string, ContextHealth>;
+
 export interface AsterSettings {
   kubeconfigSources: string[];
   /**
@@ -492,6 +508,11 @@ export interface DesktopApi {
   };
   contexts: {
     list(): Promise<ContextInfo[]>;
+    /**
+     * Probes API server reachability for the given contexts. Resolves after
+     * the slowest probe (bounded per-context by the core's probe timeout).
+     */
+    health(contextIds: string[]): Promise<ContextHealth[]>;
     sourcesReport(): Promise<SourcesReport>;
     /**
      * Resolves a kubeconfig name collision by renaming the colliding entry
@@ -504,6 +525,15 @@ export interface DesktopApi {
     setKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<AsterSettings>;
     pickKubeconfigFile(): Promise<string | null>;
     pickKubeconfigFolder(): Promise<string | null>;
+    /**
+     * Imports a pasted kubeconfig: the shell sniffs the content, writes it
+     * into the app-managed kubeconfig directory (mode 0600) and resolves to
+     * the written path, ready to be added as a source. Contents travel
+     * renderer → shell only and are never returned. Rejects with a
+     * human-readable reason when the text does not look like a kubeconfig.
+     * An empty name derives the file slug from the first context.
+     */
+    importKubeconfigContent(name: string, content: string): Promise<string>;
     applyKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<void>;
   };
   discovery: {

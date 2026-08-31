@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Boxes,
   CheckCircle2,
+  ClipboardPaste,
   LayoutGrid,
   List as ListIcon,
   LoaderCircle,
@@ -14,7 +15,7 @@ import {
 import { AsterMark } from "../components/AsterMark";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import type { ContextInfo, CoreStatus, RenameConflictRequest } from "../../shared/types";
+import type { ContextHealthMap, ContextInfo, CoreStatus, RenameConflictRequest } from "../../shared/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -38,6 +39,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { ContextLayout } from "../lib/context-picker";
+import { PasteKubeconfigDialog } from "./PasteKubeconfigDialog";
 
 interface ContextPickerProps {
   core: CoreStatus;
@@ -48,12 +50,20 @@ interface ContextPickerProps {
   layout: ContextLayout;
   loading: boolean;
   error: string;
+  /** Per-context reachability; a missing entry means unknown or still probing. */
+  health: ContextHealthMap;
+  healthProbing: boolean;
   onQueryChange(value: string): void;
   onLayoutChange(value: ContextLayout): void;
   onSelect(value: string): void;
   onRefresh(): void;
   onConnect(contextId?: string): void;
   onOpenSettings(): void;
+  /**
+   * Imports pasted kubeconfig content and applies it immediately (the empty
+   * state has no settings page behind it), resolving to the stored path.
+   */
+  onPasteKubeconfig(name: string, content: string): Promise<string>;
   /** Renames a colliding entry inside its kubeconfig file, then reloads contexts. */
   onRenameConflict(request: RenameConflictRequest): Promise<void>;
 }
@@ -67,16 +77,20 @@ function ContextPicker({
   layout,
   loading,
   error,
+  health,
+  healthProbing,
   onQueryChange,
   onLayoutChange,
   onSelect,
   onRefresh,
   onConnect,
   onOpenSettings,
+  onPasteKubeconfig,
   onRenameConflict,
 }: ContextPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [conflictDialog, setConflictDialog] = useState<ContextInfo | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
   // Key of the conflict row whose rename form is open: path|kind|name.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -388,6 +402,25 @@ function ContextPicker({
                 const isSelected = context.id === selectedId;
                 const isTabStop = isSelected || (!selected && context.id === firstSelectableId);
                 const hasConflicts = Boolean(context.conflicts?.length);
+                const healthEntry = health[context.id];
+                // Static config errors already render below the name; the dot
+                // is only for dialable contexts. A missing entry is "checking"
+                // while a probe round runs, otherwise the row shows nothing.
+                const healthState = context.error
+                  ? null
+                  : healthEntry
+                    ? healthEntry.status
+                    : healthProbing
+                      ? "checking"
+                      : null;
+                const healthLabel =
+                  healthState === "ok"
+                    ? `Reachable${healthEntry?.version ? ` · ${healthEntry.version}` : ""}${
+                        healthEntry?.latencyMs != null ? ` · ${healthEntry.latencyMs} ms` : ""
+                      }`
+                    : healthState === "error"
+                      ? `Unreachable${healthEntry?.message ? `: ${healthEntry.message}` : ""}`
+                      : "Checking reachability…";
 
                 return (
                   <Button
@@ -407,8 +440,31 @@ function ContextPicker({
                     onDoubleClick={() => connect(context)}
                     onKeyDown={(event) => handleOptionKeyDown(event, context)}
                   >
-                    <span className="kubernetes-mark" aria-hidden="true">
-                      <Boxes />
+                    <span className="context-card-icon">
+                      <span className="kubernetes-mark" aria-hidden="true">
+                        <Boxes />
+                      </span>
+                      {healthState && (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span
+                                className="context-health"
+                                data-state={healthState}
+                                data-testid={`context-health-${context.id}`}
+                                aria-label={healthLabel}
+                                onClick={(event) => event.stopPropagation()}
+                                onDoubleClick={(event) => event.stopPropagation()}
+                              />
+                            }
+                          >
+                            <span className="context-health-dot" aria-hidden="true" />
+                          </TooltipTrigger>
+                          <TooltipContent className="block max-w-sm leading-relaxed break-all">
+                            {healthLabel}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                     </span>
                     <span className="context-card-copy">
                       <strong>{context.name}</strong>
@@ -466,19 +522,29 @@ function ContextPicker({
                 description={
                   totalContexts
                     ? "Try another name or cluster."
-                    : "Add a kubeconfig file in Settings, then refresh."
+                    : "Paste a kubeconfig to import its clusters, or add a file in Settings."
                 }
                 action={
                   totalContexts ? undefined : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={onOpenSettings}
-                      data-testid="context-picker-empty-settings"
-                    >
-                      <Settings data-icon="inline-start" aria-hidden="true" />
-                      Open Settings
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        data-testid="context-picker-empty-paste"
+                        onClick={() => setPasteOpen(true)}
+                      >
+                        <ClipboardPaste data-icon="inline-start" aria-hidden="true" />
+                        Paste kubeconfig
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={onOpenSettings}
+                        data-testid="context-picker-empty-settings"
+                      >
+                        <Settings data-icon="inline-start" aria-hidden="true" />
+                        Open Settings
+                      </Button>
+                    </>
                   )
                 }
               />
@@ -509,6 +575,8 @@ function ContextPicker({
           </footer>
         </section>
       </main>
+
+      <PasteKubeconfigDialog open={pasteOpen} onOpenChange={setPasteOpen} onImport={onPasteKubeconfig} />
 
       <Dialog
         open={Boolean(conflictDialog)}

@@ -40,6 +40,11 @@ pub async fn contexts_list(state: State<'_, AppState>) -> Result<Value, String> 
 }
 
 #[tauri::command]
+pub async fn contexts_health(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/contexts/health", request).await
+}
+
+#[tauri::command]
 pub async fn sources_report(state: State<'_, AppState>) -> Result<Value, String> {
     state.core.get("/v1/sources").await
 }
@@ -203,9 +208,25 @@ pub fn settings_set_kubeconfig_sources(state: State<'_, AppState>, sources: Vec<
 pub async fn settings_apply_kubeconfig_sources(state: State<'_, AppState>, sources: Vec<String>, include_standard_chain: bool) -> Result<(), String> {
     let settings = AsterSettings { kubeconfig_sources: normalize_sources(sources), include_standard_chain };
     state.settings.write(&settings);
+    // Managed paste-imports the new list no longer references are deleted so a
+    // removed source does not leave an orphaned credential file on disk.
+    crate::kubeconfig_import::prune_unreferenced(&crate::kubeconfig_import::managed_kubeconfig_dir(), &settings.kubeconfig_sources);
     // Restarting the core invalidates every live stream.
     state.streams.cancel_all();
     state.sidecar.restart().await
+}
+
+#[tauri::command]
+pub fn import_kubeconfig_content(name: Option<String>, content: String) -> Result<String, String> {
+    // One-way handoff: pasted text enters the shell here and is never returned
+    // to the renderer; only the written path crosses back. The sniff rejects
+    // obvious non-kubeconfigs up front; the Go core stays the authoritative
+    // validator once the path becomes a source.
+    let first_context = crate::kubeconfig_import::sniff_kubeconfig(&content)?;
+    let slug_source = name.as_deref().map(str::trim).filter(|value| !value.is_empty()).unwrap_or(&first_context);
+    let dir = crate::kubeconfig_import::managed_kubeconfig_dir();
+    let path = crate::kubeconfig_import::write_managed(&dir, &crate::kubeconfig_import::slugify(slug_source), &content)?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]

@@ -35,6 +35,7 @@ const (
 	maxSourcePath           = 4_096
 	maxRepoURL              = 2_048
 	maxChartVersion         = 128
+	maxHealthContexts       = 200
 )
 
 var mutationOperations = map[string]bool{
@@ -67,6 +68,21 @@ func validateContextID(value string) error {
 		return fmt.Errorf("contextId is required")
 	}
 	return checkLength("contextId", value, maxContextID)
+}
+
+func validateContextHealthRequest(value contextHealthRequest) error {
+	if len(value.ContextIDs) == 0 {
+		return fmt.Errorf("contextIds is required")
+	}
+	if len(value.ContextIDs) > maxHealthContexts {
+		return fmt.Errorf("contextIds must have at most %d entries", maxHealthContexts)
+	}
+	for _, id := range value.ContextIDs {
+		if err := validateContextID(id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateListRequest(value resources.ListRequest) error {

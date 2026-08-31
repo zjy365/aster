@@ -110,10 +110,13 @@ export function ResourceDetailView({
   const [operationDialog, setOperationDialog] = useState<OperationDialog>(null);
   const [operationValue, setOperationValue] = useState("");
   const [podsError, setPodsError] = useState("");
+  // Lifted from the YAML tab so the header Edit action can drive it.
+  const [yamlEditing, setYamlEditing] = useState(false);
 
   useEffect(() => {
     setTab("overview");
     setOperationDialog(null);
+    setYamlEditing(false);
   }, [row?.uid]);
 
   // Object-scoped keyboard shortcuts (Linear-style single letters). They run
@@ -123,11 +126,13 @@ export function ResourceDetailView({
     if (!row) return;
     const actions = new Set(resourceActionsFor(row.kind).map((action) => action.id));
     const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (operationDialog || mutationBusy) return;
+      // pendingMutation: the dry-run review modal is up — re-firing a shortcut
+      // behind it would re-tab to YAML editing or overwrite the staged mutation.
+      if (operationDialog || mutationBusy || pendingMutation) return;
       const active = document.activeElement;
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
-      // ⌘⌫ for delete (standard macOS destructive gesture).
+      // ⌘⌫ for delete (standard macOS destructive gesture). Checked before the
+      // modifier guard below — single-letter shortcuts ignore modifiers.
       if (event.metaKey && event.key === "Backspace") {
         if (actions.has("delete")) {
           event.preventDefault();
@@ -135,22 +140,23 @@ export function ResourceDetailView({
         }
         return;
       }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const key = event.key.toLowerCase();
-      if (key === "s" && actions.has("scale")) {
-        event.preventDefault();
-        openOperation("scale");
-      } else if (key === "i" && actions.has("image")) {
+      if (key === "i" && actions.has("image")) {
         event.preventDefault();
         openOperation("image");
       } else if (key === "r" && actions.has("restart")) {
         event.preventDefault();
         void onMutate({ operation: "restart" });
+      } else if (key === "e" && actions.has("edit")) {
+        event.preventDefault();
+        openYamlEditor();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row, operationDialog, mutationBusy, onMutate]);
+  }, [row, operationDialog, mutationBusy, pendingMutation, onMutate]);
 
   // Workload facts parsed from the live YAML the core already shipped; powers
   // the conditions/strategy/selector rows, annotations, and the pods list.
@@ -234,13 +240,22 @@ export function ResourceDetailView({
     pendingMutation?.operation === "delete" ? "" : mutationPreview || detail?.yaml || "";
 
   function openOperation(kind: Exclude<OperationDialog, null>) {
-    setOperationValue(kind === "scale" ? String(currentRow.desired ?? 1) : currentRow.images?.[0] || "");
+    setOperationValue(currentRow.images?.[0] || "");
     setOperationDialog(kind);
   }
 
+  function openYamlEditor() {
+    setTab("yaml");
+    setYamlEditing(true);
+  }
+
   function runAction(id: ResourceActionId) {
-    if (id === "scale" || id === "image") {
+    if (id === "image") {
       openOperation(id);
+      return;
+    }
+    if (id === "edit") {
+      openYamlEditor();
       return;
     }
     void onMutate({ operation: id });
@@ -250,15 +265,9 @@ export function ResourceDetailView({
     event.preventDefault();
     if (!operationDialog || mutationBusy || !canMutate) return;
 
-    if (operationDialog === "scale") {
-      const replicas = Number(operationValue);
-      if (!Number.isInteger(replicas) || replicas < 0) return;
-      await onMutate({ operation: "scale", replicas });
-    } else {
-      const image = operationValue.trim();
-      if (!image) return;
-      await onMutate({ operation: "image", image });
-    }
+    const image = operationValue.trim();
+    if (!image) return;
+    await onMutate({ operation: "image", image });
     setOperationDialog(null);
   }
 
@@ -311,7 +320,6 @@ export function ResourceDetailView({
               onOpenPods={workload ? () => setTab("pods") : undefined}
               onOpenPod={openPod}
               onNavigateRelated={onNavigateRelated}
-              onScale={canMutate && actionIds.has("scale") ? () => openOperation("scale") : undefined}
               onUpdateImage={canMutate && actionIds.has("image") ? () => openOperation("image") : undefined}
             />
           </TabsContent>
@@ -361,6 +369,8 @@ export function ResourceDetailView({
               canMutate={canMutate}
               mutationBusy={mutationBusy}
               mutationMessage={mutationMessage}
+              editing={yamlEditing}
+              onEditingChange={setYamlEditing}
               onMutate={onMutate}
             />
           </TabsContent>
@@ -471,6 +481,8 @@ function ResourceYamlTab({
   canMutate,
   mutationBusy,
   mutationMessage,
+  editing,
+  onEditingChange,
   onMutate,
 }: {
   kind: string;
@@ -479,10 +491,11 @@ function ResourceYamlTab({
   canMutate: boolean;
   mutationBusy: boolean;
   mutationMessage: string;
+  /** Controlled by the parent so the header Edit action can open the editor. */
+  editing: boolean;
+  onEditingChange(editing: boolean): void;
   onMutate(request: MutationDraft): Promise<void>;
 }) {
-  const [editing, setEditing] = useState(false);
-
   if (!detail) return <YamlViewer detail={detail} detailError={detailError} />;
   if (!editing) {
     return (
@@ -493,7 +506,7 @@ function ResourceYamlTab({
             <p>{kind === "Secret" ? "Secret values are redacted by the local core." : "The object returned by the Kubernetes API."}</p>
           </div>
           {kind !== "Secret" && (
-            <Button variant="outline" disabled={!canMutate} data-testid="yaml-edit" onClick={() => setEditing(true)}>
+            <Button variant="outline" disabled={!canMutate} data-testid="yaml-edit" onClick={() => onEditingChange(true)}>
               <FileCode2 data-icon="inline-start" />
               Edit
             </Button>
@@ -511,7 +524,7 @@ function ResourceYamlTab({
       mutationBusy={mutationBusy}
       mutationMessage={mutationMessage}
       onMutate={onMutate}
-      onClose={() => setEditing(false)}
+      onClose={() => onEditingChange(false)}
     />
   );
 }
@@ -638,32 +651,25 @@ function OperationInputDialog({
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   onOpenChange(open: boolean): void;
 }) {
-  const scale = kind === "scale";
-  const valid = scale
-    ? Number.isInteger(Number(value)) && Number(value) >= 0
-    : Boolean(value.trim());
+  const valid = Boolean(value.trim());
 
   return (
     <Dialog open={Boolean(kind)} onOpenChange={onOpenChange}>
       <DialogContent className="resource-operation-dialog" data-testid="resource-operation-dialog">
         <form onSubmit={onSubmit}>
           <DialogHeader>
-            <DialogTitle>{scale ? "Scale workload" : "Update container image"}</DialogTitle>
+            <DialogTitle>Update container image</DialogTitle>
             <DialogDescription>
-              {scale
-                ? "Enter the desired replica count. A dry-run diff will be shown before apply."
-                : "Enter the complete image reference. A dry-run diff will be shown before apply."}
+              Enter the complete image reference. A dry-run diff will be shown before apply.
             </DialogDescription>
           </DialogHeader>
           <label className="resource-operation-field">
-            <span>{scale ? "Desired replicas" : "Container image"}</span>
+            <span>Container image</span>
             <input
               autoFocus
-              type={scale ? "number" : "text"}
-              min={scale ? 0 : undefined}
-              step={scale ? 1 : undefined}
+              type="text"
               value={value}
-              aria-label={scale ? "Desired replicas" : "Container image"}
+              aria-label="Container image"
               onChange={(event) => onValueChange(event.target.value)}
             />
           </label>

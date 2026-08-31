@@ -42,7 +42,6 @@ export interface OverviewTabProps {
   onOpenPods?(): void;
   onOpenPod?(pod: ResourceRow): void;
   onNavigateRelated(item: RelatedResource): void;
-  onScale?(): void;
   onUpdateImage?(): void;
 }
 
@@ -59,10 +58,9 @@ export function OverviewTab({
   onOpenPods,
   onOpenPod,
   onNavigateRelated,
-  onScale,
   onUpdateImage,
 }: OverviewTabProps) {
-  const vitals = workloadVitals(row, onScale);
+  const vitals = workloadVitals(row);
   const labels = Object.entries(row.labels ?? {});
   const annotations = details?.annotations ?? [];
   const hasAside =
@@ -81,18 +79,7 @@ export function OverviewTab({
             <div key={vital.label}>
               <dd data-tone={vital.tone ?? "neutral"}>
                 {vital.dot && <StatusDot status={vital.dot} />}
-                {vital.onClick ? (
-                  <button
-                    type="button"
-                    className="resource-vital-action"
-                    title="Scale this workload"
-                    onClick={vital.onClick}
-                  >
-                    {vital.value}
-                  </button>
-                ) : (
-                  vital.value
-                )}
+                {vital.value}
               </dd>
               <dt>{vital.label}</dt>
             </div>
@@ -442,7 +429,6 @@ interface Vital {
   tone?: "neutral" | "positive" | "caution";
   /** Renders a status dot before the value. */
   dot?: string;
-  onClick?(): void;
 }
 
 /**
@@ -450,7 +436,7 @@ interface Vital {
  * strip at all rather than an empty row of dashes — status and age already lead
  * in the identity header and the information grid.
  */
-function workloadVitals(row: ResourceRow, onScale?: () => void): Vital[] {
+function workloadVitals(row: ResourceRow): Vital[] {
   const hasCounters =
     row.desired !== undefined ||
     row.ready !== undefined ||
@@ -472,7 +458,7 @@ function workloadVitals(row: ResourceRow, onScale?: () => void): Vital[] {
     vitals.push({ label: "Ready", value: String(row.ready) });
   }
   if (row.desired !== undefined) {
-    vitals.push({ label: "Desired", value: String(row.desired), onClick: onScale });
+    vitals.push({ label: "Desired", value: String(row.desired) });
   }
   if (row.updated !== undefined) vitals.push({ label: "Updated", value: String(row.updated) });
   if (row.available !== undefined) vitals.push({ label: "Available", value: String(row.available) });

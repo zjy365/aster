@@ -45,12 +45,12 @@ const MOCK_DESKTOP_API = `
     ["devbox.example.com", "v1", "widgets", "Widget", false],
   ].map(([group, version, resource, kind, namespaced]) => ({ group, version, resource, kind, namespaced }));
 
-  const row = (kind, index, namespaced) => ({
+  const row = (kind, index, namespaced, namespace = namespaced ? "default" : "") => ({
     uid: kind.id + "-uid-" + index,
     apiVersion: kind.group ? kind.group + "/" + kind.version : kind.version,
     kind: kind.kind,
     name: kind.resource + "-" + index,
-    namespace: namespaced ? "default" : "",
+    namespace,
     resourceVersion: "1000",
     createdAt: "2026-08-01T00:00:00Z",
     status: "Running",
@@ -65,8 +65,9 @@ const MOCK_DESKTOP_API = `
     const index = request.continueToken ? Number(request.continueToken) : 0;
     const start = index * PAGE;
     const items = [];
+    const namespace = request.namespace || (request.resourceKind.namespaced ? "default" : "");
     for (let i = start; i < Math.min(start + PAGE, TOTAL); i++) {
-      items.push(row(request.resourceKind, i, request.resourceKind.namespaced));
+      items.push(row(request.resourceKind, i, request.resourceKind.namespaced, namespace));
     }
     const next = start + PAGE < TOTAL ? String(index + 1) : undefined;
     return {
@@ -76,9 +77,10 @@ const MOCK_DESKTOP_API = `
     };
   };
 
-  // Records the last applied scale so the object get reflects the write — the
-  // watch fixture only ever ships the rv-1000 snapshot, like a lagging stream.
-  let scaledReplicas = null;
+  // Records the replicas from the last applied YAML edit so the object get
+  // reflects the write — the watch fixture only ever ships the rv-1000
+  // snapshot, like a lagging stream.
+  let appliedReplicas = null;
 
   // A realistic Deployment object: selector, strategy, conditions, and
   // annotations feed the overview's structured sections and the pods scope.
@@ -166,6 +168,10 @@ const MOCK_DESKTOP_API = `
     },
     contexts: {
       list: async () => contexts,
+      // prod is unreachable so both dot states show up in the picker tests.
+      health: async (ids) => ids.map((id) => id === "prod"
+        ? { id, status: "error", message: "dial tcp 10.0.0.2:443: i/o timeout" }
+        : { id, status: "ok", latencyMs: 12, version: "v1.30.1" }),
       sourcesReport: async () => ({
         chain: [{ path: "/Users/fixture/.kube/config", kind: "file", files: 1, contexts: 2, default: true }],
         configured: [],
@@ -178,6 +184,13 @@ const MOCK_DESKTOP_API = `
       applyKubeconfigSources: async () => undefined,
       pickKubeconfigFile: async () => null,
       pickKubeconfigFolder: async () => null,
+      importKubeconfigContent: async (name, content) => {
+        window.__asterImportedKubeconfig = { name, content };
+        if (!content.includes("kind: Config")) {
+          throw new Error("the pasted text does not look like a kubeconfig (missing apiVersion/kind: Config)");
+        }
+        return "/managed/kubeconfigs/" + (name.trim() || "dev-admin") + ".yaml";
+      },
     },
     discovery: { list: async () => discovery },
     namespaces: {
@@ -265,7 +278,8 @@ const MOCK_DESKTOP_API = `
         // The list may open any row, not just index 0; derive the index from
         // the requested name so the returned uid matches the selected row.
         const index = Number(request.name.slice(request.resourceKind.resource.length + 1)) || 0;
-        const fresh = row(request.resourceKind, index, request.resourceKind.namespaced);
+        const namespace = request.namespace || (request.resourceKind.namespaced ? "default" : "");
+        const fresh = row(request.resourceKind, index, request.resourceKind.namespaced, namespace);
         let yaml = request.resourceKind.kind === "Deployment"
           ? deploymentYaml(request.name)
           : request.resourceKind.kind === "Pod"
@@ -274,7 +288,7 @@ const MOCK_DESKTOP_API = `
         if (scaledReplicas !== null && request.resourceKind.kind === "Deployment") {
           fresh.desired = scaledReplicas;
           fresh.resourceVersion = "1002";
-          yaml = yaml.replace("  replicas: 2", "  replicas: " + scaledReplicas);
+          yaml = yaml.replace("  replicas: 2", "  replicas: " + appliedReplicas);
         }
         return { row: fresh, yaml };
       },
@@ -331,15 +345,14 @@ const MOCK_DESKTOP_API = `
         if (!request.dryRun && request.resourceVersion && request.resourceVersion !== "1001") {
           throw new Error("resource version conflict: expected " + request.resourceVersion + ", got 1001");
         }
-        if (!request.dryRun && request.operation === "scale") {
-          scaledReplicas = request.replicas;
+        if (!request.dryRun && request.operation === "yaml" && request.resourceKind.kind === "Deployment") {
+          const match = /  replicas: (\\d+)/.exec(request.yaml || "");
+          if (match) appliedReplicas = Number(match[1]);
         }
-        // Mirror the API server: a scale dry-run echoes the would-be object,
+        // Mirror the API server: a YAML dry-run echoes the would-be object,
         // including server-managed bumps (generation) the review diff filters out.
-        const yaml = request.dryRun && request.operation === "scale" && request.resourceKind.kind === "Deployment"
-          ? deploymentYaml(request.name)
-              .replace("  replicas: 2", "  replicas: " + request.replicas)
-              .replace("  namespace: default", "  namespace: default\\n  generation: 2")
+        const yaml = request.dryRun && request.operation === "yaml" && request.resourceKind.kind === "Deployment"
+          ? (request.yaml || "").replace("  namespace: default", "  namespace: default\\n  generation: 2")
           : request.operation === "create"
             ? request.yaml
             : undefined;
@@ -400,6 +413,27 @@ test("context picker renders without overflow at both viewports", async ({ page 
   await page.setViewportSize({ width: 900, height: 640 });
   await expectNoOverflow(page, "context picker 900x640");
   await screenshot(page, "picker-900");
+  expect(failures).toEqual([]);
+});
+
+test("context picker shows cluster reachability status", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  const ok = page.getByTestId("context-health-dev");
+  await expect(ok).toBeVisible();
+  await expect(ok).toHaveAttribute("data-state", "ok");
+  await expect(ok).toHaveAttribute("aria-label", "Reachable · v1.30.1 · 12 ms");
+
+  const down = page.getByTestId("context-health-prod");
+  await expect(down).toBeVisible();
+  await expect(down).toHaveAttribute("data-state", "error");
+  await expect(down).toHaveAttribute("aria-label", "Unreachable: dial tcp 10.0.0.2:443: i/o timeout");
+  // An unreachable cluster stays selectable: the status is advisory.
+  await expect(page.getByTestId("context-option-prod")).toBeEnabled();
+
+  await expectNoOverflow(page, "context picker health 1280x800");
   expect(failures).toEqual([]);
 });
 
@@ -635,9 +669,9 @@ test("resource detail opens and preserves layout", async ({ page }) => {
 
   // Object-scoped actions live in the identity header, above the fold.
   const actions = page.getByTestId("resource-detail-actions");
-  await expect(actions.getByTestId("resource-action-scale")).toBeVisible();
   await expect(actions.getByTestId("resource-action-image")).toBeVisible();
   await expect(actions.getByTestId("resource-action-restart")).toBeVisible();
+  await expect(actions.getByTestId("resource-action-edit")).toBeVisible();
   await expect(actions.getByTestId("delete-resource")).toBeVisible();
   // Wide layout resolves actions inline, so the More menu stays out of the tree.
   await expect(page.getByTestId("resource-actions-more")).toBeHidden();
@@ -690,15 +724,15 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
   const editor = detail.getByTestId("resource-yaml-editor");
   await expect(editor).toBeVisible();
   await expect(editor).toHaveAttribute("wrap", "off");
+  await expect
+    .poll(() => editor.evaluate((el) => getComputedStyle(el).whiteSpace))
+    .toBe("pre");
 
-  // The fixture fits the editor width, so nothing scrolls yet; a long
-  // unbroken line (like kubectl's last-applied-configuration annotation)
-  // must overflow horizontally, staying one visual line that scrolls.
-  expect(await editor.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   const longLine =
-    "    kubectl.kubernetes.io/last-applied-configuration: " +
-    '{"apiVersion":"apps/v1","kind":"Deployment","spec":{"replicas":2,"template":{"spec":{"containers":[{"name":"web","image":"nginx:1.27"}]}}}}';
-  await editor.fill((await editor.inputValue()) + "\n" + longLine);
+    "      apiVersion: apps/v1 kind: Deployment metadata: name: embedded workload spec: " +
+    "replicas: 2 template: spec: containers: name: web image: nginx:1.27 ".repeat(4).trim();
+  const blockScalar = `embedded.yaml: |\n${longLine}`;
+  await editor.fill((await editor.inputValue()) + "\n" + blockScalar);
   expect(await editor.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
 
   // Park the scroll at the long line so the screenshot shows it intact.
@@ -707,11 +741,19 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
     el.scrollLeft = 0;
   });
   await expectNoOverflow(page, "yaml editor long line 1280x800");
+  // The snapshot is generated on macOS, but CI renders the same @fontsource
+  // JetBrains Mono through FreeType, so subpixel antialiasing differs by a few
+  // percent on text edges. Absorb that cross-platform delta without hiding
+  // layout drift, which moves orders of magnitude more pixels.
+  await expect(editor).toHaveScreenshot("yaml-editor-nowrap.png", {
+    animations: "disabled",
+    maxDiffPixelRatio: 0.05,
+  });
   await screenshot(page, "detail-yaml-editor-nowrap-1280");
   expect(failures).toEqual([]);
 });
 
-test("detail reflects an applied scale and survives manual refresh", async ({ page }) => {
+test("detail reflects an applied YAML edit and survives manual refresh", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
@@ -727,13 +769,19 @@ test("detail reflects an applied scale and survives manual refresh", async ({ pa
   const vitals = page.getByTestId("resource-vitals");
   await expect(vitals).toContainText("2/2");
 
-  // Scale 2 → 3 through the dry-run review. The mock's list watch never ships
-  // the write (rv-1000 snapshot only), so the update must come from the
-  // post-apply refetch, and the stale snapshot must not downgrade it back.
-  await page.getByTestId("resource-action-scale").click();
-  await page.getByLabel("Desired replicas").fill("3");
-  await page.getByTestId("operation-prepare-dry-run").click();
+  // Edit replicas 2 → 3 through the header Edit action and the dry-run review.
+  // The mock's list watch never ships the write (rv-1000 snapshot only), so the
+  // update must come from the post-apply refetch, and the stale snapshot must
+  // not downgrade it back.
+  await page.getByTestId("resource-action-edit").click();
+  const editor = detail.getByTestId("resource-yaml-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill((await editor.inputValue()).replace("  replicas: 2", "  replicas: 3"));
+  await detail.getByTestId("yaml-prepare-dry-run").click();
   await page.getByTestId("mutation-apply").click();
+
+  // The edit flow leaves us on the YAML tab; the replica counters live on Overview.
+  await detail.getByRole("tab", { name: "Overview" }).click();
   await expect(vitals).toContainText("2/3", { timeout: 15_000 });
 
   // A manual refresh re-fetches the object in place instead of dropping back
@@ -741,8 +789,8 @@ test("detail reflects an applied scale and survives manual refresh", async ({ pa
   await page.keyboard.press("F5");
   await expect(detail).toBeVisible();
   await expect(vitals).toContainText("2/3");
-  await expectNoOverflow(page, "detail after scale and refresh 1280x800");
-  await screenshot(page, "detail-scale-refresh-1280");
+  await expectNoOverflow(page, "detail after edit and refresh 1280x800");
+  await screenshot(page, "detail-edit-refresh-1280");
   expect(failures).toEqual([]);
 });
 
@@ -757,11 +805,11 @@ test("mutation review renders a collapsed GitHub-style diff", async ({ page }) =
   await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
   await firstRow.click();
 
-  await page.getByTestId("resource-action-scale").click();
-  const scaleDialog = page.getByTestId("resource-operation-dialog");
-  await expect(scaleDialog).toBeVisible();
-  await scaleDialog.getByLabel("Desired replicas").fill("5");
-  await scaleDialog.getByTestId("operation-prepare-dry-run").click();
+  await page.getByTestId("resource-action-edit").click();
+  const editor = page.getByTestId("resource-yaml-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill((await editor.inputValue()).replace("  replicas: 2", "  replicas: 5"));
+  await page.getByTestId("yaml-prepare-dry-run").click();
 
   const dialog = page.getByTestId("mutation-review-dialog");
   await expect(dialog).toBeVisible({ timeout: 15_000 });
@@ -779,6 +827,71 @@ test("mutation review renders a collapsed GitHub-style diff", async ({ page }) =
   // snapshot (1000) — the mock rejects anything else with a conflict.
   await dialog.getByTestId("mutation-apply").click();
   await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+  expect(failures).toEqual([]);
+});
+
+test("header Edit is the universal update entry on non-workload kinds", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("resource-nav-configmaps").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("configmaps-0", { timeout: 15_000 });
+  await firstRow.click();
+
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+  // No guided verbs for a ConfigMap: Edit anchors the safe group, then Delete.
+  const actions = page.getByTestId("resource-detail-actions");
+  await expect(actions.getByTestId("resource-action-edit")).toBeVisible();
+  await expect(actions.getByTestId("delete-resource")).toBeVisible();
+  await expect(actions.getByTestId("resource-action-image")).toBeHidden();
+  await expect(actions.getByTestId("resource-action-restart")).toBeHidden();
+
+  // The header Edit action jumps straight into the YAML editor.
+  await actions.getByTestId("resource-action-edit").click();
+  await expect(detail.getByTestId("resource-yaml-editor")).toBeVisible();
+  await expectNoOverflow(page, "configmap detail edit 1280x800");
+  await screenshot(page, "configmap-detail-edit-1280");
+  expect(failures).toEqual([]);
+});
+
+test("object shortcuts drive the header actions", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
+  await firstRow.click();
+
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+
+  // E opens the YAML editor (and switches to the YAML tab).
+  await page.keyboard.press("e");
+  await expect(detail.getByTestId("resource-yaml-editor")).toBeVisible();
+  await detail.getByRole("button", { name: "View" }).click();
+  await expect(detail.getByTestId("resource-yaml-view")).toBeVisible();
+
+  // ⌘⌫ stages a delete dry-run; cancel it instead of applying.
+  await page.keyboard.press("Meta+Backspace");
+  const review = page.getByTestId("mutation-review-dialog");
+  await expect(review).toBeVisible({ timeout: 15_000 });
+
+  // Single-letter shortcuts must be inert while the dry-run review modal is
+  // open: pressing "e" behind it must not re-tab to YAML editing.
+  await page.keyboard.press("e");
+  await expect(detail.getByTestId("resource-yaml-editor")).toHaveCount(0);
+  await expect(review).toBeVisible();
+
+  await review.getByRole("button", { name: "Cancel" }).click();
+  await expect(review).not.toBeVisible();
   expect(failures).toEqual([]);
 });
 
@@ -857,12 +970,13 @@ test("detail actions collapse into one More menu on a narrow window", async ({ p
 
   await expect(page.getByTestId("resource-detail-view")).toBeVisible({ timeout: 15_000 });
   // Safe actions fold away; the destructive action is never buried in a menu.
-  await expect(page.getByTestId("resource-action-scale")).toBeHidden();
+  await expect(page.getByTestId("resource-action-edit")).toBeHidden();
   await expect(page.getByTestId("delete-resource")).toBeVisible();
 
   await page.getByTestId("resource-actions-more").click();
-  await expect(page.getByTestId("resource-action-menu-scale")).toBeVisible();
+  await expect(page.getByTestId("resource-action-menu-image")).toBeVisible();
   await expect(page.getByTestId("resource-action-menu-restart")).toBeVisible();
+  await expect(page.getByTestId("resource-action-menu-edit")).toBeVisible();
   await page.keyboard.press("Escape");
 
   await expectNoOverflow(page, "detail 1000x800");
@@ -1054,6 +1168,71 @@ test("settings opens as a page and returns to the picker", async ({ page }) => {
   await expect(page.getByTestId("context-option-prod")).toBeVisible();
 });
 
+test("paste import stages a kubeconfig source in settings", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByTestId("context-picker-settings").click();
+  const settings = page.getByTestId("settings-page");
+  await settings.getByTestId("settings-tab-kubeconfig").click();
+
+  await settings.getByTestId("settings-paste-kubeconfig").click();
+  const dialog = page.getByTestId("paste-kubeconfig-dialog");
+  await expect(dialog).toBeVisible();
+
+  // A paste that is not a kubeconfig is rejected in place; nothing is staged.
+  await dialog.getByTestId("paste-kubeconfig-content").fill("foo: bar");
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog.getByTestId("paste-kubeconfig-error")).toContainText("does not look like a kubeconfig");
+  await expect(dialog).toBeVisible();
+
+  // A valid paste with a name stages the stored path as a pending source.
+  await dialog.getByTestId("paste-kubeconfig-content").fill(
+    ["apiVersion: v1", "kind: Config", "contexts:", "- name: prod-eu", "  context:", "    cluster: prod", "    user: admin"].join("\n"),
+  );
+  await dialog.getByTestId("paste-kubeconfig-name").fill("prod-eu");
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog).not.toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterImportedKubeconfig?: { name: string } }).__asterImportedKubeconfig?.name))
+    .toBe("prod-eu");
+  await expect(settings.getByTestId("settings-source-list")).toContainText("/managed/kubeconfigs/prod-eu.yaml");
+  await expect(settings.getByTestId("settings-apply")).toBeEnabled();
+
+  await expectNoOverflow(page, "paste kubeconfig import");
+  await screenshot(page, "settings-paste-import");
+  expect(failures).toEqual([]);
+});
+
+test("paste import from the picker empty state", async ({ page }) => {
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as { __ASTER_DESKTOP__?: { contexts: Record<string, unknown> } }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.contexts.list = async () => [];
+      desktop.contexts.sourcesReport = async () => ({ chain: [], configured: [] });
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  // The empty state leads with paste import; applying restarts the (mocked)
+  // core, the dialog closes, and the picker stays honest about zero contexts.
+  await expect(page.getByTestId("context-picker-empty")).toContainText("No contexts found");
+  await page.getByTestId("context-picker-empty-paste").click();
+  const dialog = page.getByTestId("paste-kubeconfig-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId("paste-kubeconfig-content").fill(
+    ["apiVersion: v1", "kind: Config", "contexts:", "- name: dev", "  context:", "    cluster: dev", "    user: dev"].join("\n"),
+  );
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByTestId("context-picker-empty")).toBeVisible();
+  await expectNoOverflow(page, "picker empty-state paste import");
+  await screenshot(page, "picker-empty-paste");
+  expect(failures).toEqual([]);
+});
+
 test("settings opens with no kubeconfig at all", async ({ page }) => {
   // A machine with no kubeconfig: the core reports zero contexts and an empty
   // standard chain (the wire contract is [], never null — a null here once
@@ -1234,7 +1413,41 @@ test("context picker keeps the brand visible when many contexts scroll", async (
   expect(failures).toEqual([]);
 });
 
-test("namespace picker refetches the list after each context switch", async ({ page }) => {
+test("namespace picker shows a loading row while the list loads", async ({ page }) => {
+  // On a large cluster the lazy first fetch takes seconds; the picker must
+  // say it is loading instead of sitting on a misleading empty list.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  const loading = page.getByTestId("namespace-loading");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText("Loading namespaces");
+  // The no-match empty state never stands in for the in-flight fetch.
+  await expect(page.locator(".namespace-combobox-empty")).not.toContainText("No matching namespaces");
+  await screenshot(page, "namespace-picker-loading");
+
+  // Once the fetch lands the loading row leaves and real items appear.
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await expect(loading).toHaveCount(0);
+  expect(failures).toEqual([]);
+});
+
+test("namespace lists stay isolated per cluster across switches", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
@@ -1263,12 +1476,447 @@ test("namespace picker refetches the list after each context switch", async ({ p
   await expect(namespaceItem("kube-system")).toHaveCount(0);
   await page.keyboard.press("Escape");
 
-  // Back to dev: the list must load again (regression: it stayed empty).
+  // Back to dev: the retained dev list renders at once from the cache; it is
+  // never dev's prod data (the cross-cluster isolation this test guards).
   await page.getByTestId("change-context").click();
   await connectToDev(page);
   await openPicker();
   await expect(namespaceItem("kube-system")).toBeVisible();
   await screenshot(page, "namespace-picker-after-context-switch");
+  expect(failures).toEqual([]);
+});
+
+test("switching back to a cluster reuses the cached namespace list without refetching", async ({ page }) => {
+  // Regression: A→B→A must not re-fetch A's inventory. Count list() calls.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      (window as unknown as { __namespaceListCalls?: number }).__namespaceListCalls = 0;
+      desktop.namespaces.list = async (contextId: string) => {
+        (window as unknown as { __namespaceListCalls: number }).__namespaceListCalls += 1;
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const openPicker = async () => {
+    await page.getByTestId("namespace-select").click();
+    await expect(page.getByTestId("namespace-filter")).toBeVisible();
+  };
+  const namespaceItem = (name: string) =>
+    page.locator(".namespace-combobox-item", { hasText: name });
+  const calls = () => page.evaluate(() => (window as unknown as { __namespaceListCalls?: number }).__namespaceListCalls ?? 0);
+
+  // Cold visit to dev: one fetch.
+  await openPicker();
+  await expect(namespaceItem("kube-system")).toBeVisible();
+  await page.keyboard.press("Escape");
+  expect(await calls()).toBe(1);
+
+  // Switch to prod: prod fetches its own list (dev's is never reused).
+  await page.getByTestId("change-context").click();
+  const prod = page.getByTestId("context-option-prod");
+  await prod.click();
+  await prod.dblclick();
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await openPicker();
+  await expect(namespaceItem("default")).toBeVisible();
+  await expect(namespaceItem("kube-system")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  expect(await calls()).toBe(2);
+
+  // Back to dev: the cached list renders at once and no fetch happens.
+  await page.getByTestId("change-context").click();
+  await connectToDev(page);
+  await openPicker();
+  await expect(namespaceItem("kube-system")).toBeVisible();
+  expect(await calls()).toBe(2);
+  await screenshot(page, "namespace-cluster-cache-reuse");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker commits a typed namespace with Enter before the list loads", async ({ page }) => {
+  // A user who knows the exact namespace must not wait for the inventory. The
+  // fixture delays the first fetch so the direct-Enter path is observable.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Open the picker, type a namespace that is not in the (still loading) list,
+  // and press Enter: the picker switches scope without waiting.
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await expect(filter).toBeVisible();
+  await filter.fill("ns-abcdefg");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toContainText("ns-abcdefg");
+  await screenshot(page, "namespace-enter-commit");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker Enter selects the highlighted row when matches exist", async ({ page }) => {
+  // Direct-Enter must not hijack Base UI's autoHighlight: typing a prefix of
+  // a loaded namespace and pressing Enter selects the highlighted row, not
+  // the raw prefix.
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await filter.fill("kube");
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toContainText("kube-system");
+  await screenshot(page, "namespace-enter-highlighted-row");
+  expect(failures).toEqual([]);
+});
+
+test("toolbar inputs ignore IME composition until it commits", async ({ page }) => {
+  // CJK input methods fire real input events for every composition keystroke
+  // (e.g. pinyin "d'e"); the toolbar must keep filtering on the last
+  // committed text and only apply the composition once it ends. The
+  // composition text itself must stay visible in both inputs.
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  // Anchor on the row's accessible name ("Select deployments-3 …"): raw
+  // textContent runs cells together, so neither substring nor \b can tell
+  // "deployments-3" apart from "deployments-31".
+  const row = (name: string) =>
+    grid.getByRole("row", { name: new RegExp(`^Select ${name} `) });
+
+  // Simulate an IME: compositionstart, then input events with isComposing,
+  // then a compositionend carrying the committed text. The value is set
+  // before compositionstart so controlled inputs observe it in the same
+  // order real keystrokes produce.
+  const startComposition = (testId: string, composition: string) =>
+    page.evaluate(([id, text]) => {
+      const input = document.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
+      input.value = text;
+      input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+      input.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data: text,
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+    }, [testId, composition]);
+  const commitComposition = (testId: string, committed: string) =>
+    page.evaluate(([id, text]) => {
+      const input = document.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
+      input.value = text;
+      input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: text }));
+    }, [testId, committed]);
+
+  await expect(row("deployments-0")).toBeVisible({ timeout: 15_000 });
+
+  // Resource search: the in-progress pinyin is displayed but never filters.
+  await startComposition("resource-search", "d'e");
+  const search = page.getByTestId("resource-search");
+  await expect(search).toHaveValue("d'e");
+  await expect(row("deployments-0")).toBeVisible();
+
+  // The committed text filters exactly once, when the composition ends.
+  await commitComposition("resource-search", "deployments-3");
+  await expect(search).toHaveValue("deployments-3");
+  await expect(row("deployments-3")).toBeVisible();
+  await expect(row("deployments-0")).toHaveCount(0);
+
+  // Namespace picker: composition text must not enter the prefix search.
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await expect(filter).toBeVisible();
+
+  // First commit a query that matches nothing, so the direct-Enter path is
+  // armed; then compose on top of it. The Enter that commits an IME
+  // composition (Chrome reports key "Enter", keyCode 229, isComposing) must
+  // not run that commit path or switch the namespace.
+  await commitComposition("namespace-filter", "zzz-no-match");
+  await expect(page.locator(".namespace-combobox-empty")).toContainText("No matching namespaces");
+  await startComposition("namespace-filter", "d'e");
+  await expect(filter).toHaveValue("d'e");
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('[data-testid="namespace-filter"]')!;
+    const enter = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+      key: "Enter",
+    });
+    Object.defineProperty(enter, "keyCode", { get: () => 229 });
+    Object.defineProperty(enter, "which", { get: () => 229 });
+    input.dispatchEvent(enter);
+  });
+  // The composition is still in progress: the picker stays open and the
+  // namespace is untouched — the IME's Enter must never commit the raw
+  // pinyin or the armed "zzz-no-match" query as the namespace.
+  await expect(filter).toBeVisible();
+  await expect(page.getByTestId("namespace-select")).toContainText("default");
+
+  // Ending the composition applies the committed text to the prefix search.
+  await commitComposition("namespace-filter", "kube");
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await expect(page.locator(".namespace-combobox-empty")).not.toContainText("No matching namespaces");
+  await filter.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toContainText("kube-system");
+  await screenshot(page, "toolbar-ime-composition");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker Enter respects the All-namespaces row while loading", async ({ page }) => {
+  // The "All namespaces" row renders and auto-highlights with an empty filter
+  // even before the list loads. Enter must select that highlighted row (issue
+  // #23), not fall through to the dead direct-Enter commit — and a query that
+  // collides with the label ("all") must still commit raw while nothing is
+  // highlighted, because the null row is only offered with an empty filter.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const filter = page.getByTestId("namespace-filter");
+  await page.getByTestId("namespace-select").click();
+  await expect(filter).toBeVisible();
+  await expect(page.getByTestId("namespace-loading")).toBeVisible();
+
+  // Non-empty filter while loading: the null row is gone, nothing is
+  // highlighted, so direct-Enter commits the raw input.
+  await filter.fill("all");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toHaveText("all");
+  await expect(filter).toBeHidden();
+
+  // Reopen with an empty filter while the fetch is still in flight: the
+  // "All namespaces" row sits highlighted, so Enter selects it instead of
+  // being swallowed.
+  await page.getByTestId("namespace-select").click();
+  await expect(filter).toBeVisible();
+  await expect(page.getByTestId("namespace-loading")).toBeVisible();
+  await filter.click();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toHaveText("All namespaces");
+  await expect(filter).toBeHidden();
+  await screenshot(page, "namespace-enter-all-namespaces-row");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker Enter prefers a real namespace named all over cluster scope", async ({ page }) => {
+  // A cluster can have a namespace literally named "all". With a query typed,
+  // the null-valued "All namespaces" row must not shadow it in the list or
+  // autoHighlight (issue #23): Enter selects the namespace, not cluster scope.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.namespaces.list = async () => ({
+        namespaces: [
+          { name: "all", status: "Active" },
+          { name: "default", status: "Active" },
+          { name: "kube-system", status: "Active" },
+        ],
+        truncated: false,
+      });
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await filter.fill("all");
+  // The null row is filtered out with a query, so only the real namespace
+  // named "all" survives (hasText is case-insensitive, hence the anchor).
+  const rows = page.locator(".namespace-combobox-item");
+  await expect(rows.filter({ hasText: /^all$/ })).toBeVisible();
+  await expect(rows.filter({ hasText: "All namespaces" })).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("namespace-select")).toHaveText("all");
+  await screenshot(page, "namespace-enter-named-all");
+  expect(failures).toEqual([]);
+});
+
+test("command palette shows a loading row while the namespace list loads", async ({ page }) => {
+  // Issue #15 scopes the loading placeholder to the palette too: opening ⌘K
+  // during the first fetch must say so instead of showing only
+  // "All namespaces".
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const list = desktop.namespaces.list.bind(desktop.namespaces);
+      desktop.namespaces.list = async (contextId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return list(contextId);
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.keyboard.press("Meta+k");
+  const palette = page.getByTestId("command-palette");
+  await expect(palette).toBeVisible();
+  const loading = palette.getByTestId("command-item-namespace:loading");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText("Loading namespaces");
+  await screenshot(page, "palette-namespaces-loading");
+
+  // Once the fetch lands the loading row leaves and real namespaces appear.
+  await expect(palette.getByTestId("command-item-namespace:kube-system")).toBeVisible();
+  await expect(loading).toHaveCount(0);
+  expect(failures).toEqual([]);
+});
+
+test("switching back to a namespace restores the cached snapshot instantly", async ({ page }) => {
+  // Delay every watch snapshot by 600ms so the cold path's full-pane loading
+  // state is observable; a cached revisit must skip it entirely.
+  await page.addInitScript(() => {
+    type FixtureRow = Record<string, unknown>;
+    type FixtureBatch = {
+      subscriptionId?: string;
+      kind: "snapshot" | "delta" | "error";
+      items?: FixtureRow[];
+      events?: unknown[];
+      [key: string]: unknown;
+    };
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: {
+        resources: {
+          watch(
+            request: { namespace?: string },
+            listener: (batch: FixtureBatch) => void,
+          ): () => void;
+        };
+      };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      const watch = desktop.resources.watch.bind(desktop.resources);
+      let watchSerial = 0;
+      desktop.resources.watch = (request, listener) => {
+        const serial = ++watchSerial;
+        const timers: ReturnType<typeof setTimeout>[] = [];
+        const stop = watch(request, (batch) => {
+          if (batch.kind !== "snapshot") {
+            listener(batch);
+            return;
+          }
+          timers.push(setTimeout(() => {
+            const next: FixtureBatch = { ...batch, items: (batch.items ?? []).map((item) => ({ ...item })) };
+            if (serial === 3 && next.items?.[0]) {
+              next.items[0] = { ...next.items[0], name: "fresh-default" };
+            }
+            listener(next);
+          }, 600));
+        });
+        return () => {
+          stop();
+          timers.forEach(clearTimeout);
+          // Simulate a delayed delta from the stopped subscription. The hook
+          // must reject it after switching to another namespace.
+          setTimeout(() => listener({
+            subscriptionId: "stale-" + serial,
+            kind: "delta",
+            events: [{
+              type: "added",
+              row: {
+                uid: "late-" + serial,
+                apiVersion: "apps/v1",
+                kind: "Deployment",
+                name: "late-" + serial,
+                namespace: request.namespace || "default",
+                resourceVersion: "stale",
+                createdAt: "2026-08-01T00:00:00Z",
+                status: "Stale",
+              },
+            }],
+          } as FixtureBatch), 100);
+        };
+      };
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const loadingState = page.locator(".table-state", { hasText: "Loading resources" });
+  const namespaceItem = (name: string) =>
+    page.locator(".namespace-combobox-item", { hasText: name });
+
+  // Cold first visit to the default namespace: spinner, then rows.
+  await expect(loadingState).toBeVisible();
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+
+  // Cold first visit to kube-system: the full-pane spinner returns.
+  await page.getByTestId("namespace-select").click();
+  await namespaceItem("kube-system").click();
+  await expect(loadingState).toBeVisible();
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+
+  // Switching back to default is a revisit: retained rows render at once and
+  // the loading state never appears, while the heading reports the refresh.
+  await page.getByTestId("namespace-select").click();
+  await namespaceItem("default").click();
+  await expect(loadingState).toHaveCount(0);
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0");
+  const heading = page.locator(".pane-heading");
+  await expect(heading).toContainText("Refreshing");
+
+  // A delayed event from the stopped kube-system subscription must not cross
+  // into the default view while its fresh snapshot is pending.
+  await page.waitForTimeout(150);
+  await expect(grid).not.toContainText("late-2");
+
+  // The fresh snapshot replaces the retained rows in place.
+  await expect(heading).not.toContainText("Refreshing", { timeout: 15_000 });
+  await expect(grid.getByRole("row").nth(1)).toContainText("fresh-default");
+  await expect(grid).not.toContainText("late-2");
+  await screenshot(page, "namespace-revisit-cached");
   expect(failures).toEqual([]);
 });
 
