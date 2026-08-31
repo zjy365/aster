@@ -150,15 +150,16 @@ func (m *Manager) PodExec(ctx context.Context, contextID, namespace, name, conta
 	if contextID == "" || namespace == "" || name == "" || len(command) == 0 {
 		return "", "", fmt.Errorf("contextId, namespace, name and command are required")
 	}
+	client, err := m.coreClient(contextID)
+	if err != nil {
+		return "", "", err
+	}
+	// The SPDY executor needs the raw rest config for its own transport.
 	config, err := m.loader.ClientConfig(contextID).ClientConfig()
 	if err != nil {
 		return "", "", fmt.Errorf("load context %q: %w", contextID, err)
 	}
 	config.UserAgent = "aster/0.1"
-	client, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return "", "", fmt.Errorf("create exec client: %w", err)
-	}
 	request := client.CoreV1().RESTClient().Post().Resource("pods").Name(name).Namespace(namespace).SubResource("exec").VersionedParams(&corev1.PodExecOptions{Container: container, Command: command, Stdin: false, Stdout: true, Stderr: true, TTY: false}, scheme.ParameterCodec)
 	executor, err := remotecommand.NewSPDYExecutor(config, "POST", request.URL())
 	if err != nil {
