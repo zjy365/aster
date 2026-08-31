@@ -249,7 +249,7 @@ func (m *Manager) Client(contextID string) (dynamic.Interface, error) {
 // PortForward opens a loopback listener on a random free port and forwards to
 // the pod port over SPDY. The returned stop function tears the listener down;
 // the forward also ends when the context is cancelled.
-func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name string, podPort int64) (func(), int, error) {
+func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name string, podPort, localPort int64) (func(), int, error) {
 	if contextID == "" || namespace == "" || name == "" {
 		return nil, 0, fmt.Errorf("contextId, namespace and name are required")
 	}
@@ -265,7 +265,7 @@ func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name st
 	dialer := spdy.NewDialer(upgrade, &http.Client{Transport: transport}, "POST", upstreamURL(config.Host, namespace, name))
 	stopChan := make(chan struct{})
 	readyChan := make(chan struct{})
-	forwarder, err := portforward.New(dialer, []string{fmt.Sprintf("0:%d", podPort)}, stopChan, readyChan, io.Discard, io.Discard)
+	forwarder, err := portforward.New(dialer, []string{fmt.Sprintf("%d:%d", localPort, podPort)}, stopChan, readyChan, io.Discard, io.Discard)
 	if err != nil {
 		return nil, 0, fmt.Errorf("create port forwarder: %w", err)
 	}
@@ -293,9 +293,17 @@ func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name st
 }
 
 func upstreamURL(host, namespace, name string) *url.URL {
+	scheme := "https"
+	trimmed := host
+	if strings.HasPrefix(host, "http://") {
+		scheme = "http"
+		trimmed = strings.TrimPrefix(host, "http://")
+	} else {
+		trimmed = strings.TrimPrefix(host, "https://")
+	}
 	return &url.URL{
-		Scheme: "https",
-		Host:   strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://"),
+		Scheme: scheme,
+		Host:   trimmed,
 		Path:   fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", namespace, name),
 	}
 }

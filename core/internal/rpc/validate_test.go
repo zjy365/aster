@@ -118,6 +118,23 @@ func TestValidatePortForwardRequests(t *testing.T) {
 	}
 }
 
+func TestValidatePortForwardLocalPort(t *testing.T) {
+	base := resources.PortForwardRequest{ContextID: "ctx", Namespace: "default", Name: "pod", PodPort: 8080}
+	if err := validatePortForwardRequest(base); err != nil {
+		t.Fatalf("random localPort rejected: %v", err)
+	}
+	base.LocalPort = 8080
+	if err := validatePortForwardRequest(base); err != nil {
+		t.Fatalf("explicit localPort rejected: %v", err)
+	}
+	for _, bad := range []int{-1, 65_536} {
+		base.LocalPort = bad
+		if err := validatePortForwardRequest(base); err == nil {
+			t.Fatalf("localPort %d accepted", bad)
+		}
+	}
+}
+
 func TestInvalidInputReturns400(t *testing.T) {
 	service := resources.NewService(rpcClientProvider{client: nil})
 	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))

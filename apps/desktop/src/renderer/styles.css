@@ -4688,3 +4688,89 @@ button.overview-card:focus-visible {
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
+
+/* Port forward section: dense port rows in the detail overview. */
+.port-forward-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 30px;
+  padding: 0 4px;
+  border-radius: 6px;
+}
+
+.port-forward-row:hover {
+  background: var(--surface-hover);
+}
+
+.port-forward-label {
+  flex: 1 1 30%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.port-forward-port {
+  flex: 0 0 auto;
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.port-forward-local {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--surface-muted);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.port-forward-pod {
+  font-family: inherit;
+  color: var(--text-secondary);
+}
+
+.port-forward-manual {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-block: 6px;
+}
+
+.port-forward-input {
+  width: 88px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.port-forward-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.port-forward-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.port-forward-status {
+  margin: 8px 0 0;
+  min-height: 14px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.port-forward-status:empty {
+  display: none;
+}

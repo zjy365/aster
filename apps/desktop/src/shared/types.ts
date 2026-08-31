@@ -256,6 +256,8 @@ export interface PodMetric {
 export interface PodPortForward {
   id: string;
   localPort: number;
+  /** The backing pod for service/workload forwards. */
+  pod?: string;
 }
 
 export interface PortForwardStartRequest {
@@ -263,6 +265,11 @@ export interface PortForwardStartRequest {
   namespace: string;
   name: string;
   podPort: number;
+  /** Kubernetes kind of the named object; routes the forward like kubectl's
+   *  svc/x, deploy/x, pod/x prefixes. Empty means Pod. */
+  kind?: string;
+  /** Local port to bind; 0/undefined picks a random free port. */
+  localPort?: number;
 }
 
 export type MutationOperation = "scale" | "image" | "restart" | "yaml" | "create" | "delete";
