@@ -21,6 +21,8 @@ import (
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/transport/spdy"
+
+	"github.com/zjy365/aster/core/internal/version"
 )
 
 type dynamicFactory func(*rest.Config) (dynamic.Interface, error)
@@ -136,7 +138,7 @@ func (m *Manager) coreClient(contextID string) (kubernetes.Interface, error) {
 		if err != nil {
 			return nil, fmt.Errorf("load context %q: %w", contextID, err)
 		}
-		config.UserAgent = "aster/0.1"
+		config.UserAgent = version.UserAgent()
 		client, err = m.coreFactory(config)
 		if err != nil {
 			return nil, fmt.Errorf("create core client for context %q: %w", contextID, err)
@@ -150,15 +152,16 @@ func (m *Manager) PodExec(ctx context.Context, contextID, namespace, name, conta
 	if contextID == "" || namespace == "" || name == "" || len(command) == 0 {
 		return "", "", fmt.Errorf("contextId, namespace, name and command are required")
 	}
+	client, err := m.coreClient(contextID)
+	if err != nil {
+		return "", "", err
+	}
+	// The SPDY executor needs the raw rest config for its own transport.
 	config, err := m.loader.ClientConfig(contextID).ClientConfig()
 	if err != nil {
 		return "", "", fmt.Errorf("load context %q: %w", contextID, err)
 	}
-	config.UserAgent = "aster/0.1"
-	client, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return "", "", fmt.Errorf("create exec client: %w", err)
-	}
+	config.UserAgent = version.UserAgent()
 	request := client.CoreV1().RESTClient().Post().Resource("pods").Name(name).Namespace(namespace).SubResource("exec").VersionedParams(&corev1.PodExecOptions{Container: container, Command: command, Stdin: false, Stdout: true, Stderr: true, TTY: false}, scheme.ParameterCodec)
 	executor, err := remotecommand.NewSPDYExecutor(config, "POST", request.URL())
 	if err != nil {
@@ -207,7 +210,7 @@ func (m *Manager) Discovery(contextID string) (discovery.DiscoveryInterface, err
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextID, err)
 	}
-	config.UserAgent = "aster/0.1"
+	config.UserAgent = version.UserAgent()
 	client, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("create discovery client for context %q: %w", contextID, err)
@@ -231,7 +234,7 @@ func (m *Manager) Client(contextID string) (dynamic.Interface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextID, err)
 	}
-	config.UserAgent = "aster/0.1"
+	config.UserAgent = version.UserAgent()
 	if config.QPS == 0 {
 		config.QPS = 30
 	}
@@ -257,7 +260,7 @@ func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name st
 	if err != nil {
 		return nil, 0, fmt.Errorf("load context %q: %w", contextID, err)
 	}
-	config.UserAgent = "aster/0.1"
+	config.UserAgent = version.UserAgent()
 	transport, upgrade, err := spdy.RoundTripperFor(config)
 	if err != nil {
 		return nil, 0, fmt.Errorf("create spdy round tripper: %w", err)

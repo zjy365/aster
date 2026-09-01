@@ -22,6 +22,8 @@ import (
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/yaml"
+
+	"github.com/zjy365/aster/core/internal/version"
 )
 
 // ClientConfigProvider lazily yields the client config for a context. The
@@ -63,7 +65,7 @@ func (r *restClientGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterfa
 	if err != nil {
 		return nil, err
 	}
-	config.UserAgent = "aster/0.1"
+	config.UserAgent = version.UserAgent()
 	client, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
 		return nil, err

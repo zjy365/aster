@@ -3,6 +3,7 @@ package resources
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -97,5 +98,52 @@ func TestPodMetrics(t *testing.T) {
 	}
 	if len(response.Pods) != 1 || response.Pods[0].Containers[0].CPU != "12m" || response.Pods[0].Containers[0].Memory != "48Mi" {
 		t.Fatalf("metrics=%#v", response.Pods)
+	}
+}
+
+func TestPodMetricsFollowsPagination(t *testing.T) {
+	first := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1",
+		"kind":       "PodMetrics",
+		"metadata":   map[string]any{"name": "web-a", "namespace": "apps"},
+		"containers": []any{map[string]any{"name": "app", "usage": map[string]any{"cpu": "1m", "memory": "1Mi"}}},
+	}}
+	second := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1",
+		"kind":       "PodMetrics",
+		"metadata":   map[string]any{"name": "web-b", "namespace": "apps"},
+		"containers": []any{map[string]any{"name": "app", "usage": map[string]any{"cpu": "2m", "memory": "2Mi"}}},
+	}}
+	gvr := schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: "PodMetricsList"})
+	pages := [][]unstructured.Unstructured{{*first}, {*second}}
+	client.PrependReactor("list", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		list := &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetricsList"}}
+		listAction, ok := action.(clienttesting.ListActionImpl)
+		if !ok {
+			return true, list, nil
+		}
+		token := listAction.ListOptions.Continue
+		index := 0
+		if token == "page-1" {
+			index = 1
+		}
+		if index >= len(pages) {
+			return true, list, nil
+		}
+		list.Items = pages[index]
+		if index < len(pages)-1 {
+			list.SetContinue(fmt.Sprintf("page-%d", index+1))
+		}
+		return true, list, nil
+	})
+	service := NewService(fakeProvider{client: client})
+
+	response, err := service.PodMetrics(context.Background(), MetricsRequest{ContextID: "context", Namespace: "apps"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Pods) != 2 || response.Pods[0].Name != "web-a" || response.Pods[1].Name != "web-b" {
+		t.Fatalf("expected both pages collected, got %#v", response.Pods)
 	}
 }
