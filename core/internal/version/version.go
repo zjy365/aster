@@ -3,7 +3,7 @@ package version
 
 import "fmt"
 
-var buildVersion = "1.0.3"
+var buildVersion = "1.0.4"
 
 func UserAgent() string {
 	return fmt.Sprintf("aster/%s", buildVersion)
