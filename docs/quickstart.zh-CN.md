@@ -22,8 +22,9 @@ winget install --id kind.sigs.k8s.kind
 kind create cluster
 ```
 
-其他选择：[minikube](https://minikube.sigs.k8s.io/)、[k3d](https://k3d.io/)，
-或任意托管集群。它们都会写入 kubeconfig，Aster 会自动识别。
+其他选择：[minikube](https://minikube.sigs.k8s.io/)（`minikube start`）、
+[k3s](https://k3s.io/) / [k3d](https://k3d.io/)（`k3d cluster create`），
+或任意托管集群（EKS、GKE、AKS 等）。它们都会写入 kubeconfig，Aster 会自动识别。
 
 ## 2. 把集群加进 Aster
 

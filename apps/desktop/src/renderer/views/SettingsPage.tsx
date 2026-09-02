@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PasteKubeconfigDialog } from "./PasteKubeconfigDialog";
-import { QUICKSTART_URL, REPO_URL } from "../lib/links";
+import { AUTHOR_X_URL, QUICKSTART_URL, REPO_URL } from "../lib/links";
 import {
   BUILT_IN_THEMES,
   getThemeDefinition,
@@ -81,7 +81,7 @@ const SECTION_TITLES: Record<Section, string> = {
 const COMMUNITY_LINKS: { id: string; label: string; url: string; icon: typeof Star }[] = [
   { id: "docs", label: "Quickstart", url: QUICKSTART_URL, icon: BookOpen },
   { id: "github", label: "Star on GitHub", url: REPO_URL, icon: Star },
-  { id: "x", label: "Follow on X", url: "https://x.com/zjy365", icon: AtSign },
+  { id: "x", label: "Follow on X", url: AUTHOR_X_URL, icon: AtSign },
 ];
 
 const THEME_OPTIONS: { value: AppearanceTheme; label: string }[] = [

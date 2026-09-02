@@ -22,9 +22,11 @@ winget install --id kind.sigs.k8s.kind
 kind create cluster
 ```
 
-Alternatives: [minikube](https://minikube.sigs.k8s.io/),
-[k3d](https://k3d.io/), or any managed cluster. All of them write a kubeconfig
-that Aster picks up automatically.
+Alternatives: [minikube](https://minikube.sigs.k8s.io/)
+(`minikube start`), [k3s](https://k3s.io/) /
+[k3d](https://k3d.io/) (`k3d cluster create`), or any managed cluster
+(EKS, GKE, AKS, …). All of them write a kubeconfig that Aster picks up
+automatically.
 
 ## 2. Add clusters to Aster
 

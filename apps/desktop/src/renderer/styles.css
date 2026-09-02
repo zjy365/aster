@@ -3742,9 +3742,12 @@ h2 {
   }
 }
 
-/* Update notice card (bottom-right, fixed overlay) */
+/* Bottom-right fixed notice overlay, shared by UpdateNotice and the
+   first-run WelcomeCard (the two never render together — the update card
+   defers while the welcome card is up). */
 
-.update-notice {
+.update-notice,
+.welcome-card {
   position: fixed;
   right: 18px;
   /* Clears the 34px table footer (Load next 100 lives at its right edge). */
@@ -3759,11 +3762,16 @@ h2 {
   color: var(--text);
 }
 
+.welcome-card {
+  width: min(360px, calc(100vw - 36px));
+}
+
 .update-notice[data-state="error"] {
   border-color: var(--failed);
 }
 
-.update-notice-close {
+.update-notice-close,
+.welcome-card-close {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -3778,7 +3786,8 @@ h2 {
   cursor: pointer;
 }
 
-.update-notice-close:hover {
+.update-notice-close:hover,
+.welcome-card-close:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
@@ -3874,41 +3883,8 @@ h2 {
   text-align: right;
 }
 
-/* First-run welcome card: same bottom-right notice slot as UpdateNotice (the
-   two never render together — the update card defers while this is up). */
-.welcome-card {
-  position: fixed;
-  right: 18px;
-  bottom: 52px;
-  z-index: 60;
-  width: min(360px, calc(100vw - 36px));
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: 0 14px 40px rgb(0 0 0 / 16%);
-  color: var(--text);
-}
-
-.welcome-card-close {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-}
-
-.welcome-card-close:hover {
-  color: var(--text);
-  background: var(--surface-hover);
-}
+/* First-run welcome card: the notice overlay shape comes from the shared
+   .update-notice rule above; only the list layout is its own. */
 
 .welcome-card-title {
   margin: 0 0 8px;
