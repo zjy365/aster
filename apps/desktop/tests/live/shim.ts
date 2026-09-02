@@ -124,8 +124,11 @@ const api: DesktopApi = {
     renameConflict: async (request) => { await corePost("/v1/sources/rename", request); },
   },
   settings: {
-    get: () => Promise.resolve({ kubeconfigSources: [], includeStandardChain: false }),
-    setKubeconfigSources: (sources, includeStandardChain) => Promise.resolve({ kubeconfigSources: sources, includeStandardChain }),
+    // Live tests target the core pipeline; a pre-welcomed stamp keeps the
+    // first-run card out of their way.
+    get: () => Promise.resolve({ kubeconfigSources: [], includeStandardChain: false, welcomedAt: "2026-08-01T00:00:00Z" }),
+    setKubeconfigSources: (sources, includeStandardChain) => Promise.resolve({ kubeconfigSources: sources, includeStandardChain, welcomedAt: "2026-08-01T00:00:00Z" }),
+    markWelcomed: () => Promise.resolve({ kubeconfigSources: [], includeStandardChain: false, welcomedAt: "2026-08-01T00:00:00Z" }),
     pickKubeconfigFile: () => Promise.resolve(null),
     pickKubeconfigFolder: () => Promise.resolve(null),
     // Paste import writes through the shell filesystem; there is no shell here.

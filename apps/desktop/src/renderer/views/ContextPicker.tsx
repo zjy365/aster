@@ -3,8 +3,11 @@ import {
   AlertTriangle,
   ArrowRight,
   Boxes,
+  Check,
   CheckCircle2,
   ClipboardPaste,
+  Copy,
+  ExternalLink,
   LayoutGrid,
   List as ListIcon,
   LoaderCircle,
@@ -39,6 +42,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { ContextLayout } from "../lib/context-picker";
+import { QUICKSTART_URL } from "../lib/links";
 import { PasteKubeconfigDialog } from "./PasteKubeconfigDialog";
 
 interface ContextPickerProps {
@@ -66,6 +70,8 @@ interface ContextPickerProps {
   onPasteKubeconfig(name: string, content: string): Promise<string>;
   /** Renames a colliding entry inside its kubeconfig file, then reloads contexts. */
   onRenameConflict(request: RenameConflictRequest): Promise<void>;
+  /** Opens an external URL (quickstart docs) in the system browser via the shell. */
+  onOpenExternal(url: string): void;
 }
 
 function ContextPicker({
@@ -87,6 +93,7 @@ function ContextPicker({
   onOpenSettings,
   onPasteKubeconfig,
   onRenameConflict,
+  onOpenExternal,
 }: ContextPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [conflictDialog, setConflictDialog] = useState<ContextInfo | null>(null);
@@ -544,6 +551,7 @@ function ContextPicker({
                         <Settings data-icon="inline-start" aria-hidden="true" />
                         Open Settings
                       </Button>
+                      <NoClusterHint onOpenExternal={onOpenExternal} />
                     </>
                   )
                 }
@@ -683,6 +691,44 @@ function ContextPicker({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * The no-clusters empty state's third path: users with nothing to paste yet
+ * get the shortest route to a first cluster — a copyable kind one-liner and
+ * the quickstart for alternatives. Quieter than the primary CTAs above it.
+ */
+function NoClusterHint({ onOpenExternal }: { onOpenExternal(url: string): void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="context-no-cluster" data-testid="context-picker-empty-cluster">
+      <span>No cluster yet?</span>
+      <code className="context-no-cluster-command">kind create cluster</code>
+      <button
+        type="button"
+        className="context-no-cluster-copy"
+        aria-label="Copy kind create cluster command"
+        title={copied ? "Copied" : "Copy command"}
+        data-testid="context-picker-empty-copy"
+        onClick={() => {
+          void navigator.clipboard.writeText("kind create cluster");
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        }}
+      >
+        {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+      </button>
+      <button
+        type="button"
+        className="context-no-cluster-link"
+        data-testid="context-picker-empty-docs"
+        onClick={() => onOpenExternal(QUICKSTART_URL)}
+      >
+        <ExternalLink aria-hidden="true" />
+        How to get a cluster
+      </button>
     </div>
   );
 }

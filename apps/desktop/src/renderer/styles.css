@@ -774,6 +774,73 @@ h2 {
   line-height: 1.5;
 }
 
+/* The "No cluster yet?" third path in the picker's empty state: one quiet
+   row — label, mono command, copy, docs link — under the primary CTAs. */
+.context-no-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  width: 100%;
+  max-width: 460px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.context-no-cluster > span {
+  margin-top: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.context-no-cluster-command {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.context-no-cluster-copy,
+.context-no-cluster-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.context-no-cluster-copy {
+  padding: 3px;
+}
+
+.context-no-cluster-copy svg,
+.context-no-cluster-link svg {
+  width: 12px;
+  height: 12px;
+}
+
+.context-no-cluster-copy:hover,
+.context-no-cluster-link:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.context-no-cluster-link {
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
 .context-picker-footer {
   display: flex;
   min-height: 44px;
@@ -3805,6 +3872,88 @@ h2 {
   font-size: 11px;
   color: var(--faint);
   text-align: right;
+}
+
+/* First-run welcome card: same bottom-right notice slot as UpdateNotice (the
+   two never render together — the update card defers while this is up). */
+.welcome-card {
+  position: fixed;
+  right: 18px;
+  bottom: 52px;
+  z-index: 60;
+  width: min(360px, calc(100vw - 36px));
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 14px 40px rgb(0 0 0 / 16%);
+  color: var(--text);
+}
+
+.welcome-card-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.welcome-card-close:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.welcome-card-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.welcome-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.welcome-card-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.welcome-card-list li > span {
+  min-width: 0;
+}
+
+.welcome-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 6px;
+  padding: 2px 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.welcome-card-link:hover {
+  background: var(--surface-hover);
 }
 
 /* Overview dashboard. It lives in the workbench like a resource kind: the

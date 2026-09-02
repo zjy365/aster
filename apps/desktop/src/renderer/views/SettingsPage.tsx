@@ -2,6 +2,7 @@
 import {
   ArrowLeft,
   AtSign,
+  BookOpen,
   Boxes,
   ClipboardPaste,
   FilePlus2,
@@ -21,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PasteKubeconfigDialog } from "./PasteKubeconfigDialog";
+import { QUICKSTART_URL, REPO_URL } from "../lib/links";
 import {
   BUILT_IN_THEMES,
   getThemeDefinition,
@@ -74,10 +76,12 @@ const SECTION_TITLES: Record<Section, string> = {
   about: "About",
 };
 
-/** Community links pinned at the bottom of the settings sidebar. */
-const COMMUNITY_LINKS: { label: string; url: string; icon: typeof Star }[] = [
-  { label: "Star on GitHub", url: "https://github.com/zjy365", icon: Star },
-  { label: "Follow on X", url: "https://x.com/zjy365", icon: AtSign },
+/** Community links pinned at the bottom of the settings sidebar: the guide,
+ * the project on GitHub, the author on X. */
+const COMMUNITY_LINKS: { id: string; label: string; url: string; icon: typeof Star }[] = [
+  { id: "docs", label: "Quickstart", url: QUICKSTART_URL, icon: BookOpen },
+  { id: "github", label: "Star on GitHub", url: REPO_URL, icon: Star },
+  { id: "x", label: "Follow on X", url: "https://x.com/zjy365", icon: AtSign },
 ];
 
 const THEME_OPTIONS: { value: AppearanceTheme; label: string }[] = [
@@ -249,13 +253,13 @@ export function SettingsPage({
           </TabsList>
           <div className="settings-sidebar-bottom">
             <div className="settings-sidebar-links">
-              {COMMUNITY_LINKS.map(({ label, url, icon: Icon }) => (
+              {COMMUNITY_LINKS.map(({ id, label, url, icon: Icon }) => (
                 <button
                   key={url}
                   type="button"
                   className="settings-sidebar-link"
                   onClick={() => onOpenExternal(url)}
-                  data-testid={`settings-link-${label === "Star on GitHub" ? "github" : "x"}`}
+                  data-testid={`settings-link-${id}`}
                 >
                   <Icon aria-hidden="true" />
                   {label}

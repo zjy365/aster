@@ -68,6 +68,12 @@ export interface AsterSettings {
    * no configured sources the app simply has no clusters.
    */
   includeStandardChain: boolean;
+  /**
+   * RFC 3339 timestamp written when the first-run welcome card is dismissed;
+   * null means never welcomed. The shell only stores it — deciding when the
+   * card shows is the renderer's.
+   */
+  welcomedAt: string | null;
 }
 
 /**
@@ -516,6 +522,8 @@ export interface DesktopApi {
   settings: {
     get(): Promise<AsterSettings>;
     setKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<AsterSettings>;
+    /** Stamps the first-run welcome dismissal (shell-side time); idempotent. */
+    markWelcomed(): Promise<AsterSettings>;
     pickKubeconfigFile(): Promise<string | null>;
     pickKubeconfigFolder(): Promise<string | null>;
     /**

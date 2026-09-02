@@ -199,14 +199,39 @@ pub fn settings_get(state: State<'_, AppState>) -> AsterSettings {
 
 #[tauri::command]
 pub fn settings_set_kubeconfig_sources(state: State<'_, AppState>, sources: Vec<String>, include_standard_chain: bool) -> AsterSettings {
-    let settings = AsterSettings { kubeconfig_sources: normalize_sources(sources), include_standard_chain };
+    // The struct-update base carries every unrelated field (the welcome
+    // stamp) forward: rewriting the sources must not resurrect the card.
+    let settings = AsterSettings {
+        kubeconfig_sources: normalize_sources(sources),
+        include_standard_chain,
+        ..state.settings.read()
+    };
     state.settings.write(&settings);
     settings
 }
 
+/// Records that the first-run welcome card has been dismissed. The shell
+/// stamps the time and stores it; deciding when to show the card is the
+/// renderer's. Idempotent: an existing stamp is kept.
+#[tauri::command]
+pub fn settings_mark_welcomed(state: State<'_, AppState>) -> AsterSettings {
+    state.settings.mark_welcomed_with(&now_rfc3339_utc())
+}
+
+fn now_rfc3339_utc() -> String {
+    use time::format_description::well_known::Rfc3339;
+    time::OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
 #[tauri::command]
 pub async fn settings_apply_kubeconfig_sources(state: State<'_, AppState>, sources: Vec<String>, include_standard_chain: bool) -> Result<(), String> {
-    let settings = AsterSettings { kubeconfig_sources: normalize_sources(sources), include_standard_chain };
+    let settings = AsterSettings {
+        kubeconfig_sources: normalize_sources(sources),
+        include_standard_chain,
+        ..state.settings.read()
+    };
     state.settings.write(&settings);
     // Managed paste-imports the new list no longer references are deleted so a
     // removed source does not leave an orphaned credential file on disk.
