@@ -1,7 +1,7 @@
 {
   "name": "@aster/desktop",
   "productName": "Aster",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Aster Kubernetes desktop workbench",
   "author": "Aster contributors",
