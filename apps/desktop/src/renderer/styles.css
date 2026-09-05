@@ -753,6 +753,12 @@ h2 {
   text-align: center;
 }
 
+/* Full-state views (empty / loading / error) center in the whole list area;
+   the card lists keep their top-aligned grid. */
+.context-list:has(.context-picker-state) {
+  align-content: center;
+}
+
 .context-picker-state [data-slot="empty-icon"] {
   margin-bottom: 12px;
   color: var(--faint);
@@ -778,10 +784,9 @@ h2 {
    row — label, mono command, copy, docs link — under the primary CTAs. */
 .context-no-cluster {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  gap: 6px;
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
@@ -791,10 +796,33 @@ h2 {
   font-size: 11px;
 }
 
+.context-no-cluster-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .context-no-cluster > span {
   margin-top: 0;
   font-size: 11px;
   white-space: nowrap;
+}
+
+/* Inline settings entry inside the empty-state sentence: a quiet link, not a
+   second button — the titlebar gear and this link are the same destination. */
+.context-empty-inline-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.context-empty-inline-link:hover {
+  text-decoration: underline;
 }
 
 .context-no-cluster-command {
