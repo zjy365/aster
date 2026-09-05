@@ -28,6 +28,7 @@ rand = "0.8"
 futures-util = "0.3"
 bytes = "1"
 dirs = "6"
+time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

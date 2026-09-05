@@ -753,6 +753,12 @@ h2 {
   text-align: center;
 }
 
+/* Full-state views (empty / loading / error) center in the whole list area;
+   the card lists keep their top-aligned grid. */
+.context-list:has(.context-picker-state) {
+  align-content: center;
+}
+
 .context-picker-state [data-slot="empty-icon"] {
   margin-bottom: 12px;
   color: var(--faint);
@@ -772,6 +778,95 @@ h2 {
   margin-top: 6px;
   font-size: 11px;
   line-height: 1.5;
+}
+
+/* The "No cluster yet?" third path in the picker's empty state: one quiet
+   row — label, mono command, copy, docs link — under the primary CTAs. */
+.context-no-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  width: 100%;
+  max-width: 460px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.context-no-cluster-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.context-no-cluster > span {
+  margin-top: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Inline settings entry inside the empty-state sentence: a quiet link, not a
+   second button — the titlebar gear and this link are the same destination. */
+.context-empty-inline-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.context-empty-inline-link:hover {
+  text-decoration: underline;
+}
+
+.context-no-cluster-command {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.context-no-cluster-copy,
+.context-no-cluster-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.context-no-cluster-copy {
+  padding: 3px;
+}
+
+.context-no-cluster-copy svg,
+.context-no-cluster-link svg {
+  width: 12px;
+  height: 12px;
+}
+
+.context-no-cluster-copy:hover,
+.context-no-cluster-link:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.context-no-cluster-link {
+  padding: 3px 6px;
+  white-space: nowrap;
 }
 
 .context-picker-footer {
@@ -3675,9 +3770,12 @@ h2 {
   }
 }
 
-/* Update notice card (bottom-right, fixed overlay) */
+/* Bottom-right fixed notice overlay, shared by UpdateNotice and the
+   first-run WelcomeCard (the two never render together — the update card
+   defers while the welcome card is up). */
 
-.update-notice {
+.update-notice,
+.welcome-card {
   position: fixed;
   right: 18px;
   /* Clears the 34px table footer (Load next 100 lives at its right edge). */
@@ -3692,11 +3790,16 @@ h2 {
   color: var(--text);
 }
 
+.welcome-card {
+  width: min(360px, calc(100vw - 36px));
+}
+
 .update-notice[data-state="error"] {
   border-color: var(--failed);
 }
 
-.update-notice-close {
+.update-notice-close,
+.welcome-card-close {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -3711,7 +3814,8 @@ h2 {
   cursor: pointer;
 }
 
-.update-notice-close:hover {
+.update-notice-close:hover,
+.welcome-card-close:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
@@ -3805,6 +3909,55 @@ h2 {
   font-size: 11px;
   color: var(--faint);
   text-align: right;
+}
+
+/* First-run welcome card: the notice overlay shape comes from the shared
+   .update-notice rule above; only the list layout is its own. */
+
+.welcome-card-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.welcome-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.welcome-card-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.welcome-card-list li > span {
+  min-width: 0;
+}
+
+.welcome-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 6px;
+  padding: 2px 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.welcome-card-link:hover {
+  background: var(--surface-hover);
 }
 
 /* Overview dashboard. It lives in the workbench like a resource kind: the

@@ -1,6 +1,14 @@
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
 
+/// Canonical external destinations for the Help menu. The menu items carry
+/// these as their command ids (link: prefix); lib.rs opens them through the
+/// same opener channel the renderer uses, so https-only validation stays in
+/// one place.
+pub const DOCS_URL: &str = "https://github.com/zjy365/aster/blob/main/docs/quickstart.md";
+pub const REPORT_URL: &str = "https://github.com/zjy365/aster/issues";
+pub const REPO_URL: &str = "https://github.com/zjy365/aster";
+
 /// Port of installApplicationMenu from src/main/window.ts. Command items use
 /// the "cmd:" id prefix; lib.rs turns those into "app:command" events.
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
@@ -46,6 +54,11 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .item(&PredefinedMenuItem::minimize(app, None)?)
         .item(&PredefinedMenuItem::close_window(app, None)?)
         .build()?;
+    let help = SubmenuBuilder::new(app, "Help")
+        .item(&MenuItemBuilder::with_id(format!("link:{DOCS_URL}"), "Quickstart Docs").build(app)?)
+        .item(&MenuItemBuilder::with_id(format!("link:{REPORT_URL}"), "Report Issue").build(app)?)
+        .item(&MenuItemBuilder::with_id(format!("link:{REPO_URL}"), "GitHub Repository").build(app)?)
+        .build()?;
 
     let mut menu = MenuBuilder::new(app);
     if cfg!(target_os = "macos") {
@@ -62,7 +75,7 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             .build()?;
         menu = menu.item(&app_menu);
     }
-    let menu = menu.items(&[&file, &edit, &navigate, &view, &window]).build()?;
+    let menu = menu.items(&[&file, &edit, &navigate, &view, &window, &help]).build()?;
     app.set_menu(menu)?;
     Ok(())
 }

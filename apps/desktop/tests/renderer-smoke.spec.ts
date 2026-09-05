@@ -19,6 +19,15 @@ const MOCK_DESKTOP_API = `
   const TOTAL = ${TOTAL_DEPLOYMENTS};
   const PAGE = ${PAGE_SIZE};
 
+  // The mocked settings store lives in sessionStorage so a reload (the test's
+  // stand-in for an app relaunch) reads back what markWelcomed wrote. Unset
+  // means a returning user: the welcome card stays hidden in every test that
+  // does not opt in by setting the key to "".
+  const mockWelcomedAt = () => {
+    const stored = window.sessionStorage.getItem("aster.mockWelcomedAt");
+    return stored === null ? "2026-08-01T00:00:00Z" : (stored || null);
+  };
+
   const contexts = [
     { id: "dev", name: "dev", cluster: "dev-cluster", server: "https://dev.invalid", user: "dev", namespace: "default", current: true, source: "fixture", conflicts: [{ path: "/Users/fixture/other.yaml", kind: "cluster", name: "dev-cluster", suggestion: "dev-cluster-hzh" }] },
     { id: "prod", name: "prod", cluster: "prod-cluster", server: "https://prod.invalid", user: "prod", namespace: "default", current: false, source: "fixture" },
@@ -163,8 +172,16 @@ const MOCK_DESKTOP_API = `
       renameConflict: async (request) => { window.__renamedConflict = request; },
     },
     settings: {
-      get: async () => ({ kubeconfigSources: [], includeStandardChain: true }),
-      setKubeconfigSources: async (sources, includeStandardChain) => ({ kubeconfigSources: sources, includeStandardChain }),
+      // Default is a returning user (welcomed) so the first-run card stays
+      // out of unrelated tests; the welcome-card tests opt in via
+      // sessionStorage below.
+      get: async () => ({ kubeconfigSources: [], includeStandardChain: true, welcomedAt: mockWelcomedAt() }),
+      setKubeconfigSources: async (sources, includeStandardChain) => ({ kubeconfigSources: sources, includeStandardChain, welcomedAt: mockWelcomedAt() }),
+      markWelcomed: async () => {
+        window.sessionStorage.setItem("aster.mockWelcomedAt", "2026-09-02T04:00:00Z");
+        window.__asterWelcomed = (window.__asterWelcomed || 0) + 1;
+        return { kubeconfigSources: [], includeStandardChain: true, welcomedAt: "2026-09-02T04:00:00Z" };
+      },
       applyKubeconfigSources: async () => undefined,
       pickKubeconfigFile: async () => null,
       pickKubeconfigFolder: async () => null,
@@ -1131,12 +1148,18 @@ test("settings opens as a page and returns to the picker", async ({ page }) => {
   await expect(settings).toContainText("Ready");
   await expect(settings.getByTestId("settings-check-updates")).toBeVisible();
 
-  // Community links in the sidebar hand their URLs to the shell opener.
+  // Sidebar links hand their URLs to the shell opener: the quickstart doc,
+  // the repo (star), and the author's X profile.
+  await settings.getByTestId("settings-link-docs").click();
   await settings.getByTestId("settings-link-github").click();
   await settings.getByTestId("settings-link-x").click();
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __asterOpenedUrls?: string[] }).__asterOpenedUrls ?? []))
-    .toEqual(["https://github.com/zjy365", "https://x.com/zjy365"]);
+    .toEqual([
+      "https://github.com/zjy365/aster/blob/main/docs/quickstart.md",
+      "https://github.com/zjy365/aster",
+      "https://x.com/zjy365",
+    ]);
 
   // Let the 150ms tab highlight transition settle so the screenshot shows the
   // final state instead of a mid-fade frame.
@@ -1242,6 +1265,145 @@ test("settings opens with no kubeconfig at all", async ({ page }) => {
   );
   await expectNoOverflow(page, "settings page with no kubeconfig");
   await screenshot(page, "settings-no-kubeconfig");
+  expect(failures).toEqual([]);
+});
+
+test("empty state offers the no-cluster path: copy kind command, open quickstart", async ({ page }) => {
+  // A machine with no kubeconfig at all: the picker's empty state must show
+  // the third path — a copyable kind one-liner and the quickstart link — so
+  // first-run users are not dead-ended at the paste box.
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as { __ASTER_DESKTOP__?: { contexts: Record<string, unknown> } }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.contexts.list = async () => [];
+      desktop.contexts.sourcesReport = async () => ({ chain: [], configured: [] });
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  const hint = page.getByTestId("context-picker-empty-cluster");
+  await expect(hint).toBeVisible();
+  await expect(hint).toContainText("No cluster yet?");
+  await expect(hint.getByText("kind create cluster")).toBeVisible();
+
+  await page.getByTestId("context-picker-empty-copy").click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe("kind create cluster");
+
+  await page.getByTestId("context-picker-empty-docs").click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterOpenedUrls?: string[] }).__asterOpenedUrls ?? []))
+    .toContain("https://github.com/zjy365/aster/blob/main/docs/quickstart.md");
+
+  await expectNoOverflow(page, "picker empty state with no-cluster path");
+  await screenshot(page, "picker-empty-no-cluster");
+  expect(failures).toEqual([]);
+});
+
+test("no-cluster path stays hidden when contexts exist", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await expect(page.getByTestId("context-picker-empty-cluster")).toHaveCount(0);
+  expect(failures).toEqual([]);
+});
+
+test("welcome card appears once on first cluster entry", async ({ page }) => {
+  // A never-welcomed user: the card shows the first time a context apply
+  // lands on the workbench, teaches the real shortcuts, and is gone forever
+  // after dismissal — even across a reload (the relaunch stand-in).
+  await page.addInitScript(() => {
+    // Only seed the never-welcomed state on first load; the init script also
+    // runs after reload, where the stamp markWelcomed wrote must survive.
+    if (window.sessionStorage.getItem("aster.mockWelcomedAt") === null) {
+      window.sessionStorage.setItem("aster.mockWelcomedAt", "");
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  // Still absent while on the picker: the card belongs to the workbench.
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await expect(page.getByTestId("welcome-card")).toHaveCount(0);
+
+  await connectToDev(page);
+  const card = page.getByTestId("welcome-card");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Command palette");
+  await expect(card.getByText("⌘K")).toBeVisible();
+  await expect(card.getByText("⌘F")).toBeVisible();
+  await expect(card.getByText("Filter the list, open a row, step back")).toBeVisible();
+
+  // The three external lines hand their URLs to the shell opener.
+  await page.getByTestId("welcome-link-star").click();
+  await page.getByTestId("welcome-link-docs").click();
+  await page.getByTestId("welcome-link-report").click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterOpenedUrls?: string[] }).__asterOpenedUrls ?? []))
+    .toEqual([
+      "https://github.com/zjy365/aster",
+      "https://github.com/zjy365/aster/blob/main/docs/quickstart.md",
+      "https://github.com/zjy365/aster/issues",
+    ]);
+
+  await expectNoOverflow(page, "workbench with welcome card");
+  await screenshot(page, "workbench-welcome");
+
+  await page.getByTestId("welcome-dismiss").click();
+  await expect(card).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterWelcomed?: number }).__asterWelcomed ?? 0))
+    .toBe(1);
+
+  // Relaunch: the stamp persisted, so the card never returns.
+  await page.reload();
+  await connectToDev(page);
+  await expect(page.getByTestId("welcome-card")).toHaveCount(0);
+  expect(failures).toEqual([]);
+});
+
+test("welcome card does not appear after a failed apply", async ({ page }) => {
+  // A never-welcomed user whose only context is broken: the apply gate in
+  // connectContext must keep the card out of a workbench that never opened.
+  await page.addInitScript(() => {
+    if (window.sessionStorage.getItem("aster.mockWelcomedAt") === null) {
+      window.sessionStorage.setItem("aster.mockWelcomedAt", "");
+    }
+    const desktop = (window as unknown as { __ASTER_DESKTOP__?: { contexts: Record<string, unknown> } }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.contexts.list = async () => [
+        { id: "broken", name: "broken", cluster: "broken-cluster", server: "https://broken.invalid", user: "u", namespace: "default", current: false, source: "fixture", error: "no such file or directory" },
+      ];
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  const option = page.getByTestId("context-option-broken");
+  await expect(option).toBeVisible();
+  await expect(option).toBeDisabled();
+  await option.dblclick({ force: true });
+  await expect(page.getByTestId("workbench-shell")).toHaveCount(0);
+  await expect(page.getByTestId("welcome-card")).toHaveCount(0);
+  expect(failures).toEqual([]);
+});
+
+test("welcome card stays hidden for returning users", async ({ page }) => {
+  // The mock defaults to a welcomed (returning) user; entering a cluster
+  // must not surface the card for them.
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await expect(page.getByTestId("welcome-card")).toHaveCount(0);
   expect(failures).toEqual([]);
 });
 

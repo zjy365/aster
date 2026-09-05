@@ -44,6 +44,13 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if let Some(command) = event.id().0.strip_prefix("cmd:") {
                 let _ = app.emit("app:command", command);
+                return;
+            }
+            // Help-menu links carry their URL as the id; open them through the
+            // same opener channel the renderer uses so the https-only rule
+            // stays in one place.
+            if let Some(url) = event.id().0.strip_prefix("link:") {
+                let _ = commands::app_open_external(app.clone(), url.to_string());
             }
         })
         .setup(|app| {
@@ -131,6 +138,7 @@ pub fn run() {
             commands::workloads_logs_follow_stop,
             commands::settings_get,
             commands::settings_set_kubeconfig_sources,
+            commands::settings_mark_welcomed,
             commands::settings_apply_kubeconfig_sources,
             commands::settings_pick_kubeconfig_file,
             commands::settings_pick_kubeconfig_folder,

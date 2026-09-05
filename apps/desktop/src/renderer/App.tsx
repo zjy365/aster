@@ -3,6 +3,7 @@ import { LoaderCircle, Ship } from "lucide-react";
 import type { AsterSettings, RelatedResource, ResourceKind, ResourceRow, SourcesReport } from "../shared/types";
 import { CommandPalette } from "./components/CommandPalette";
 import { UpdateNotice } from "./components/UpdateNotice";
+import { WelcomeCard } from "./components/WelcomeCard";
 import { ResourceTable, rowKey, TableState } from "./components/ResourceTable";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +46,9 @@ const ResourceDetailView = lazy(() => import("./detail/ResourceDetailView").then
 const CreateResourceDialog = lazy(() => import("./detail/CreateResourceDialog").then((module) => ({
   default: module.CreateResourceDialog,
 })));
+
+/** The settings shape used before the shell answers, and as its fallback. */
+const emptySettings: AsterSettings = { kubeconfigSources: [], includeStandardChain: true, welcomedAt: null };
 
 /**
  * Composition root: every domain owns its state in a hook above; this
@@ -139,7 +143,19 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [settings, setSettings] = useState<AsterSettings>({ kubeconfigSources: [], includeStandardChain: true });
+  const [settings, setSettings] = useState<AsterSettings>(emptySettings);
+  // The welcome decision reads the *persisted* stamp, so it is inert until
+  // the shell has answered settings.get(): showing the card off the
+  // emptySettings fallback could flash it at returning users.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  // First-run welcome: shown the first time a context apply lands on the
+  // workbench, gone forever once dismissed (the stamp lives in shell-owned
+  // settings; this is the only place that decides when it appears).
+  const [welcomeVisible, setWelcomeVisible] = useState(false);
+  const dismissWelcome = useCallback(() => {
+    setWelcomeVisible(false);
+    void desktop.settings.markWelcomed().then(setSettings).catch(() => undefined);
+  }, []);
   const [sourcesReport, setSourcesReport] = useState<SourcesReport>({ chain: [], configured: [] });
   const [appVersion, setAppVersion] = useState("");
   const reloadSources = useCallback(async () => {
@@ -307,7 +323,10 @@ export default function App() {
     contexts.setContextId(target.id);
     contexts.setView("workbench");
     localStorage.setItem("aster.lastContext", target.id);
-  }, [contexts, core.state, namespaces]);
+    // A successful entry into a cluster is the moment the welcome card is
+    // worth showing: the palette and list keys it teaches only exist here.
+    if (settingsLoaded && !settings.welcomedAt) setWelcomeVisible(true);
+  }, [contexts, core.state, namespaces, settingsLoaded, settings.welcomedAt]);
 
   const showContextPicker = useCallback(() => {
     contexts.setContextChoice(contextId);
@@ -445,7 +464,12 @@ export default function App() {
   const searchItems = useMemo(() => searchResultItems(searchResults, paletteQuery), [searchResults, paletteQuery]);
 
   useEffect(() => {
-    void desktop.settings.get().then(setSettings).catch(() => setSettings({ kubeconfigSources: [], includeStandardChain: true }));
+    void desktop.settings.get()
+      .then((loaded) => {
+        setSettings(loaded);
+        setSettingsLoaded(true);
+      })
+      .catch(() => setSettings(emptySettings));
     void desktop.app.version().then(setAppVersion).catch(() => undefined);
   }, []);
 
@@ -465,7 +489,7 @@ export default function App() {
         onRefreshSources={reloadSources}
         onApply={async (sources, includeStandardChain) => {
           await desktop.settings.applyKubeconfigSources(sources, includeStandardChain);
-          setSettings({ kubeconfigSources: sources, includeStandardChain });
+          setSettings({ kubeconfigSources: sources, includeStandardChain, welcomedAt: settings.welcomedAt });
           await reloadSources();
         }}
         onPickFile={() => desktop.settings.pickKubeconfigFile()}
@@ -514,7 +538,7 @@ export default function App() {
             ? settings.kubeconfigSources
             : [...settings.kubeconfigSources, path];
           await desktop.settings.applyKubeconfigSources(sources, settings.includeStandardChain);
-          setSettings({ kubeconfigSources: sources, includeStandardChain: settings.includeStandardChain });
+          setSettings({ kubeconfigSources: sources, includeStandardChain: settings.includeStandardChain, welcomedAt: settings.welcomedAt });
           await contexts.loadContexts();
           return path;
         }}
@@ -522,6 +546,7 @@ export default function App() {
           await desktop.contexts.renameConflict(request);
           await contexts.loadContexts();
         }}
+        onOpenExternal={(url) => void desktop.app.openExternal(url)}
       />
       {updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />}
       </>
@@ -721,7 +746,15 @@ export default function App() {
             </Suspense>
           )}
       </div>
-      {updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />}
+      {welcomeVisible ? (
+        <WelcomeCard
+          isMac={desktop.platform === "darwin"}
+          onDismiss={dismissWelcome}
+          onOpenExternal={(url) => void desktop.app.openExternal(url)}
+        />
+      ) : updateCard ? (
+        <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />
+      ) : null}
       <CommandPalette
         open={paletteOpen}
         onOpenChange={(open) => {
