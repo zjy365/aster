@@ -828,6 +828,37 @@ test("YAML editor preserves IME, history, revert and keyboard focus", async ({ p
   expect(failures).toEqual([]);
 });
 
+for (const action of ["typing", "Escape"] as const) {
+  test(`YAML editor keeps ${action} local instead of triggering resource actions`, async ({ page }) => {
+    const failures = collectFailures(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/");
+    await connectToDev(page);
+    await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+    await page.getByTestId("resource-action-edit").click();
+    const editor = page.getByTestId("resource-yaml-editor");
+    await editor.focus();
+    await editor.press("ControlOrMeta+End");
+    await page.keyboard.insertText("\n# draft: ");
+    if (action === "typing") {
+      // Real keydowns, not fill/insertText: i/r/e are detail shortcuts.
+      await page.keyboard.type("image restart edit");
+      await expect(editor).toContainText("# draft: image restart edit");
+      await expect(editor).toBeFocused();
+      // This belongs to the editor's line deletion, never resource deletion.
+      await editor.press("Meta+Backspace");
+      await expect(page.getByTestId("mutation-review-dialog")).toHaveCount(0);
+    } else {
+      await editor.press("Escape");
+      await expect(editor).toBeVisible();
+      await expect(editor).toContainText("# draft:");
+      await expect(editor).not.toBeFocused();
+    }
+    await expect(page.getByTestId("resource-detail-view")).toBeVisible();
+    expect(failures).toEqual([]);
+  });
+}
+
 test("detail reflects an applied YAML edit and survives manual refresh", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });

@@ -361,6 +361,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         if (contexts.view === "workbench") setPaletteOpen((open) => !open);
@@ -378,7 +379,7 @@ export default function App() {
       if (event.key === "Escape") {
         if (paletteOpen) return;
         const active = document.activeElement;
-        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || (active instanceof HTMLElement && active.isContentEditable)) {
           active.blur();
           return;
         }
