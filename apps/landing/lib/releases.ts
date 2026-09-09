@@ -9,7 +9,7 @@ export type Release = {
 };
 
 /**
- * Fetch the platform download links from the latest GitHub release at build
+ * Fetch platform download links from the latest packaged GitHub release at build
  * time (Next.js Server Component / SSG). The GitHub API is only called during
  * `next build` (and optional ISR revalidation); the rendered page is static and
  * makes no runtime API requests, so a static host is fine.
@@ -19,7 +19,7 @@ export type Release = {
  */
 const OWNER = "zjy365";
 const REPO = "aster";
-const GITHUB_API = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
+const GITHUB_API = `https://api.github.com/repos/${OWNER}/${REPO}/releases`;
 
 const ASSET_PATTERNS: {
   id: string;
@@ -61,21 +61,24 @@ export type ReleasesResult = {
   releases: Release[];
 };
 
-async function fetchLatestRelease(): Promise<{
+type GitHubRelease = {
   tag_name: string;
+  draft: boolean;
+  prerelease: boolean;
   assets: { name: string; browser_download_url: string }[];
-}> {
-  const res = await fetch(GITHUB_API, {
+};
+
+async function fetchReleases<T>(url: string): Promise<T> {
+  const res = await fetch(url, {
     headers: { Accept: "application/vnd.github+json" },
   });
   if (!res.ok) {
-    throw new Error(`GitHub API returned ${res.status} for ${GITHUB_API}`);
+    throw new Error(`GitHub API returned ${res.status} for ${url}`);
   }
   return res.json();
 }
 
-export async function getReleases(): Promise<ReleasesResult> {
-  const release = await fetchLatestRelease();
+function platformDownloads(release: GitHubRelease): ReleasesResult {
   const version = release.tag_name.replace(/^v/, "");
 
   const releases: Release[] = [];
@@ -91,4 +94,21 @@ export async function getReleases(): Promise<ReleasesResult> {
     });
   }
   return { version, releases };
+}
+
+export async function getReleases(): Promise<ReleasesResult> {
+  const latest = platformDownloads(await fetchReleases<GitHubRelease>(`${GITHUB_API}/latest`));
+  if (latest.releases.length > 0) return latest;
+
+  // A published release may have no installers (for example, a failed build).
+  // Walk the release history until a stable version has a supported installer.
+  for (let page = 1; ; page++) {
+    const history = await fetchReleases<GitHubRelease[]>(`${GITHUB_API}?per_page=100&page=${page}`);
+    for (const release of history) {
+      if (release.draft || release.prerelease) continue;
+      const downloads = platformDownloads(release);
+      if (downloads.releases.length > 0) return downloads;
+    }
+    if (history.length < 100) return latest;
+  }
 }

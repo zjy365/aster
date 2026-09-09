@@ -60,6 +60,9 @@ jobs:
       - name: Typecheck
         run: pnpm --dir apps/landing typecheck
 
+      - name: Test release selection
+        run: pnpm --dir apps/landing test
+
       - name: Build static export
         run: NEXT_PUBLIC_BASE_PATH=/aster pnpm --dir apps/landing build
 
