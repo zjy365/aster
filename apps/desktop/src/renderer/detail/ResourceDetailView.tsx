@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { Badge } from "../components/ui/badge";
+import { YamlEditor } from "../components/YamlEditor";
 import { Button } from "../components/ui/button";
 import {
   Dialog,
@@ -126,11 +127,12 @@ export function ResourceDetailView({
     if (!row) return;
     const actions = new Set(resourceActionsFor(row.kind).map((action) => action.id));
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
       // pendingMutation: the dry-run review modal is up — re-firing a shortcut
       // behind it would re-tab to YAML editing or overwrite the staged mutation.
       if (operationDialog || mutationBusy || pendingMutation) return;
       const active = document.activeElement;
-      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || (active instanceof HTMLElement && active.isContentEditable)) return;
       // ⌘⌫ for delete (standard macOS destructive gesture). Checked before the
       // modifier guard below — single-letter shortcuts ignore modifiers.
       if (event.metaKey && event.key === "Backspace") {
@@ -561,16 +563,12 @@ function YamlResourceEditor({
         </div>
         {dirty && <Badge variant="outline">Unsaved edits</Badge>}
       </div>
-      <textarea
-        className="resource-yaml-editor"
+      <YamlEditor
         value={yaml}
-        wrap="off"
         readOnly={!canMutate || mutationBusy}
-        aria-readonly={!canMutate || mutationBusy}
-        spellCheck={false}
         aria-label={`${kind} YAML`}
         data-testid="resource-yaml-editor"
-        onChange={(event) => setYaml(event.target.value)}
+        onChange={setYaml}
       />
       <div className="resource-editor-actions">
         <Button variant="outline" disabled={mutationBusy} onClick={onClose}>View</Button>

@@ -2627,11 +2627,44 @@ h2 {
 }
 
 .resource-yaml-editor {
-  min-height: 420px;
-  resize: vertical;
-  /* Match the read-only viewer: no soft wrap, long lines scroll horizontally.
-     wrap="off" on the element does the same in WebKit; this pins it across engines. */
-  white-space: pre;
+  height: 420px;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.resource-yaml-editor:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.resource-yaml-editor .cm-editor {
+  height: 100%;
+  outline: none;
+}
+
+.resource-yaml-editor .cm-scroller {
+  overflow: auto;
+  font: inherit;
+}
+
+.resource-yaml-editor .cm-content {
+  padding: 14px 0;
+  caret-color: var(--text);
+}
+
+.resource-yaml-editor .cm-line {
+  padding: 0 16px;
+}
+
+.resource-yaml-editor .cm-gutters {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  border-right: 1px solid var(--border);
+}
+
+.resource-yaml-editor .cm-placeholder {
+  color: var(--text-secondary);
 }
 
 .resource-editor-actions {
@@ -2728,7 +2761,7 @@ h2 {
 }
 
 .create-resource-editor {
-  min-height: 320px;
+  height: 320px;
 }
 
 /* Settings page: System-Settings-style shell — sidebar flush left with the
@@ -4543,7 +4576,7 @@ button.overview-card:focus-visible {
 }
 
 .helm-upgrade-values-editor {
-  min-height: 320px;
+  height: 320px;
   max-height: 45vh;
 }
 
@@ -4579,7 +4612,7 @@ button.overview-card:focus-visible {
 }
 
 .paste-kubeconfig-content {
-  min-height: 240px;
+  height: 240px;
   max-height: 45vh;
 }
 

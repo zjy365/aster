@@ -2,6 +2,7 @@
 import { ClipboardPaste, LoaderCircle, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { YamlEditor } from "../components/YamlEditor";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -69,15 +70,14 @@ export function PasteKubeconfigDialog({ open, onOpenChange, onImport }: PasteKub
         </DialogHeader>
 
         <div className="paste-kubeconfig-fields">
-          <textarea
+          <YamlEditor
             aria-label="Kubeconfig YAML"
             autoFocus
-            className="resource-yaml-editor paste-kubeconfig-content"
+            className="paste-kubeconfig-content"
             data-testid="paste-kubeconfig-content"
-            onChange={(event) => setContent(event.target.value)}
+            onChange={setContent}
             placeholder={"apiVersion: v1\nkind: Config\nclusters:\n- …"}
             readOnly={busy}
-            spellCheck={false}
             value={content}
           />
           <label className="paste-kubeconfig-field">

@@ -2,6 +2,7 @@
 import { CircleArrowUp, LoaderCircle, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { YamlEditor } from "../components/YamlEditor";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -156,13 +157,12 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
               </div>
               <div className="helm-upgrade-field">
                 <span>Your values</span>
-                <textarea
+                <YamlEditor
                   aria-label="Upgrade values YAML"
-                  className="resource-yaml-editor helm-upgrade-values-editor"
+                  className="helm-upgrade-values-editor"
                   data-testid="helm-upgrade-values"
-                  onChange={(event) => setValues(event.target.value)}
+                  onChange={setValues}
                   readOnly={busy}
-                  spellCheck={false}
                   value={values}
                 />
               </div>
