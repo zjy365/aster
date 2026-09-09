@@ -32,6 +32,7 @@ pub struct Streams {
     core: Arc<CoreClient>,
     watches: Mutex<HashMap<String, CancellationToken>>,
     logs: Mutex<HashMap<String, CancellationToken>>,
+    helm: Mutex<HashMap<String, CancellationToken>>,
 }
 
 impl Streams {
@@ -40,6 +41,7 @@ impl Streams {
             core,
             watches: Mutex::new(HashMap::new()),
             logs: Mutex::new(HashMap::new()),
+            helm: Mutex::new(HashMap::new()),
         }
     }
 
@@ -70,6 +72,57 @@ impl Streams {
         Self::cancel(&self.watches, id);
     }
 
+    pub fn start_helm(self: &Arc<Self>, id: String, request: Value, channel: Channel<Value>) {
+        let token = Self::replace_all(&self.helm, &id);
+        let this = Arc::clone(self);
+        let sink: BatchSink = Arc::new(move |batch| channel.send(batch).is_ok());
+        tauri::async_runtime::spawn(async move {
+            this.run_helm(request, &sink, token.clone()).await;
+            Self::finish(&this.helm, &id, &token);
+        });
+    }
+
+    pub fn stop_helm(&self, id: &str) {
+        Self::cancel(&self.helm, id);
+    }
+
+    async fn run_helm(&self, request: Value, sink: &BatchSink, token: CancellationToken) {
+        // Each upstream page/read is capped at 20 seconds. Only silence is
+        // timed out here; a healthy multi-page query can run beyond 30 seconds.
+        let result = tokio::select! {
+            biased;
+            () = token.cancelled() => return,
+            result = tokio::time::timeout(Duration::from_secs(30), self.core.post_stream("/v1/helm/releases/stream", request)) => result,
+        };
+        let stream = match result {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(message)) => { let _ = sink(json!({"kind": "error", "message": message})); return; }
+            Err(_) => { let _ = sink(json!({"kind": "error", "message": "Helm request timed out waiting for Aster core. Refresh to retry."})); return; }
+        };
+        let stream = stream.map(|chunk| chunk.map_err(crate::core_client::transport_error));
+        let mut lines = Ndjson::new(stream);
+        loop {
+            if token.is_cancelled() { return; }
+            let item = match tokio::time::timeout(Duration::from_secs(30), lines.next(&token)).await {
+                Ok(item) => item,
+                Err(_) => { let _ = sink(json!({"kind": "error", "message": "Helm loading stopped responding for 30 seconds. Try a narrower namespace scope or refresh."})); return; }
+            };
+            match item {
+                NdjsonItem::Cancelled => return,
+                NdjsonItem::Ended => { let _ = sink(json!({"kind": "error", "message": "Helm loading ended before completion. Refresh to retry."})); return; }
+                NdjsonItem::Failed(message) => { let _ = sink(json!({"kind": "error", "message": message})); return; }
+                NdjsonItem::Line(line) => {
+                    let event: Value = match serde_json::from_str(&line) {
+                        Ok(value) => value,
+                        Err(_) => { let _ = sink(json!({"kind": "error", "message": "Invalid Helm response from Aster core."})); return; }
+                    };
+                    let done = matches!(event.get("kind").and_then(Value::as_str), Some("done" | "error"));
+                    if !sink(event) || done { return; }
+                }
+            }
+        }
+    }
+
     pub fn stop_logs(&self, id: &str) {
         Self::cancel(&self.logs, id);
     }
@@ -77,6 +130,7 @@ impl Streams {
     pub fn cancel_all(&self) {
         Self::cancel_map(&self.watches);
         Self::cancel_map(&self.logs);
+        Self::cancel_map(&self.helm);
     }
 
     /// A renderer keeps at most one subscription of each kind; starting a new
@@ -476,6 +530,53 @@ mod tests {
 
     struct StaticCredentials {
         base_url: String,
+    }
+
+    #[tokio::test]
+    async fn helm_stream_delivers_progress_and_requires_completion() {
+        for completed in [true, false] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let (head, body) = read_request(&mut socket).await.unwrap();
+                assert!(head.starts_with("POST /v1/helm/releases/stream "));
+                assert!(body.contains("dev"));
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n{\"kind\":\"progress\",\"scanned\":500}\n{\"kind\":\"progress\"}\n").await.unwrap();
+                if completed { socket.write_all(b"{\"kind\":\"done\"}\n").await.unwrap(); }
+            });
+            let client = Arc::new(CoreClient::new(Arc::new(StaticCredentials { base_url: url })));
+            let streams = Streams::new(client);
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let captured = events.clone();
+            let sink: BatchSink = Arc::new(move |event| { captured.lock().unwrap().push(event); true });
+            tokio::time::timeout(Duration::from_secs(2), streams.run_helm(json!({"contextId":"dev"}), &sink, CancellationToken::new())).await.unwrap();
+            server.await.unwrap();
+            let events = events.lock().unwrap();
+            assert_eq!(events[0]["kind"], "progress");
+            assert_eq!(events[1]["kind"], "progress");
+            assert_eq!(events.last().unwrap()["kind"], if completed { "done" } else { "error" });
+        }
+    }
+
+    #[tokio::test]
+    async fn helm_cancellation_closes_inflight_request_before_headers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let token = CancellationToken::new();
+        let cancel = token.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request(&mut socket).await.unwrap();
+            cancel.cancel();
+            let mut byte = [0];
+            assert_eq!(tokio::time::timeout(Duration::from_secs(2), socket.read(&mut byte)).await.unwrap().unwrap(), 0);
+        });
+        let client = Arc::new(CoreClient::new(Arc::new(StaticCredentials { base_url: url })));
+        let streams = Streams::new(client);
+        let sink: BatchSink = Arc::new(|_| panic!("cancelled query emitted an event"));
+        tokio::time::timeout(Duration::from_secs(2), streams.run_helm(json!({"contextId":"dev"}), &sink, token)).await.unwrap();
+        server.await.unwrap();
     }
 
     impl CredentialProvider for StaticCredentials {

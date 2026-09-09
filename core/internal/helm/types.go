@@ -31,8 +31,9 @@ func notFound(message string) error {
 }
 
 type ListRequest struct {
-	ContextID string `json:"contextId"`
-	Namespace string `json:"namespace"`
+	ContinueToken string `json:"continueToken,omitempty"`
+	ContextID     string `json:"contextId"`
+	Namespace     string `json:"namespace"`
 }
 
 // ReleaseSummary is the projection the renderer's release table needs. It
@@ -50,7 +51,8 @@ type ReleaseSummary struct {
 }
 
 type ListResponse struct {
-	Releases []ReleaseSummary `json:"releases"`
+	ContinueToken string           `json:"continueToken,omitempty"`
+	Releases      []ReleaseSummary `json:"releases"`
 }
 
 type GetRequest struct {

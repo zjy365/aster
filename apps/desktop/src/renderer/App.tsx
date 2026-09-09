@@ -101,12 +101,12 @@ export default function App() {
     coreReady: core.state === "ready",
     enabled: overviewActive,
   });
+  const [helmActive, setHelmActive] = useState(false);
   const helm = useHelm({
     contextId,
     namespace: namespaces.namespace,
-    coreReady: core.state === "ready",
+    coreReady: core.state === "ready" && helmActive,
   });
-  const [helmActive, setHelmActive] = useState(false);
 
   // Live CPU/memory readouts for the Pod table. Only fetched while the Pod
   // kind is the active pane and the list is namespace-scoped, so a browse
@@ -640,6 +640,11 @@ export default function App() {
               contextName={contexts.activeContext?.name}
               namespace={namespaces.namespace}
               releases={helm.releases}
+              progress={helm.progress}
+              onCancel={helm.cancel}
+              hasMore={helm.hasMore}
+              loadingMore={helm.loadingMore}
+              onLoadMore={helm.loadMore}
               loading={helm.loading}
               error={helm.error}
               selected={helm.selected}

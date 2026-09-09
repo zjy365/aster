@@ -4381,8 +4381,7 @@ button.overview-card:focus-visible {
 }
 
 .table-row.helm-grid {
-  /* Helm rows are a plain flow list, unlike the virtualized resource rows. */
-  position: static;
+  position: absolute;
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
@@ -4977,3 +4976,11 @@ button.overview-card:focus-visible {
   overflow: auto;
   overflow-wrap: anywhere;
 }
+.helm-list-status {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.helm-list-status.error { color: var(--failed); }

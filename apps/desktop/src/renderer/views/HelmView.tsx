@@ -1,5 +1,6 @@
 import { CircleArrowUp, LoaderCircle, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import type { HelmReleaseDetail, HelmReleaseSummary } from "../../shared/types";
 import type { HelmUpgradeInput } from "../hooks/useHelm";
@@ -12,6 +13,11 @@ export interface HelmViewProps {
   releases: HelmReleaseSummary[];
   loading: boolean;
   error: string;
+  progress: string;
+  onCancel(): void;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore(): void;
   selected?: HelmReleaseDetail;
   detailLoading: boolean;
   detailError: string;
@@ -44,6 +50,11 @@ export function HelmView({
   releases,
   loading,
   error,
+  progress,
+  onCancel,
+  hasMore,
+  loadingMore,
+  onLoadMore,
   selected,
   detailLoading,
   detailError,
@@ -64,13 +75,16 @@ export function HelmView({
           </div>
           <div className="resource-summary">
             <span>{releases.length} loaded</span>
-            <button className="load-more" data-testid="helm-refresh" disabled={loading || busy} onClick={onRefresh} type="button">
+            {(loading || loadingMore) && <button className="load-more" data-testid="helm-cancel" onClick={onCancel} type="button">Cancel</button>}
+            <button className="load-more" data-testid="helm-refresh" disabled={loading || loadingMore || busy} onClick={onRefresh} type="button">
               Refresh
             </button>
           </div>
         </div>
       )}
 
+      {!selected && progress && <div className="helm-list-status" role="status" data-testid="helm-progress">{progress}</div>}
+      {!selected && error && releases.length > 0 && <div className="helm-list-status error" role="alert">Loading incomplete: {error}</div>}
       {selected ? (
         <ReleaseDetail
           key={`${selected.namespace}/${selected.name}`}
@@ -85,6 +99,9 @@ export function HelmView({
       ) : (
         <ReleaseTable
           releases={releases}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onLoadMore={onLoadMore}
           loading={loading}
           error={error}
           namespace={namespace}
@@ -97,18 +114,33 @@ export function HelmView({
 
 function ReleaseTable({
   releases,
+  hasMore,
+  loadingMore,
+  onLoadMore,
   loading,
   error,
   namespace,
   onSelect,
 }: {
   releases: HelmReleaseSummary[];
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore(): void;
   loading: boolean;
   error: string;
   namespace: string;
   onSelect(name: string, namespace: string): void;
 }) {
-  if (loading) {
+  const viewport = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({ count: releases.length + (hasMore ? 1 : 0), getScrollElement: () => viewport.current, estimateSize: () => 36, overscan: 8, getItemKey: (index) => index < releases.length ? `${releases[index].namespace}/${releases[index].name}` : "__load-more__" });
+  const [focusIndex, setFocusIndex] = useState(0);
+  const pendingFocus = useRef<number | null>(null);
+  useEffect(() => {
+    if (pendingFocus.current === null) return;
+    const target = viewport.current?.querySelector<HTMLElement>(`[data-row-index="${pendingFocus.current}"]`);
+    if (target) { target.focus(); pendingFocus.current = null; }
+  });
+  if (loading && releases.length === 0) {
     return (
       <div className="table-state" data-testid="helm-loading">
         <LoaderCircle aria-hidden="true" className="spin size-5" />
@@ -116,7 +148,7 @@ function ReleaseTable({
       </div>
     );
   }
-  if (error) {
+  if (error && releases.length === 0) {
     return (
       <div className="table-state error" data-testid="helm-error" role="alert">
         <TriangleAlert aria-hidden="true" className="size-5" />
@@ -132,7 +164,15 @@ function ReleaseTable({
     );
   }
   return (
-    <div className="table-frame" data-testid="helm-table">
+    <div className="table-frame" data-testid="helm-table" role="grid" aria-label="Helm releases" aria-rowcount={releases.length + 1 + (hasMore ? 1 : 0)} onKeyDown={(event) => {
+      const next = event.key === "ArrowDown" ? focusIndex + 1 : event.key === "ArrowUp" ? focusIndex - 1 : event.key === "Home" ? 0 : event.key === "End" ? releases.length - 1 : null;
+      if (next === null) return;
+      event.preventDefault();
+      const index = Math.max(0, Math.min(releases.length - 1, next));
+      pendingFocus.current = index;
+      setFocusIndex(index);
+      virtualizer.scrollToIndex(index);
+    }}>
       <div className="table-header helm-grid" role="row" aria-rowindex={1}>
         <span role="columnheader">Name</span>
         <span role="columnheader">Status</span>
@@ -142,25 +182,43 @@ function ReleaseTable({
         <span role="columnheader">Revision</span>
         <span role="columnheader">Updated</span>
       </div>
-      <div className="table-viewport">
-        {releases.map((release) => (
-          <button
-            aria-label={`Open ${release.name}`}
+      <div ref={viewport} className="table-viewport">
+        <div className="virtual-space" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((row) => {
+          if (row.index === releases.length) return (
+            <div role="row" aria-rowindex={row.index + 2} className="table-row table-load-more" key="__load-more__" style={{ transform: `translateY(${row.start}px)` }}>
+              <button className="load-more" data-testid="helm-load-more" disabled={loadingMore} onClick={onLoadMore} type="button">
+                {loadingMore && <LoaderCircle aria-hidden="true" className="spin size-3.5" />}
+                {loadingMore ? "Loading next 50…" : "Load next 50"}
+              </button>
+            </div>
+          );
+          const release = releases[row.index];
+          return <button
+            aria-label={`Open ${release.name} in ${release.namespace}`}
+            role="row"
+            aria-rowindex={row.index + 2}
+            title={`${release.namespace}/${release.name}`}
             className="table-row helm-grid"
             data-testid={`helm-release-${release.name}`}
-            key={release.name}
+            data-row-index={row.index}
+            tabIndex={row.index === Math.min(focusIndex, releases.length - 1) ? 0 : -1}
+            onFocus={() => setFocusIndex(row.index)}
+            style={{ transform: `translateY(${row.start}px)` }}
+            key={row.key}
             onClick={() => onSelect(release.name, release.namespace)}
             type="button"
           >
-            <span className="primary-cell">{release.name}</span>
-            <span className="status-cell"><span className={`status-dot ${statusTone(release.status)}`} aria-hidden="true" />{release.status}</span>
-            <span>{release.chart}</span>
-            <span>{release.chartVersion}</span>
-            <span>{release.appVersion}</span>
-            <span className="tabular">{release.version}</span>
-            <span className="tabular">{release.updatedAt ? formatAge(release.updatedAt) : "—"}</span>
-          </button>
-        ))}
+            <span role="gridcell" className="primary-cell">{release.name}</span>
+            <span role="gridcell" className="status-cell"><span className={`status-dot ${statusTone(release.status)}`} aria-hidden="true" />{release.status}</span>
+            <span role="gridcell">{release.chart}</span>
+            <span role="gridcell">{release.chartVersion}</span>
+            <span role="gridcell">{release.appVersion}</span>
+            <span role="gridcell" className="tabular">{release.version}</span>
+            <span role="gridcell" className="tabular">{release.updatedAt ? formatAge(release.updatedAt) : "—"}</span>
+          </button>;
+        })}
+        </div>
       </div>
     </div>
   );

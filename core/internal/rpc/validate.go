@@ -294,6 +294,9 @@ func validateWatchRequest(value resources.WatchRequest) error {
 }
 
 func validateHelmListRequest(value helm.ListRequest) error {
+	if err := checkLength("continueToken", value.ContinueToken, 128); err != nil {
+		return err
+	}
 	if err := validateContextID(value.ContextID); err != nil {
 		return err
 	}

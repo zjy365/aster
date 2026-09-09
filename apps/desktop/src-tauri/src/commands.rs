@@ -155,9 +155,33 @@ pub async fn resources_mutate(state: State<'_, AppState>, request: Value) -> Res
 }
 
 #[tauri::command]
-pub async fn helm_releases_list(state: State<'_, AppState>, context_id: String, namespace: String) -> Result<Value, String> {
-    let url = format!("/v1/helm/releases?contextId={}&namespace={}", url_encode(&context_id), url_encode(&namespace));
-    state.core.get(&url).await
+pub fn helm_releases_start(state: State<'_, AppState>, id: String, request: Value, channel: Channel<Value>) -> Result<(), String> {
+    if id.is_empty() || id.len() > 128 { return Err("Invalid Helm subscription ID".into()); }
+    validate_helm_page(&request)?;
+    state.streams.start_helm(id, request, channel);
+    Ok(())
+}
+
+fn validate_helm_page(request: &Value) -> Result<(), String> {
+    let context = request.get("contextId").and_then(Value::as_str).unwrap_or("");
+    let namespace = request.get("namespace").and_then(Value::as_str).unwrap_or("");
+    let cursor = request.get("continueToken").and_then(Value::as_str).unwrap_or("");
+    if context.trim().is_empty() || context.len() > 512 || namespace.len() > 253 || cursor.len() > 128 {
+        return Err("Invalid Helm context or namespace".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn helm_releases_close(state: State<'_, AppState>, request: Value) -> Result<(), String> {
+    validate_helm_page(&request)?;
+    state.core.post("/v1/helm/releases/close", request).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn helm_releases_stop(state: State<'_, AppState>, id: String) {
+    state.streams.stop_helm(&id);
 }
 
 #[tauri::command]
