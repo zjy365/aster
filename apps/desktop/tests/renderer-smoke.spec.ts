@@ -252,12 +252,19 @@ const MOCK_DESKTOP_API = `
       }),
     },
     helm: {
-      list: async (_contextId, namespace) => [
+      list: ({ namespace }, listener) => {
+        const releases = [
         // An empty namespace means all namespaces; surface releases from
         // distinct namespaces so the All-namespaces list is distinguishable.
         { name: "web", namespace: namespace || "apps", version: 3, status: "deployed", chart: "web", chartVersion: "1.2.3", appVersion: "7.0", updatedAt: "2026-08-01T00:00:00Z", description: "Install complete" },
         { name: "broken", namespace: namespace || "default", version: 1, status: "failed", chart: "broken", chartVersion: "0.1.0", appVersion: "1.0", updatedAt: "2026-08-02T00:00:00Z" },
-      ],
+        ];
+        const timer = setTimeout(() => {
+          listener({ kind: "done", releases });
+        }, 0);
+        return () => clearTimeout(timer);
+      },
+      closeList: async () => {},
       get: async (request) => ({
         name: request.name,
         namespace: request.namespace,
@@ -1644,6 +1651,83 @@ test("helm view lists releases and opens a detail", async ({ page }) => {
   await page.getByTestId("toolbar-back").click();
   await expect(page.getByTestId("helm-table")).toBeVisible();
   await expect(view.getByTestId("helm-release-broken")).toBeVisible();
+  expect(failures).toEqual([]);
+});
+
+test("helm loads atomic pages of 50 on demand and cancels stale scopes", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    const sessions: any[] = [];
+    (window as any).__helmSessions = sessions;
+    (window as any).__helmClosed = [];
+    window.__ASTER_DESKTOP__!.helm.closeList = async (request) => { (window as any).__helmClosed.push(request); };
+    window.__ASTER_DESKTOP__!.helm.list = (request, listener) => {
+      const session = { request, listener, cancelled: false };
+      sessions.push(session);
+      listener({ kind: "progress" });
+      return () => { session.cancelled = true; };
+    };
+    (window as any).__finishHelmPage = (offset: number, count: number, next: string) => {
+      sessions.at(-1).listener({ kind: "done", continueToken: next,
+        releases: Array.from({ length: count }, (_, index) => ({ name: `release-${offset + index}`, namespace: "apps", version: 10, status: "deployed", chart: "web", chartVersion: "1.0", appVersion: "1.0" })),
+      });
+    };
+  });
+  await connectToDev(page);
+  expect(await page.evaluate(() => (window as any).__helmSessions.length)).toBe(0);
+  await page.getByTestId("tool-nav-helm").click();
+  await expect(page.getByTestId("helm-loading")).toBeVisible();
+  await page.evaluate(() => {
+    for (let i = 0; i < 50; i++) (window as any).__helmSessions[0].listener({ kind: "progress" });
+  });
+  await expect(page.getByTestId("helm-view")).toContainText("0 loaded");
+  await expect(page.getByTestId("helm-table")).toHaveCount(0);
+  await page.evaluate(() => (window as any).__finishHelmPage(0, 50, "snapshot:50"));
+  const grid = page.getByTestId("helm-table");
+  await expect(page.getByTestId("helm-view")).toContainText("50 loaded");
+  expect(await page.evaluate(() => (window as any).__helmSessions.length)).toBe(1);
+  await grid.locator('[data-row-index="0"]').focus();
+  await page.keyboard.press("End");
+  await expect(grid.locator('[data-row-index="49"]')).toBeFocused();
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(page.getByTestId("helm-load-more")).toHaveText("Load next 50");
+  await expectNoOverflow(page, "helm first page");
+  const header = await grid.locator(".table-header").boundingBox();
+  const viewport = await grid.locator(".table-viewport").boundingBox();
+  expect(viewport!.y).toBeGreaterThanOrEqual(header!.y + header!.height);
+  await screenshot(page, "helm-page-50-1280");
+  await page.getByTestId("helm-load-more").click();
+  expect(await page.evaluate(() => (window as any).__helmSessions[1].request.continueToken)).toBe("snapshot:50");
+  await expect(page.getByTestId("helm-view")).toContainText("50 loaded");
+  await expect(page.getByTestId("helm-load-more")).toBeDisabled();
+  await page.evaluate(() => (window as any).__finishHelmPage(50, 50, "snapshot:100"));
+  await expect(page.getByTestId("helm-view")).toContainText("100 loaded");
+  expect(await grid.getByRole("row").count()).toBeLessThan(50);
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await page.getByTestId("helm-load-more").click();
+  await page.evaluate(() => (window as any).__helmSessions.at(-1).listener({ kind: "error", message: "Helm request timed out" }));
+  await expect(page.getByRole("alert")).toContainText("timed out");
+  await expect(page.getByTestId("helm-view")).toContainText("100 loaded");
+  await page.getByTestId("helm-load-more").click();
+  expect(await page.evaluate(() => (window as any).__helmSessions.at(-1).request.continueToken)).toBe("snapshot:100");
+  await page.evaluate(() => (window as any).__finishHelmPage(100, 5, ""));
+  await expect(page.getByTestId("helm-view")).toContainText("105 loaded");
+  await expect(page.getByTestId("helm-load-more")).toHaveCount(0);
+  await page.getByTestId("helm-refresh").click();
+  expect(await page.evaluate(() => (window as any).__helmClosed.at(-1).continueToken)).toBe("snapshot:100");
+  await expect(page.getByTestId("helm-loading")).toBeVisible();
+  await page.evaluate(() => (window as any).__helmSessions[0].listener({ kind: "error", message: "stale failure" }));
+  await expect(page.getByText("stale failure")).toHaveCount(0);
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "kube-system" }).click();
+  expect(await page.evaluate(() => (window as any).__helmSessions.at(-2).cancelled)).toBe(true);
+  await page.getByTestId("helm-cancel").click();
+  expect(await page.evaluate(() => (window as any).__helmSessions.at(-1).cancelled)).toBe(true);
+  await page.getByTestId("helm-refresh").click();
+  await page.getByTestId("resource-nav-pods").click();
+  expect(await page.evaluate(() => (window as any).__helmSessions.at(-1).cancelled)).toBe(true);
   expect(failures).toEqual([]);
 });
 

@@ -17,7 +17,7 @@
 import type {
   DesktopApi,
   HelmReleaseDetail,
-  HelmReleaseSummary,
+  HelmListEvent,
   NamespaceInfo,
   Overview,
   ResourceListRequest,
@@ -159,10 +159,20 @@ const api: DesktopApi = {
     },
   },
   helm: {
-    list: async (contextId, namespace): Promise<HelmReleaseSummary[]> => {
-      const value = await coreGet(`/v1/helm/releases?contextId=${encodeURIComponent(contextId)}&namespace=${encodeURIComponent(namespace)}`);
-      return value.releases ?? [];
+    list: (request, listener) => {
+      const controller = new AbortController();
+      // The test proxy buffers this finite stream; production uses a Tauri Channel.
+      void fetch("/__core__/v1/helm/releases/stream", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify(request), signal: controller.signal,
+      }).then(async (response) => {
+        if (!response.ok) throw new Error(`Helm HTTP ${response.status}`);
+        const text = await response.text();
+        if (!controller.signal.aborted) for (const line of text.trim().split("\n")) listener(JSON.parse(line) as HelmListEvent);
+      }).catch((cause) => { if (!controller.signal.aborted) listener({ kind: "error", message: String(cause) }); });
+      return () => controller.abort();
     },
+    closeList: async (request) => { await corePost("/v1/helm/releases/close", request); },
     get: async (request): Promise<HelmReleaseDetail> => (await corePost("/v1/helm/releases/get", request)).release,
     uninstall: async (request) => { await corePost("/v1/helm/releases/uninstall", request); },
     rollback: async (request) => { await corePost("/v1/helm/releases/rollback", request); },

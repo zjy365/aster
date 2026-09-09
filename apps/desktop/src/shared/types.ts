@@ -365,6 +365,18 @@ export interface HelmReleaseSummary {
   description?: string;
 }
 
+/** One page of an explicit Helm view, pinned by an opaque continuation token. */
+export interface HelmListRequest {
+  contextId: string;
+  namespace: string;
+  continueToken?: string;
+}
+
+export type HelmListEvent =
+  | { kind: "progress" }
+  | { kind: "done"; releases?: HelmReleaseSummary[]; continueToken?: string }
+  | { kind: "error"; message: string };
+
 /**
  * Full release read. Values are user-authored chart input and travel
  * unredacted; rendered manifests have Secret data masked by the core.
@@ -557,7 +569,8 @@ export interface DesktopApi {
     get(contextId: string): Promise<Overview>;
   };
   helm: {
-    list(contextId: string, namespace: string): Promise<HelmReleaseSummary[]>;
+    list(request: HelmListRequest, listener: (event: HelmListEvent) => void): () => void;
+    closeList(request: HelmListRequest): Promise<void>;
     get(request: HelmGetRequest): Promise<HelmReleaseDetail>;
     uninstall(request: HelmUninstallRequest): Promise<void>;
     rollback(request: HelmRollbackRequest): Promise<void>;

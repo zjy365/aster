@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -37,7 +38,9 @@ type ClientConfigProvider interface {
 const maxDetailBytes = 4 << 20
 
 type Service struct {
-	clients ClientConfigProvider
+	listMu        sync.Mutex
+	listSnapshots map[string]*listSnapshot
+	clients       ClientConfigProvider
 	// newConfiguration replaces the real client wiring in tests so the
 	// service can run against an in-memory Helm storage without a cluster.
 	newConfiguration func(ctx context.Context, contextID, namespace string) (*action.Configuration, error)
@@ -104,29 +107,13 @@ func (s *Service) configuration(ctx context.Context, contextID, namespace string
 }
 
 func (s *Service) List(ctx context.Context, request ListRequest) (ListResponse, error) {
-	if request.ContextID == "" {
-		return ListResponse{}, invalid("contextId is required")
-	}
-	config, err := s.configuration(ctx, request.ContextID, request.Namespace)
-	if err != nil {
-		return ListResponse{}, err
-	}
-	client := action.NewList(config)
-	client.StateMask = action.ListDeployed | action.ListFailed
-	client.ByDate = true
-	client.SortReverse = true
-	// An empty namespace means every namespace (helm list -A semantics): the
-	// secret driver lists across namespaces when the lazy client's namespace
-	// is empty, so empty namespace flows through configuration() unmodified.
-	releases, err := client.Run()
-	if err != nil {
-		return ListResponse{}, fmt.Errorf("list releases: %w", err)
-	}
-	response := ListResponse{Releases: make([]ReleaseSummary, 0, len(releases))}
-	for _, item := range releases {
-		response.Releases = append(response.Releases, summarize(item))
-	}
-	return response, nil
+	response := ListResponse{Releases: []ReleaseSummary{}}
+	err := s.StreamList(ctx, request, func(event ListEvent) error {
+		response.Releases = append(response.Releases, event.Releases...)
+		response.ContinueToken = event.ContinueToken
+		return nil
+	})
+	return response, err
 }
 
 func (s *Service) Get(ctx context.Context, request GetRequest) (GetResponse, error) {

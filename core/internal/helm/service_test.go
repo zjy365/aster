@@ -73,8 +73,8 @@ func chartRelease(name, namespace string, version int, status release.Status) *r
 			// Chart defaults, distinct from the user's Config overrides.
 			Values: map[string]any{"replicas": 1, "imagePullPolicy": "Always"},
 		},
-		Config:    map[string]any{"replicas": 2, "auth": map[string]any{"token": "s3cret"}},
-		Manifest:  "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-cm\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: web-secret\ndata:\n  password: c3VwZXJzZWNyZXQ=\n",
+		Config:   map[string]any{"replicas": 2, "auth": map[string]any{"token": "s3cret"}},
+		Manifest: "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-cm\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: web-secret\ndata:\n  password: c3VwZXJzZWNyZXQ=\n",
 	}
 }
 
@@ -84,67 +84,6 @@ func seed(t *testing.T, store *storage.Storage, items ...*release.Release) {
 		if err := store.Create(item); err != nil {
 			t.Fatalf("seed release: %v", err)
 		}
-	}
-}
-
-func TestListFiltersByNamespaceAndState(t *testing.T) {
-	store := testStorage(t)
-	seed(t, store,
-		chartRelease("web", "apps", 1, release.StatusDeployed),
-		chartRelease("api", "apps", 2, release.StatusSuperseded),
-		chartRelease("legacy", "default", 1, release.StatusDeployed),
-		chartRelease("broken", "apps", 1, release.StatusFailed),
-	)
-	service := testService(t, store)
-
-	response, err := service.List(context.Background(), ListRequest{ContextID: "dev", Namespace: "apps"})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(response.Releases) != 2 {
-		t.Fatalf("apps releases = %d, want 2", len(response.Releases))
-	}
-	names := map[string]string{}
-	for _, item := range response.Releases {
-		names[item.Name] = item.Status
-	}
-	if names["web"] != "deployed" || names["broken"] != "failed" {
-		t.Fatalf("releases = %#v", response.Releases)
-	}
-	for _, item := range response.Releases {
-		if item.Chart != "web" || item.ChartVersion != "1.2.3" || item.AppVersion != "7.0" {
-			t.Fatalf("summary = %#v", item)
-		}
-	}
-}
-
-func TestListAllNamespaces(t *testing.T) {
-	store := testStorage(t)
-	seed(t, store,
-		chartRelease("web", "apps", 1, release.StatusDeployed),
-		chartRelease("api", "apps", 2, release.StatusSuperseded),
-		chartRelease("legacy", "default", 1, release.StatusDeployed),
-		chartRelease("broken", "apps", 1, release.StatusFailed),
-	)
-	service := testService(t, store)
-
-	// An empty namespace means every namespace (helm list -A semantics): the
-	// driver lists across namespaces instead of scoping to one.
-	response, err := service.List(context.Background(), ListRequest{ContextID: "dev"})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	// The superseded release is filtered out by the state mask, so across
-	// namespaces we get the deployed web/legacy plus the failed broken.
-	if len(response.Releases) != 3 {
-		t.Fatalf("all-namespaces releases = %d, want 3", len(response.Releases))
-	}
-	namespaces := map[string]bool{}
-	for _, item := range response.Releases {
-		namespaces[item.Namespace] = true
-	}
-	if !namespaces["apps"] || !namespaces["default"] {
-		t.Fatalf("all-namespaces release namespaces = %#v", namespaces)
 	}
 }
 

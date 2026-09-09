@@ -87,7 +87,7 @@ impl CoreClient {
         }
         let response = request.send().await.map_err(transport_error)?;
         let status = response.status();
-        let value: Value = response.json().await.map_err(|error| error.to_string())?;
+        let value: Value = response.json().await.map_err(transport_error)?;
         if !status.is_success() {
             let message = value
                 .pointer("/error/message")
@@ -101,10 +101,19 @@ impl CoreClient {
     }
 }
 
-/// reqwest's Display embeds the request URL; the sidecar loopback address is
-/// shell-internal and must not reach the renderer.
-fn transport_error(error: reqwest::Error) -> String {
-    error.without_url().to_string()
+/// Classify transport failures without exposing URLs, tokens or source chains.
+pub(crate) fn transport_error(error: reqwest::Error) -> String {
+    let (category, message) = if error.is_timeout() {
+        ("timeout", "Request to Aster core timed out. Try a narrower namespace scope or refresh.")
+    } else if error.is_connect() {
+        ("connect", "Cannot connect to Aster core. Check the core status and retry.")
+    } else if error.is_body() || error.is_decode() {
+        ("response", "Aster core returned an incomplete or invalid response. Refresh to retry.")
+    } else {
+        ("transport", "The connection to Aster core was interrupted. Check the core status and retry.")
+    };
+    eprintln!("Aster core request failed: {category}");
+    message.to_string()
 }
 
 /// Percent-encodes a query parameter value (unreserved characters pass through).
@@ -122,6 +131,24 @@ pub fn url_encode(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn timeout_is_actionable_and_does_not_expose_sidecar_address() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/private", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        });
+        let error = reqwest::Client::builder().no_proxy().timeout(Duration::from_millis(20)).build().unwrap()
+            .get(url).send().await.unwrap_err();
+        assert!(error.is_timeout());
+        let message = transport_error(error);
+        assert!(message.contains("timed out"));
+        assert!(!message.contains("127.0.0.1"));
+        assert!(!message.contains("private"));
+        server.abort();
+    }
 
     #[test]
     fn url_encode_leaves_unreserved_and_escapes_the_rest() {

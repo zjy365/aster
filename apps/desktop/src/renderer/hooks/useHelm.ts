@@ -14,7 +14,12 @@ export type HelmUpgradeInput = Omit<HelmUpgradeRequest, "contextId" | "namespace
 export interface HelmState {
   releases: HelmReleaseSummary[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  loadMore(): void;
   error: string;
+  progress: string;
+  cancel(): void;
   selected?: HelmReleaseDetail;
   detailLoading: boolean;
   detailError: string;
@@ -45,7 +50,11 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
   const [detailError, setDetailError] = useState("");
   const [busy, setBusy] = useState(false);
   const [generation, setGeneration] = useState(0);
-  const request = useRef(0);
+  const loadNextPage = useRef<() => void>(() => {});
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const stopList = useRef<() => void>(() => {});
+  const [progress, setProgress] = useState("");
 
   // Same scope-reset contract as useResourceDetail: when the list scope
   // (context or namespace) changes, close any open release detail so a stale
@@ -56,24 +65,67 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
   }, [contextId, namespace]);
 
   useEffect(() => {
-    if (!contextId || !coreReady) return;
-    const current = ++request.current;
-    setLoading(true);
-    setError("");
     setReleases([]);
-    desktop.helm.list(contextId, namespace)
-      .then((items) => {
-        if (current !== request.current) return;
-        setReleases(items);
-      })
-      .catch((cause) => {
-        if (current !== request.current) return;
-        setError(cause instanceof Error ? cause.message : String(cause));
-      })
-      .finally(() => {
-        if (current === request.current) setLoading(false);
+    setError("");
+    setProgress("");
+    setHasMore(false);
+    setLoadingMore(false);
+    setLoading(Boolean(contextId && coreReady));
+    if (!contextId || !coreReady) return;
+    let active = true;
+    let pending = false;
+    let pageRequest = 0;
+    let cursor = "";
+    let retainedCursor = "";
+    let stop = () => {};
+    const close = (continueToken: string) => {
+      void desktop.helm.closeList({ contextId, namespace, continueToken }).catch(() => {});
+    };
+    const startPage = (continueToken: string) => {
+      if (!active || pending) return;
+      pending = true;
+      const current = ++pageRequest;
+      setLoading(!continueToken);
+      setLoadingMore(Boolean(continueToken));
+      setError("");
+      setProgress("");
+      stop = desktop.helm.list({ contextId, namespace, continueToken: continueToken || undefined }, (event) => {
+        if (!active || current !== pageRequest) {
+          if (!active && event.kind === "done" && event.continueToken) close(event.continueToken);
+          return;
+        }
+        if (event.kind === "progress") return;
+        pending = false;
+        setLoading(false);
+        setLoadingMore(false);
+        if (event.kind === "error") { setError(event.message); return; }
+        // Commit the whole page once; heartbeat/progress never changes rows.
+        setReleases((items) => continueToken ? [...items, ...(event.releases ?? [])] : (event.releases ?? []));
+        cursor = event.continueToken ?? "";
+        if (cursor) retainedCursor = cursor;
+        setHasMore(Boolean(cursor));
       });
+    };
+    loadNextPage.current = () => { if (cursor) startPage(cursor); };
+    stopList.current = () => {
+      ++pageRequest;
+      pending = false;
+      stop();
+      setLoading(false);
+      setLoadingMore(false);
+      setProgress("Loading cancelled");
+    };
+    startPage("");
+    return () => {
+      active = false;
+      ++pageRequest;
+      stop();
+      if (retainedCursor) close(retainedCursor);
+    };
   }, [contextId, namespace, coreReady, generation]);
+
+  const loadMore = useCallback(() => loadNextPage.current(), []);
+  const cancel = useCallback(() => stopList.current(), []);
 
   const refresh = useCallback(() => setGeneration((value) => value + 1), []);
 
@@ -154,7 +206,12 @@ export function useHelm({ contextId, namespace, coreReady }: UseHelmOptions): He
 
   return {
     releases,
+    progress,
+    cancel,
     loading,
+    loadingMore,
+    hasMore,
+    loadMore,
     error,
     selected,
     detailLoading,

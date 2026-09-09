@@ -46,6 +46,8 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("GET /v1/discovery", server.listDiscovery)
 	mux.HandleFunc("GET /v1/overview", server.overview)
 	mux.HandleFunc("GET /v1/helm/releases", server.listHelmReleases)
+	mux.HandleFunc("POST /v1/helm/releases/stream", server.streamHelmReleases)
+	mux.HandleFunc("POST /v1/helm/releases/close", server.closeHelmList)
 	mux.HandleFunc("POST /v1/helm/releases/get", server.getHelmRelease)
 	mux.HandleFunc("POST /v1/helm/releases/uninstall", server.uninstallHelmRelease)
 	mux.HandleFunc("POST /v1/helm/releases/rollback", server.rollbackHelmRelease)
@@ -213,8 +215,9 @@ func (s *Server) overview(writer http.ResponseWriter, request *http.Request) {
 
 func (s *Server) listHelmReleases(writer http.ResponseWriter, request *http.Request) {
 	value := helm.ListRequest{
-		ContextID: request.URL.Query().Get("contextId"),
-		Namespace: request.URL.Query().Get("namespace"),
+		ContinueToken: request.URL.Query().Get("continueToken"),
+		ContextID:     request.URL.Query().Get("contextId"),
+		Namespace:     request.URL.Query().Get("namespace"),
 	}
 	if err := validateHelmListRequest(value); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_request", err)

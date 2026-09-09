@@ -9,7 +9,7 @@ import type {
   DesktopApi,
   HelmGetRequest,
   HelmReleaseDetail,
-  HelmReleaseSummary,
+  HelmListEvent,
   HelmRollbackRequest,
   HelmUninstallRequest,
   HelmUpgradeRequest,
@@ -157,10 +157,22 @@ export function createTauriDesktopApi(): DesktopApi {
       },
     },
     helm: {
-      list: async (contextId, namespace): Promise<HelmReleaseSummary[]> => {
-        const value = await invoke<{ releases: HelmReleaseSummary[] }>("helm_releases_list", { contextId, namespace });
-        return value.releases;
+      list: (request, listener) => {
+        const id = `helm-list-${++subscriptionSequence}`;
+        const channel = new Channel<HelmListEvent>();
+        let active = true;
+        channel.onmessage = (event) => { if (active) listener(event); };
+        const started = invoke("helm_releases_start", { id, request, channel });
+        void started.catch((cause) => {
+          if (active) listener({ kind: "error", message: String(cause) });
+        });
+        return () => {
+          active = false;
+          // Stop after registration, even if disposal raced the start command.
+          void started.then(() => invoke("helm_releases_stop", { id })).catch(() => {});
+        };
       },
+      closeList: (request) => invoke<void>("helm_releases_close", { request }),
       get: async (request: HelmGetRequest): Promise<HelmReleaseDetail> => {
         const value = await invoke<{ release: HelmReleaseDetail }>("helm_releases_get", { request });
         return value.release;
