@@ -38,6 +38,8 @@ import { DetailHeader } from "./DetailHeader";
 import { LogViewer } from "./LogViewer";
 import { MutationDiffView } from "./MutationDiffView";
 import { OverviewTab, type PodsPreview } from "./OverviewTab";
+import { PortForwardSection } from "./PortForwardSection";
+import { extractForwardPorts } from "./port-forward-ports";
 import { resourceActionsFor, type ResourceActionId } from "./resource-actions";
 import { formatTimestamp } from "./resource-format";
 import { HighlightedYaml } from "./yaml-highlight";
@@ -49,7 +51,7 @@ type MutationDraft = Omit<
   "contextId" | "resourceKind" | "namespace" | "name"
 >;
 
-type DetailTab = "overview" | "pods" | "yaml" | "events" | "related" | "logs";
+type DetailTab = "overview" | "ports" | "pods" | "yaml" | "events" | "related" | "logs";
 type OperationDialog = "image" | null;
 
 /** Static catalog entry; module-level so the pods hook sees a stable reference. */
@@ -176,6 +178,15 @@ export function ResourceDetailView({
   });
   // Live CPU/memory for a single Pod; the hook idles (no polls) for other kinds.
   const isPod = row?.kind === "Pod";
+  // The Ports tab serves every kind whose forward the core can resolve; it
+  // stays visible even without declared ports (manual input covers those).
+  const canForward = Boolean(row && isPortForwardKind(row.kind));
+  // Forwardable TCP ports from the live YAML; service and workload targets
+  // resolve to a backing pod in the core before the SPDY dial.
+  const forwardPorts = useMemo(
+    () => (detail && row && isPortForwardKind(row.kind) ? extractForwardPorts(row.kind, detail.yaml) : []),
+    [detail, row],
+  );
   const metrics = usePodMetrics(
     contextId,
     isPod ? row?.namespace ?? "" : "",
@@ -278,6 +289,7 @@ export function ResourceDetailView({
       >
         <TabsList className="resource-detail-tab-list" aria-label="Resource details">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          {canForward && <TabsTrigger value="ports">Ports</TabsTrigger>}
           {workload && (
             <TabsTrigger value="pods">
               Pods{podCount ? ` (${podCount}${pods.list.continueToken ? "+" : ""})` : ""}
@@ -312,8 +324,20 @@ export function ResourceDetailView({
             />
           </TabsContent>
 
+          {canForward && (
+            <TabsContent value="ports" className="resource-detail-padded-tab">
+              <PortForwardSection
+                  contextId={contextId}
+                  namespace={row!.namespace}
+                  name={row!.name}
+                  kind={row!.kind}
+                ports={forwardPorts}
+              />
+            </TabsContent>
+          )}
+
           {workload && (
-            <TabsContent value="pods">
+            <TabsContent value="pods" className="resource-detail-padded-tab">
               {details?.selectorPartial ? (
                 <EmptyTab
                   icon={<Box />}
@@ -334,7 +358,7 @@ export function ResourceDetailView({
             </TabsContent>
           )}
 
-          <TabsContent value="yaml">
+          <TabsContent value="yaml" className="resource-detail-padded-tab">
             <ResourceYamlTab
               key={row.uid || `${row.namespace}/${row.name}`}
               kind={row.kind}
@@ -349,16 +373,16 @@ export function ResourceDetailView({
             />
           </TabsContent>
 
-          <TabsContent value="events">
+          <TabsContent value="events" className="resource-detail-padded-tab">
             <EventsView events={events} />
           </TabsContent>
 
-          <TabsContent value="related">
+          <TabsContent value="related" className="resource-detail-padded-tab">
             <RelatedView related={related} onNavigate={onNavigateRelated} />
           </TabsContent>
 
           {showLogs && (
-            <TabsContent value="logs">
+            <TabsContent value="logs" className="resource-detail-padded-tab">
               <section className="resource-detail-section log-viewer-section">
                 <LogViewer
                   contextId={contextId}
@@ -425,6 +449,10 @@ export function ResourceDetailView({
       </AlertDialog>
     </section>
   );
+}
+
+function isPortForwardKind(kind: string): boolean {
+  return ["Pod", "Service", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"].includes(kind);
 }
 
 function isWorkloadLogKind(kind: string): kind is WorkloadKind {

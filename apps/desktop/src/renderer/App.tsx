@@ -22,6 +22,7 @@ import { useDiagnostics } from "./hooks/useDiagnostics";
 import { useDiscovery } from "./hooks/useDiscovery";
 import { useHelm } from "./hooks/useHelm";
 import { useMutation } from "./hooks/useMutation";
+import { discardPortForwards, retryPendingForwardStops, setPortForwardContext, usePendingForwardStops } from "./hooks/usePortForwards";
 import { useNamespaces } from "./hooks/useNamespaces";
 import { useOverview } from "./hooks/useOverview";
 import { useResourceDetail } from "./hooks/useResourceDetail";
@@ -62,6 +63,11 @@ export default function App() {
   const contexts = useContexts(core);
   const { contextId } = contexts;
   const [error, setError] = useState("");
+  const pendingForwardStops = usePendingForwardStops();
+  useEffect(() => {
+    if (core.state === "ready") void setPortForwardContext(contextId);
+    else discardPortForwards();
+  }, [contextId, core.state]);
   const [kind, setKind] = useState<ResourceKind>(DEFAULT_KIND);
   const namespaces = useNamespaces(contextId, contexts.contexts, setError);
   const resources = useResourceList({
@@ -320,6 +326,7 @@ export default function App() {
     setError("");
     namespaces.setNamespace(target.namespace || "");
     contexts.setContextChoice(target.id);
+    void setPortForwardContext(target.id).catch((cause) => setError(messageOf(cause)));
     contexts.setContextId(target.id);
     contexts.setView("workbench");
     localStorage.setItem("aster.lastContext", target.id);
@@ -331,6 +338,7 @@ export default function App() {
   const showContextPicker = useCallback(() => {
     contexts.setContextChoice(contextId);
     contexts.setContextQuery("");
+    void setPortForwardContext("").catch((cause) => setError(messageOf(cause)));
     contexts.setContextId("");
     namespaces.setNamespace("");
     resources.setQuery("");
@@ -473,6 +481,22 @@ export default function App() {
     void desktop.app.version().then(setAppVersion).catch(() => undefined);
   }, []);
 
+  const forwardCleanupNotice = pendingForwardStops.length > 0 ? (
+    <aside className="update-notice port-forward-cleanup-notice" data-testid="port-forward-cleanup" role="status">
+      <div className="update-notice-body">
+        <p className="update-notice-title">{pendingForwardStops.some((entry) => entry.error) ? "Could not stop port forwards" : "Stopping port forwards"}</p>
+        {pendingForwardStops.map((entry) => (
+          <p className="update-notice-notes" key={entry.id}>
+            {entry.contextId} · {entry.namespace}/{entry.name} · localhost:{entry.localPort}
+            {entry.error ? ` — ${entry.error}` : " — Stopping…"}
+          </p>
+        ))}
+        <Button size="sm" variant="outline" disabled={pendingForwardStops.every((entry) => entry.busy)}
+          onClick={() => void retryPendingForwardStops()}>Retry stopping</Button>
+      </div>
+    </aside>
+  ) : null;
+
   if (contexts.view === "settings") {
     return (
       <>
@@ -502,7 +526,7 @@ export default function App() {
           if (contexts.settingsFrom === "contexts") void contexts.loadContexts();
         }}
       />
-      {updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />}
+      {forwardCleanupNotice || (updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />)}
       </>
     );
   }
@@ -548,7 +572,7 @@ export default function App() {
         }}
         onOpenExternal={(url) => void desktop.app.openExternal(url)}
       />
-      {updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />}
+      {forwardCleanupNotice || (updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />)}
       </>
     );
   }
@@ -746,7 +770,7 @@ export default function App() {
             </Suspense>
           )}
       </div>
-      {welcomeVisible ? (
+      {forwardCleanupNotice || (welcomeVisible ? (
         <WelcomeCard
           isMac={desktop.platform === "darwin"}
           onDismiss={dismissWelcome}
@@ -754,7 +778,7 @@ export default function App() {
         />
       ) : updateCard ? (
         <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />
-      ) : null}
+      ) : null)}
       <CommandPalette
         open={paletteOpen}
         onOpenChange={(open) => {

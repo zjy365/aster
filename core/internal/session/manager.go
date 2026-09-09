@@ -5,13 +5,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/httpstream"
+	streamspdy "k8s.io/apimachinery/pkg/util/httpstream/spdy"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -20,7 +25,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/client-go/transport/spdy"
 
 	"github.com/zjy365/aster/core/internal/version"
 )
@@ -252,7 +256,7 @@ func (m *Manager) Client(contextID string) (dynamic.Interface, error) {
 // PortForward opens a loopback listener on a random free port and forwards to
 // the pod port over SPDY. The returned stop function tears the listener down;
 // the forward also ends when the context is cancelled.
-func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name string, podPort int64) (func(), int, error) {
+func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name string, podPort, localPort int64) (func(), int, error) {
 	if contextID == "" || namespace == "" || name == "" {
 		return nil, 0, fmt.Errorf("contextId, namespace and name are required")
 	}
@@ -261,14 +265,17 @@ func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name st
 		return nil, 0, fmt.Errorf("load context %q: %w", contextID, err)
 	}
 	config.UserAgent = version.UserAgent()
-	transport, upgrade, err := spdy.RoundTripperFor(config)
+	// HTTP/1.1 upgrades use net/http's cancellable response-header read.
+	config.NextProtos = []string{"http/1.1"}
+	client, err := rest.HTTPClientFor(config)
 	if err != nil {
-		return nil, 0, fmt.Errorf("create spdy round tripper: %w", err)
+		return nil, 0, fmt.Errorf("create port-forward client: %w", err)
 	}
-	dialer := spdy.NewDialer(upgrade, &http.Client{Transport: transport}, "POST", upstreamURL(config.Host, namespace, name))
+	dialer := &portForwardDialer{ctx: ctx, client: client, url: upstreamURL(config.Host, namespace, name)}
 	stopChan := make(chan struct{})
+	stop := sync.OnceFunc(func() { close(stopChan) })
 	readyChan := make(chan struct{})
-	forwarder, err := portforward.New(dialer, []string{fmt.Sprintf("0:%d", podPort)}, stopChan, readyChan, io.Discard, io.Discard)
+	forwarder, err := portforward.New(dialer, []string{fmt.Sprintf("%d:%d", localPort, podPort)}, stopChan, readyChan, io.Discard, io.Discard)
 	if err != nil {
 		return nil, 0, fmt.Errorf("create port forwarder: %w", err)
 	}
@@ -279,26 +286,101 @@ func (m *Manager) PortForward(ctx context.Context, contextID, namespace, name st
 	case err := <-errChan:
 		return nil, 0, fmt.Errorf("port forward: %w", err)
 	case <-ctx.Done():
-		close(stopChan)
+		stop()
 		return nil, 0, ctx.Err()
 	}
 	ports, err := forwarder.GetPorts()
 	if err != nil || len(ports) == 0 {
-		close(stopChan)
+		stop()
 		return nil, 0, fmt.Errorf("read forwarded ports: %w", err)
 	}
-	stop := func() { close(stopChan) }
 	go func() {
-		<-ctx.Done()
-		stop()
+		select {
+		case <-ctx.Done():
+			stop()
+		case <-stopChan:
+		case <-errChan:
+			stop()
+		}
 	}()
 	return stop, int(ports[0].Local), nil
 }
 
+// client-go's SPDY transport does not cancel a blocked response-header read.
+// net/http retains cancellation and kubeconfig transport settings, and exposes
+// a successful 101 response as a duplex stream for the SPDY client.
+type portForwardDialer struct {
+	ctx    context.Context
+	client *http.Client
+	url    *url.URL
+}
+
+func (d *portForwardDialer) Dial(protocols ...string) (httpstream.Connection, string, error) {
+	request, err := http.NewRequestWithContext(d.ctx, http.MethodPost, d.url.String(), nil)
+	if err != nil {
+		return nil, "", err
+	}
+	request.Header.Set(httpstream.HeaderConnection, httpstream.HeaderUpgrade)
+	request.Header.Set(httpstream.HeaderUpgrade, streamspdy.HeaderSpdy31)
+	for _, protocol := range protocols {
+		request.Header.Add(httpstream.HeaderProtocolVersion, protocol)
+	}
+	var socket net.Conn
+	request = request.WithContext(httptrace.WithClientTrace(request.Context(), &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) { socket = info.Conn },
+	}))
+	response, err := d.client.Do(request)
+	if err != nil {
+		return nil, "", err
+	}
+	protocol := response.Header.Get(httpstream.HeaderProtocolVersion)
+	accepted := false
+	for _, offered := range protocols {
+		if protocol == offered {
+			accepted = true
+		}
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols || !accepted ||
+		!strings.EqualFold(response.Header.Get(httpstream.HeaderUpgrade), streamspdy.HeaderSpdy31) {
+		response.Body.Close()
+		return nil, "", fmt.Errorf("port-forward upgrade rejected: HTTP %d", response.StatusCode)
+	}
+	stream, ok := response.Body.(io.ReadWriteCloser)
+	if !ok || socket == nil {
+		response.Body.Close()
+		return nil, "", fmt.Errorf("port-forward upgrade did not return a duplex stream")
+	}
+	connection, err := streamspdy.NewClientConnectionWithPings(&upgradedForwardConn{Conn: socket, stream: stream}, 5*time.Second)
+	if err != nil {
+		stream.Close()
+		return nil, "", err
+	}
+	return connection, protocol, nil
+}
+
+// Read through the HTTP response body to preserve bytes buffered during the
+// upgrade; delegate addresses and deadlines to the underlying socket.
+type upgradedForwardConn struct {
+	net.Conn
+	stream io.ReadWriteCloser
+}
+
+func (c *upgradedForwardConn) Read(p []byte) (int, error)  { return c.stream.Read(p) }
+func (c *upgradedForwardConn) Write(p []byte) (int, error) { return c.stream.Write(p) }
+func (c *upgradedForwardConn) Close() error                { return c.stream.Close() }
+
 func upstreamURL(host, namespace, name string) *url.URL {
+	scheme := "https"
+	trimmed := host
+	if strings.HasPrefix(host, "http://") {
+		scheme = "http"
+		trimmed = strings.TrimPrefix(host, "http://")
+	} else {
+		trimmed = strings.TrimPrefix(host, "https://")
+	}
 	return &url.URL{
-		Scheme: "https",
-		Host:   strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://"),
+		Scheme: scheme,
+		Host:   trimmed,
 		Path:   fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", namespace, name),
 	}
 }

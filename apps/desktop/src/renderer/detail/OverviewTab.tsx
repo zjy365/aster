@@ -4,6 +4,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import type { RelatedResource, ResourceEvent, ResourceRow } from "../../shared/types";
 import { Button } from "../components/ui/button";
 import { StatusDot } from "../components/ResourceTable";
+import { PortForwardSection } from "./PortForwardSection";
+import type { ForwardPort } from "./port-forward-ports";
 import { formatReady } from "../lib/format";
 import { formatAge, formatTimestamp } from "./resource-format";
 import type { WorkloadCondition, WorkloadDetails } from "./workload-detail";
