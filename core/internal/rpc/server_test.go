@@ -71,6 +71,7 @@ func TestStartPortForwardDetachesFromRequestContext(t *testing.T) {
 		stop:              func() {},
 	}
 	service := resources.NewService(provider)
+	t.Cleanup(service.StopAllPortForwards)
 	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
 	if err != nil {
 		t.Fatal(err)

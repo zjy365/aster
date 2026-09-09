@@ -58,13 +58,23 @@ func (s *Service) StartPortForward(ctx context.Context, request PortForwardReque
 	if !ok {
 		return PortForwardResponse{}, invalid("port-forward provider is unavailable")
 	}
-	stop, boundPort, err := provider.PortForward(ctx, request.ContextID, request.Namespace, podName, podPort, int64(request.LocalPort))
+	// Propagate cancellation during setup, then transfer ownership to the registry.
+	forwardCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	cancelSetup := context.AfterFunc(ctx, cancel)
+	stop, boundPort, err := provider.PortForward(forwardCtx, request.ContextID, request.Namespace, podName, podPort, int64(request.LocalPort))
+	detached := cancelSetup()
 	if err != nil {
+		cancel()
 		return PortForwardResponse{}, err
+	}
+	if !detached || ctx.Err() != nil {
+		cancel()
+		stop()
+		return PortForwardResponse{}, ctx.Err()
 	}
 	id := newPortForwardID()
 	s.portForwardMu.Lock()
-	s.portForwards[id] = portForwardEntry{stop: stop}
+	s.portForwards[id] = portForwardEntry{stop: func() { cancel(); stop() }}
 	s.portForwardMu.Unlock()
 	return PortForwardResponse{ID: id, LocalPort: boundPort, Pod: resolved}, nil
 }
@@ -79,6 +89,9 @@ var forwardKinds = map[string]bool{
 }
 
 func (s *Service) StopPortForward(_ context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return invalid("port-forward id is required")
+	}
 	s.portForwardMu.Lock()
 	entry, exists := s.portForwards[id]
 	if exists {
@@ -86,7 +99,7 @@ func (s *Service) StopPortForward(_ context.Context, id string) error {
 	}
 	s.portForwardMu.Unlock()
 	if !exists {
-		return invalid("unknown port-forward id")
+		return nil
 	}
 	entry.stop()
 	return nil

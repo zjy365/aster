@@ -177,15 +177,14 @@ export function ResourceDetailView({
   });
   // Live CPU/memory for a single Pod; the hook idles (no polls) for other kinds.
   const isPod = row?.kind === "Pod";
-  const isService = row?.kind === "Service";
   // The Ports tab serves every kind whose forward the core can resolve; it
   // stays visible even without declared ports (manual input covers those).
-  const canForward = Boolean(row && (isPod || isService || isWorkloadLogKind(row.kind)));
+  const canForward = Boolean(row && isPortForwardKind(row.kind));
   // Forwardable TCP ports from the live YAML; service and workload targets
   // resolve to a backing pod in the core before the SPDY dial.
   const forwardPorts = useMemo(
-    () => (detail && row && (isPod || isService || isWorkloadLogKind(row.kind)) ? extractForwardPorts(row.kind, detail.yaml) : []),
-    [detail, row, isPod, isService],
+    () => (detail && row && isPortForwardKind(row.kind) ? extractForwardPorts(row.kind, detail.yaml) : []),
+    [detail, row],
   );
   const metrics = usePodMetrics(
     contextId,
@@ -325,21 +324,19 @@ export function ResourceDetailView({
           </TabsContent>
 
           {canForward && (
-            <TabsContent value="ports">
-              <section className="resource-detail-section port-forward-section">
-                <PortForwardSection
+            <TabsContent value="ports" className="resource-detail-padded-tab">
+              <PortForwardSection
                   contextId={contextId}
                   namespace={row!.namespace}
                   name={row!.name}
                   kind={row!.kind}
-                  ports={forwardPorts}
-                />
-              </section>
+                ports={forwardPorts}
+              />
             </TabsContent>
           )}
 
           {workload && (
-            <TabsContent value="pods">
+            <TabsContent value="pods" className="resource-detail-padded-tab">
               {details?.selectorPartial ? (
                 <EmptyTab
                   icon={<Box />}
@@ -360,7 +357,7 @@ export function ResourceDetailView({
             </TabsContent>
           )}
 
-          <TabsContent value="yaml">
+          <TabsContent value="yaml" className="resource-detail-padded-tab">
             <ResourceYamlTab
               key={row.uid || `${row.namespace}/${row.name}`}
               kind={row.kind}
@@ -375,16 +372,16 @@ export function ResourceDetailView({
             />
           </TabsContent>
 
-          <TabsContent value="events">
+          <TabsContent value="events" className="resource-detail-padded-tab">
             <EventsView events={events} />
           </TabsContent>
 
-          <TabsContent value="related">
+          <TabsContent value="related" className="resource-detail-padded-tab">
             <RelatedView related={related} onNavigate={onNavigateRelated} />
           </TabsContent>
 
           {showLogs && (
-            <TabsContent value="logs">
+            <TabsContent value="logs" className="resource-detail-padded-tab">
               <section className="resource-detail-section log-viewer-section">
                 <LogViewer
                   contextId={contextId}
@@ -451,6 +448,10 @@ export function ResourceDetailView({
       </AlertDialog>
     </section>
   );
+}
+
+function isPortForwardKind(kind: string): boolean {
+  return ["Pod", "Service", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"].includes(kind);
 }
 
 function isWorkloadLogKind(kind: string): kind is WorkloadKind {

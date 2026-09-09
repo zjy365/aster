@@ -460,11 +460,7 @@ func (s *Server) startPortForward(writer http.ResponseWriter, request *http.Requ
 	if rejectInvalid(writer, validatePortForwardRequest(value)) {
 		return
 	}
-	// A forward's lifetime belongs to the service registry, not to the HTTP
-	// request that started it: the request context dies as soon as the
-	// response is written, while the forward must survive until it is
-	// stopped explicitly or the sidecar process exits.
-	result, err := s.resources.StartPortForward(context.Background(), value)
+	result, err := s.resources.StartPortForward(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
 		return

@@ -9,7 +9,6 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -62,17 +61,15 @@ func (m *Manager) resolveServiceForwardTarget(ctx context.Context, contextID str
 	}
 	var servicePort *corev1.ServicePort
 	for index := range service.Spec.Ports {
-		if int64(service.Spec.Ports[index].Port) == request.PodPort {
+		if int64(service.Spec.Ports[index].Port) == request.PodPort &&
+			(service.Spec.Ports[index].Protocol == "" || service.Spec.Ports[index].Protocol == corev1.ProtocolTCP) {
 			port := service.Spec.Ports[index]
 			servicePort = &port
 			break
 		}
 	}
 	if servicePort == nil {
-		return "", 0, fmt.Errorf("service %q has no port %d", request.Name, request.PodPort)
-	}
-	if servicePort.Protocol != "" && servicePort.Protocol != corev1.ProtocolTCP {
-		return "", 0, fmt.Errorf("port %d on service %q is %s; only TCP can be forwarded", request.PodPort, request.Name, servicePort.Protocol)
+		return "", 0, fmt.Errorf("service %q has no TCP port %d", request.Name, request.PodPort)
 	}
 
 	slices, err := client.DiscoveryV1().EndpointSlices(request.Namespace).List(ctx, metav1.ListOptions{
@@ -80,7 +77,7 @@ func (m *Manager) resolveServiceForwardTarget(ctx context.Context, contextID str
 	})
 	if err != nil && apierrors.IsNotFound(err) {
 		// Pre-1.19 clusters only have the legacy Endpoints object.
-		slices = nil
+		return m.resolveLegacyEndpoints(ctx, client, request, servicePort)
 	} else if err != nil {
 		return "", 0, fmt.Errorf("list endpointslices for service %q: %w", request.Name, err)
 	}
@@ -99,14 +96,7 @@ func (m *Manager) resolveServiceForwardTarget(ctx context.Context, contextID str
 			}
 		}
 	}
-	if slices != nil {
-		// Newer path found slices but no ready port matched: try legacy
-		// Endpoints before giving up so nothing regresses on mixed clusters.
-		if fallback, port, err := m.resolveLegacyEndpoints(ctx, client, request, servicePort); err == nil {
-			return fallback, port, nil
-		}
-		return "", 0, fmt.Errorf("service %q has no ready endpoints", request.Name)
-	}
+	// Empty or unusable slices can occur on mixed-version clusters.
 	return m.resolveLegacyEndpoints(ctx, client, request, servicePort)
 }
 
@@ -124,7 +114,7 @@ func (m *Manager) resolveLegacyEndpoints(ctx context.Context, client kubernetes.
 			}
 			for portIndex := range subset.Ports {
 				port := subset.Ports[portIndex]
-			if port.Name == servicePort.TargetPort.StrVal || (servicePort.TargetPort.Type == intstr.Int && int64(port.Port) == int64(servicePort.TargetPort.IntValue())) {
+				if port.Name == servicePort.Name && (port.Protocol == "" || port.Protocol == corev1.ProtocolTCP) && port.Port > 0 {
 					return address.TargetRef.Name, int64(port.Port), nil
 				}
 			}
@@ -138,10 +128,12 @@ func endpointReady(endpoint *discoveryv1.Endpoint) bool {
 }
 
 func portMatchesServicePort(port discoveryv1.EndpointPort, servicePort *corev1.ServicePort) bool {
-	if servicePort.TargetPort.Type == intstr.Int {
-		return port.Port != nil && int64(*port.Port) == int64(servicePort.TargetPort.IntValue())
+	name := ""
+	if port.Name != nil {
+		name = *port.Name
 	}
-	return port.Name != nil && *port.Name == servicePort.TargetPort.StrVal
+	return name == servicePort.Name && port.Port != nil && *port.Port > 0 &&
+		(port.Protocol == nil || *port.Protocol == corev1.ProtocolTCP)
 }
 
 func portValue(port discoveryv1.EndpointPort) int32 {

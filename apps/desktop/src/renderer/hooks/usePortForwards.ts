@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { desktop } from "../lib/desktop";
 import type { PodPortForward, PortForwardStartRequest } from "../../shared/types";
 
@@ -28,20 +28,79 @@ interface StoreState {
 const listeners = new Set<() => void>();
 let state: StoreState = { contextId: "", entries: new Map() };
 let snapshotCache: PortForwardEntry[] = [];
+export interface PendingForwardStop extends PortForwardEntry { contextId: string; id: string }
+const pendingStops = new Map<string, PendingForwardStop>();
+let pendingSnapshot: PendingForwardStop[] = [];
+const stopping = new Map<string, Promise<void>>();
+let coreGeneration = 0;
 
-function notify() {
-  snapshotCache = Array.from(state.entries.values());
-  for (const listener of listeners) listener();
+function stopById(id: string): Promise<void> {
+  const existing = stopping.get(id);
+  if (existing) return existing;
+  const promise = Promise.resolve().then(() => desktop.resources.portForwardStop(id)).finally(() => {
+    if (stopping.get(id) === promise) stopping.delete(id);
+  });
+  stopping.set(id, promise);
+  return promise;
 }
 
-/** Resets the store when the active context changes: a forward belongs to the context it was started in. */
-function ensureContext(contextId: string) {
-  if (state.contextId === contextId) return;
-  state = { contextId, entries: new Map() };
+async function retireForward(entry: PortForwardEntry, contextId: string) {
+  if (!entry.id) return;
+  const pending = pendingStops.get(entry.id) ?? { ...entry, id: entry.id, contextId };
+  pendingStops.set(entry.id, pending);
+  pending.busy = true;
+  pending.error = undefined;
+  notify();
+  try {
+    await stopById(pending.id);
+    if (pendingStops.get(pending.id) === pending) pendingStops.delete(pending.id);
+  } catch (error) {
+    pending.error = error instanceof Error ? error.message : String(error);
+  } finally {
+    pending.busy = false;
+    notify();
+  }
+}
+
+export async function retryPendingForwardStops() {
+  await Promise.all([...pendingStops.values()].filter((entry) => !entry.busy)
+    .map((entry) => retireForward(entry, entry.contextId)));
+}
+
+/** The sidecar has exited, so its listeners and IDs no longer exist. */
+export function discardPortForwards() {
+  coreGeneration++;
+  state = { contextId: "", entries: new Map() };
+  pendingStops.clear();
+  stopping.clear();
   notify();
 }
 
+export function usePendingForwardStops() {
+  return useSyncExternalStore(subscribe, () => pendingSnapshot, () => pendingSnapshot);
+}
+
+function notify() {
+  snapshotCache = Array.from(state.entries.values());
+  pendingSnapshot = Array.from(pendingStops.values());
+  for (const listener of listeners) listener();
+}
+
+/** Called by App, including when the Ports tab is not mounted. */
+export async function setPortForwardContext(contextId: string): Promise<void> {
+  if (state.contextId === contextId) return;
+  const previous = state;
+  state = { contextId, entries: new Map() };
+  notify();
+  await Promise.all(Array.from(previous.entries.values(), async (entry) => {
+    await retireForward(entry, previous.contextId);
+  }));
+}
+
 export async function startPortForward(request: PortForwardStartRequest): Promise<void> {
+  if (request.contextId !== state.contextId) return;
+  const owner = state;
+  const generation = coreGeneration;
   const kind = request.kind || "Pod";
   const key = forwardKey(kind, request.namespace, request.name, request.podPort);
   const existing = state.entries.get(key);
@@ -61,10 +120,15 @@ export async function startPortForward(request: PortForwardStartRequest): Promis
       request = { ...request, localPort: 0 };
     }
     const response: PodPortForward = await desktop.resources.portForwardStart(request);
+    if (generation !== coreGeneration) return;
     entry.id = response.id;
     entry.localPort = response.localPort;
     entry.pod = response.pod;
     entry.busy = false;
+    if (state !== owner || owner.entries.get(key) !== entry) {
+      await retireForward(entry, owner.contextId);
+      return;
+    }
   } catch (error) {
     entry.busy = false;
     entry.error = error instanceof Error ? error.message : String(error);
@@ -75,15 +139,21 @@ export async function startPortForward(request: PortForwardStartRequest): Promis
 export async function stopPortForward(key: string): Promise<void> {
   const entry = state.entries.get(key);
   if (!entry) return;
-  state.entries.delete(key);
-  notify();
+  if (entry.busy && entry.id) return;
   if (entry.id) {
+    entry.busy = true;
+    notify();
     try {
-      await desktop.resources.portForwardStop(entry.id);
-    } catch {
-      // The core is gone or the forward already ended; the entry is gone either way.
+      await stopById(entry.id);
+    } catch (error) {
+      entry.busy = false;
+      entry.error = error instanceof Error ? error.message : String(error);
+      notify();
+      return;
     }
   }
+  if (state.entries.get(key) === entry) state.entries.delete(key);
+  notify();
 }
 
 function subscribe(listener: () => void) {
@@ -93,32 +163,26 @@ function subscribe(listener: () => void) {
 
 /** Reads the module-level forward registry so forwards survive navigation. */
 export function usePortForwards(contextId: string) {
-  useEffect(() => {
-    ensureContext(contextId);
-  }, [contextId]);
   const entries = useSyncExternalStore(
     subscribe,
     () => snapshotCache,
     () => snapshotCache,
   );
-  const [, force] = useState(0);
-  const byKey = useCallback((key: string) => state.entries.get(key), []);
-  const start = useCallback((request: PortForwardStartRequest) => startPortForward(request), []);
-  const stop = useCallback((key: string) => stopPortForward(key), []);
-  // Entries mutate in place; bump a counter so byKey callers re-render.
-  useEffect(() => {
-    const listener = () => force((value) => value + 1);
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
-  }, []);
-  return useMemo(() => ({ entries, start, stop, byKey }), [entries, start, stop, byKey]);
+  const byKey = useCallback((key: string) => state.contextId === contextId ? state.entries.get(key) : undefined, [contextId]);
+  return useMemo(() => ({
+    entries: state.contextId === contextId ? entries : [],
+    start: startPortForward,
+    stop: stopPortForward,
+    byKey,
+  }), [entries, contextId, byKey]);
 }
 
 /** Test-only accessors; never imported by app code. */
 export function resetPortForwardStoreForTests() {
-  state = { contextId: "", entries: new Map() };
-  notify();
+  discardPortForwards();
 }
+
+export function getPendingForwardStopsForTests() { return pendingSnapshot; }
 
 export function getPortForwardSnapshotForTests(): Map<string, PortForwardEntry> {
   return state.entries;
