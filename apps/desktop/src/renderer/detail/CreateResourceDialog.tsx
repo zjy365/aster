@@ -2,6 +2,7 @@
 import { FileCode2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { YamlEditor } from "../components/YamlEditor";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -96,14 +97,13 @@ export function CreateResourceDialog({
             ariaLabel="Create dry-run review"
           />
         ) : (
-          <textarea
-            className="resource-yaml-editor create-resource-editor"
+          <YamlEditor
+            className="create-resource-editor"
             value={yaml}
             readOnly={busy}
-            spellCheck={false}
             aria-label={`New ${kind.kind} YAML`}
             data-testid="create-yaml-editor"
-            onChange={(event) => setYaml(event.target.value)}
+            onChange={setYaml}
           />
         )}
 

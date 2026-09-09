@@ -722,7 +722,7 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
 
   const editor = detail.getByTestId("resource-yaml-editor");
   await expect(editor).toBeVisible();
-  await expect(editor).toHaveAttribute("wrap", "off");
+  await expect(detail.locator(".cm-lineNumbers")).toBeVisible();
   await expect
     .poll(() => editor.evaluate((el) => getComputedStyle(el).whiteSpace))
     .toBe("pre");
@@ -731,11 +731,14 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
     "      apiVersion: apps/v1 kind: Deployment metadata: name: embedded workload spec: " +
     "replicas: 2 template: spec: containers: name: web image: nginx:1.27 ".repeat(4).trim();
   const blockScalar = `embedded.yaml: |\n${longLine}`;
-  await editor.fill((await editor.inputValue()) + "\n" + blockScalar);
-  expect(await editor.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await editor.focus();
+  await editor.press("ControlOrMeta+End");
+  await page.keyboard.insertText("\n" + blockScalar);
+  const scroller = detail.locator(".cm-scroller");
+  await expect.poll(() => scroller.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
 
   // Park the scroll at the long line so the screenshot shows it intact.
-  await editor.evaluate((el) => {
+  await scroller.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
     el.scrollLeft = 0;
   });
@@ -744,11 +747,59 @@ test("YAML editor scrolls long lines horizontally instead of wrapping", async ({
   // JetBrains Mono through FreeType, so subpixel antialiasing differs by a few
   // percent on text edges. Absorb that cross-platform delta without hiding
   // layout drift, which moves orders of magnitude more pixels.
-  await expect(editor).toHaveScreenshot("yaml-editor-nowrap.png", {
+  await expect(detail.locator(".resource-yaml-editor")).toHaveScreenshot("yaml-editor-nowrap.png", {
     animations: "disabled",
     maxDiffPixelRatio: 0.05,
   });
   await screenshot(page, "detail-yaml-editor-nowrap-1280");
+  expect(failures).toEqual([]);
+});
+
+test("YAML editor preserves IME, history, revert and keyboard focus", async ({ page, context }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+  await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+  await page.getByTestId("resource-action-edit").click();
+  const editor = page.getByTestId("resource-yaml-editor");
+  await expect(editor).toHaveAttribute("aria-label", "Deployment YAML");
+  await editor.focus();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.insertText("\n# ");
+  // Chromium's native composition path mutates the editing DOM like an IME,
+  // exercising CodeMirror's observer and React's controlled-value echo.
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Input.imeSetComposition", { text: "zhong", selectionStart: 5, selectionEnd: 5 });
+  await expect(editor).toContainText("# zhong");
+  await cdp.send("Input.imeSetComposition", { text: "中文", selectionStart: 2, selectionEnd: 2 });
+  await cdp.send("Input.insertText", { text: "中文" });
+  await expect(editor).toContainText("# 中文");
+  await expect(editor).not.toContainText("zhong");
+  await page.keyboard.insertText("注释");
+  await expect(editor).toContainText("# 中文注释");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(editor).not.toContainText("注释");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(editor).toContainText("# 中文注释");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "View", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "Revert", exact: true }).click();
+  await expect(editor).not.toContainText("中文");
+  await expect(page.getByRole("button", { name: "Revert", exact: true })).toBeDisabled();
+  await expect(page.getByTestId("yaml-prepare-dry-run")).toBeDisabled();
+  // Highlighting adapts to the app's CSS tokens in either theme.
+  await page.getByTestId("theme-menu").click();
+  await page.getByRole("menuitem", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(editor.locator(".cm-line span").first()).toBeVisible();
+  await page.setViewportSize({ width: 900, height: 640 });
+  await expectNoOverflow(page, "YAML editor dark 900x640");
+  const frame = await page.locator(".resource-yaml-editor").boundingBox();
+  const actions = await page.locator(".resource-editor-actions").boundingBox();
+  expect(frame!.y + frame!.height).toBeLessThanOrEqual(actions!.y);
+  await screenshot(page, "yaml-editor-dark-900");
+  await cdp.detach();
   expect(failures).toEqual([]);
 });
 
@@ -775,7 +826,10 @@ test("detail reflects an applied YAML edit and survives manual refresh", async (
   await page.getByTestId("resource-action-edit").click();
   const editor = detail.getByTestId("resource-yaml-editor");
   await expect(editor).toBeVisible();
-  await editor.fill((await editor.inputValue()).replace("  replicas: 2", "  replicas: 3"));
+  await editor.locator(".cm-line").filter({ hasText: /^  replicas: 2$/ }).click();
+  await editor.press("End");
+  await editor.press("Backspace");
+  await page.keyboard.insertText("3");
   await detail.getByTestId("yaml-prepare-dry-run").click();
   await page.getByTestId("mutation-apply").click();
 
@@ -807,7 +861,10 @@ test("mutation review renders a collapsed GitHub-style diff", async ({ page }) =
   await page.getByTestId("resource-action-edit").click();
   const editor = page.getByTestId("resource-yaml-editor");
   await expect(editor).toBeVisible();
-  await editor.fill((await editor.inputValue()).replace("  replicas: 2", "  replicas: 5"));
+  await editor.locator(".cm-line").filter({ hasText: /^  replicas: 2$/ }).click();
+  await editor.press("End");
+  await editor.press("Backspace");
+  await page.keyboard.insertText("5");
   await page.getByTestId("yaml-prepare-dry-run").click();
 
   const dialog = page.getByTestId("mutation-review-dialog");
@@ -1185,6 +1242,38 @@ test("paste import stages a kubeconfig source in settings", async ({ page }) => 
   const dialog = page.getByTestId("paste-kubeconfig-dialog");
   await expect(dialog).toBeVisible();
 
+  const editor = dialog.getByTestId("paste-kubeconfig-content");
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveAttribute("aria-label", "Kubeconfig YAML");
+  await expect(dialog.locator(".cm-placeholder")).toContainText("apiVersion: v1");
+  // Hold the import pending to exercise read-only reconfiguration without
+  // remounting the editor, then reject it so editing can resume.
+  await page.evaluate(() => {
+    const api = window.__ASTER_DESKTOP__!.settings;
+    const originalImport = api.importKubeconfigContent;
+    api.importKubeconfigContent = async () => {
+      await new Promise<void>((_resolve, reject) => {
+        Object.assign(window, { __rejectYamlImport: () => reject(new Error("temporary import failure")) });
+      });
+      return "";
+    };
+    Object.assign(window, { __restoreYamlImport: () => { api.importKubeconfigContent = originalImport; } });
+  });
+  await editor.fill("kind: Config");
+  await dialog.getByTestId("paste-kubeconfig-submit").click();
+  await expect(editor).toHaveAttribute("aria-readonly", "true");
+  await editor.focus();
+  await page.keyboard.type("should not be inserted");
+  await expect(editor).toHaveText("kind: Config");
+  await page.evaluate(() => {
+    const controls = window as unknown as { __rejectYamlImport(): void; __restoreYamlImport(): void };
+    controls.__rejectYamlImport();
+    controls.__restoreYamlImport();
+  });
+  await expect(editor).toHaveAttribute("aria-readonly", "false");
+  await expectNoOverflow(page, "paste YAML editor");
+  await screenshot(page, "paste-yaml-editor");
+
   // A paste that is not a kubeconfig is rejected in place; nothing is staged.
   await dialog.getByTestId("paste-kubeconfig-content").fill("foo: bar");
   await dialog.getByTestId("paste-kubeconfig-submit").click();
@@ -1472,7 +1561,7 @@ test("helm view lists releases and opens a detail", async ({ page }) => {
   await expect(upgradeDialog.getByTestId("helm-upgrade-chart")).toHaveValue("web");
   await expect(upgradeDialog.getByTestId("helm-upgrade-chart")).toBeDisabled();
   await expect(upgradeDialog.getByTestId("helm-upgrade-version")).toBeDisabled();
-  await expect(upgradeDialog.getByTestId("helm-upgrade-values")).toHaveValue("replicas: 2");
+  await expect(upgradeDialog.getByTestId("helm-upgrade-values")).toHaveText("replicas: 2");
   // Chart defaults sit read-only beside the editable values (Kite-style split).
   await expect(upgradeDialog.getByTestId("helm-upgrade-defaults")).toContainText("replicas: 1");
   await upgradeDialog.getByTestId("helm-upgrade-values").fill("replicas: 3");

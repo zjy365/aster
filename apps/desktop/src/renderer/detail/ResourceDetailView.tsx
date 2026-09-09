@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { Badge } from "../components/ui/badge";
+import { YamlEditor } from "../components/YamlEditor";
 import { Button } from "../components/ui/button";
 import {
   Dialog,
@@ -533,16 +534,12 @@ function YamlResourceEditor({
         </div>
         {dirty && <Badge variant="outline">Unsaved edits</Badge>}
       </div>
-      <textarea
-        className="resource-yaml-editor"
+      <YamlEditor
         value={yaml}
-        wrap="off"
         readOnly={!canMutate || mutationBusy}
-        aria-readonly={!canMutate || mutationBusy}
-        spellCheck={false}
         aria-label={`${kind} YAML`}
         data-testid="resource-yaml-editor"
-        onChange={(event) => setYaml(event.target.value)}
+        onChange={setYaml}
       />
       <div className="resource-editor-actions">
         <Button variant="outline" disabled={mutationBusy} onClick={onClose}>View</Button>
