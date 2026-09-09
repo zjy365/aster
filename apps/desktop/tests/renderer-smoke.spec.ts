@@ -136,6 +136,22 @@ const MOCK_DESKTOP_API = `
     "      lastTransitionTime: \\"2026-08-01T00:00:05Z\\"",
   ].join("\\n");
 
+  // A Pod object with a declared TCP container port, the common forward path.
+  const podYaml = (name) => [
+    "apiVersion: v1",
+    "kind: Pod",
+    "metadata:",
+    "  name: " + name,
+    "  namespace: default",
+    "spec:",
+    "  containers:",
+    "    - name: app",
+    "      image: nginx:1.27",
+    "      ports:",
+    "        - containerPort: 80",
+    "          protocol: TCP",
+  ].join("\\n");
+
   window.__ASTER_DESKTOP__ = {
     platform: "darwin",
     app: {
@@ -283,7 +299,9 @@ const MOCK_DESKTOP_API = `
         const fresh = row(request.resourceKind, index, request.resourceKind.namespaced, namespace);
         let yaml = request.resourceKind.kind === "Deployment"
           ? deploymentYaml(request.name)
-          : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
+          : request.resourceKind.kind === "Pod"
+            ? podYaml(request.name)
+            : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
         if (appliedReplicas !== null && request.resourceKind.kind === "Deployment") {
           fresh.desired = appliedReplicas;
           fresh.resourceVersion = "1002";
@@ -334,7 +352,7 @@ const MOCK_DESKTOP_API = `
         return () => timers.forEach(clearTimeout);
       },
       exec: async () => ({ stdout: "", stderr: "" }),
-      portForwardStart: async () => ({ id: "pf-1", localPort: 12_345 }),
+      portForwardStart: async (request) => ({ id: "pf-1", localPort: request.localPort || 12_345 }),
       portForwardStop: async () => undefined,
       mutate: async (request) => {
         // Mirror the API server's optimistic concurrency: the live object sits
@@ -686,6 +704,13 @@ test("resource detail opens and preserves layout", async ({ page }) => {
   await expect(page.getByTestId("overview-pods")).toContainText("pods-0", { timeout: 15_000 });
   await expectNoOverflow(page, "detail overview 1280x800");
   await screenshot(page, "detail-overview-1280");
+
+  for (const tab of ["Events", "Related"]) {
+    await detail.getByRole("tab", { name: new RegExp(tab) }).click();
+    await expect(page.getByTestId(`resource-${tab.toLowerCase()}`)).toBeVisible();
+    await expectNoOverflow(page, `detail ${tab} 1280x800`);
+    await screenshot(page, `detail-${tab.toLowerCase()}-1280`);
+  }
 
   await detail.getByRole("tab", { name: /Pods/ }).click();
   const podsPanel = page.getByTestId("workload-pods");
@@ -2120,3 +2145,191 @@ async function screenshot(page: Page, name: string): Promise<void> {
   // fade) so screenshots show the resting state, not a mid-fade frame.
   await page.screenshot({ path: path.join(directory, `renderer-${name}.png`), animations: "disabled" });
 }
+
+test("pod detail forwards a declared port and stops it", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("resource-nav-pods").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("pods-0", { timeout: 15_000 });
+  await firstRow.click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+
+  // Ports is its own tab, level with Overview and YAML.
+  await detail.getByRole("tab", { name: "Ports" }).click();
+  const section = page.getByTestId("port-forward-section");
+  await expect(section).toBeVisible({ timeout: 15_000 });
+  const portRow = section.getByTestId("port-forward-row").first();
+  await expect(portRow).toContainText("app");
+  await expect(portRow).toContainText("80/TCP");
+
+  // An empty local port falls back to a random free port first.
+  await portRow.getByTestId("port-forward-start").click();
+  await expect(portRow.getByTestId("port-forward-local")).toContainText("localhost:12345");
+
+  // The manual row's controls align vertically with the declared rows.
+  const rowGeometry = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll(".port-forward-row")];
+    return rows.map((row) => {
+      const rr = row.getBoundingClientRect();
+      return [...row.children].map((k) => {
+        const b = k.getBoundingClientRect();
+        return { tag: k.tagName, height: Math.round(b.height), topGap: Math.round(b.top - rr.top), bottomGap: Math.round(rr.bottom - b.bottom) };
+      });
+    });
+  });
+  const alignTolerance = 4;
+  for (const row of rowGeometry) {
+    for (const el of row) {
+      if (el.tag === "SPAN") continue;
+      expect(Math.abs(el.topGap - el.bottomGap), `row control ${el.tag} not vertically centered (${el.topGap}/${el.bottomGap})`).toBeLessThanOrEqual(alignTolerance);
+    }
+  }
+  await portRow.getByTestId("port-forward-stop").click();
+  await expect(portRow.getByTestId("port-forward-start")).toBeVisible();
+
+  // A custom local port binds exactly that port.
+  await portRow.getByLabel("Local port for app 80").fill("12346");
+  await portRow.getByTestId("port-forward-start").click();
+  await expect(portRow.getByTestId("port-forward-local")).toContainText("localhost:12346");
+
+  await portRow.getByTestId("port-forward-stop").click();
+  await expect(portRow.getByTestId("port-forward-start")).toBeVisible();
+
+  await expectNoOverflow(page, "pod detail port forward 1280x800");
+  await screenshot(page, "pod-detail-port-forward-1280");
+  expect(failures).toEqual([]);
+});
+
+test("manual forwards show addresses, survive navigation and stop on context exit", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    const fixture = window as unknown as {
+      __ASTER_DESKTOP__: { resources: { portForwardStart(request: { podPort: number; localPort?: number }): Promise<unknown>; portForwardStop(id: string): Promise<void> } };
+      stopped: string[];
+    };
+    fixture.stopped = [];
+    fixture.__ASTER_DESKTOP__.resources.portForwardStart = async ({ podPort, localPort }) => {
+      if (podPort === 9999) throw new Error("port unavailable");
+      return { id: `pf-${podPort}`, localPort: localPort || 12345 };
+    };
+    fixture.__ASTER_DESKTOP__.resources.portForwardStop = async (id) => { fixture.stopped.push(id); };
+  });
+  await connectToDev(page);
+  await page.getByTestId("resource-nav-pods").click();
+  await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+  const detail = page.getByTestId("resource-detail-view");
+  await detail.getByRole("tab", { name: "Ports", exact: true }).click();
+  const section = page.getByTestId("port-forward-section");
+  await section.getByLabel("Pod port", { exact: true }).fill("8080");
+  await section.getByLabel("Local port for other port").fill("99999");
+  await expect(section.getByTestId("port-forward-manual-start")).toBeDisabled();
+  await section.getByLabel("Local port for other port").fill("23456");
+  await section.getByTestId("port-forward-manual-start").click();
+  const manual = section.getByTestId("port-forward-row").filter({ hasText: "8080/TCP" });
+  await expect(manual.getByTestId("port-forward-local")).toHaveText("localhost:23456");
+  await expect(manual.getByRole("button", { name: "Copy localhost:23456" })).toBeVisible();
+  await expectNoOverflow(page, "manual forward active");
+  await screenshot(page, "manual-port-forward-active-1280");
+  await detail.getByRole("tab", { name: "Overview", exact: true }).click();
+  await detail.getByRole("tab", { name: "Ports", exact: true }).click();
+  await expect(manual.getByTestId("port-forward-stop")).toBeVisible();
+  await manual.getByTestId("port-forward-stop").click();
+  await expect(manual).toHaveCount(0);
+  await section.getByLabel("Pod port", { exact: true }).fill("9999");
+  await section.getByTestId("port-forward-manual-start").click();
+  await expect(section.getByRole("status")).toContainText("port unavailable");
+  await section.getByLabel("Pod port", { exact: true }).fill("8080");
+  await section.getByTestId("port-forward-manual-start").click();
+  await expect(manual.getByTestId("port-forward-stop")).toBeVisible();
+  // Cleanup must run even after the Ports surface has unmounted.
+  await detail.getByRole("tab", { name: "Overview", exact: true }).click();
+  await page.getByTestId("change-context").click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { stopped: string[] }).stopped)).toEqual(["pf-8080", "pf-8080"]);
+  expect(failures).toEqual([]);
+});
+
+for (const kind of ["ReplicaSet", "Job"]) {
+  test(`${kind} exposes only supported port forwarding`, async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate((kind) => {
+      const fixture = window as unknown as {
+        __ASTER_DESKTOP__: { resources: { list(request: unknown): Promise<{ items: Array<{ kind: string }> }>; get(request: unknown): Promise<{ row: { kind: string } }>; watch(request: unknown, listener: (batch: { items?: Array<{ kind: string }> }) => void): () => void } };
+      };
+      const watch = fixture.__ASTER_DESKTOP__.resources.watch;
+      fixture.__ASTER_DESKTOP__.resources.watch = (request, listener) => watch(request, (batch) => {
+        listener({ ...batch, items: batch.items?.map((item) => ({ ...item, kind })) });
+      });
+      const get = fixture.__ASTER_DESKTOP__.resources.get;
+      fixture.__ASTER_DESKTOP__.resources.get = async (request) => {
+        const result = await get(request);
+        return { ...result, row: { ...result.row, kind } };
+      };
+      const original = fixture.__ASTER_DESKTOP__.resources.list;
+      fixture.__ASTER_DESKTOP__.resources.list = async (request) => {
+        const result = await original(request);
+        return { ...result, items: result.items.map((item) => ({ ...item, kind })) };
+      };
+    }, kind);
+    await connectToDev(page);
+    await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+    const tab = page.getByTestId("resource-detail-view").getByRole("tab", { name: "Ports", exact: true });
+    if (kind === "ReplicaSet") {
+      await expect(tab).toBeVisible();
+      await tab.click();
+      await expect(page.getByTestId("port-forward-section")).toBeVisible();
+    } else {
+      await expect(page.getByTestId("resource-detail-view")).toBeVisible();
+      await expect(tab).toHaveCount(0);
+    }
+  });
+}
+
+
+test("failed context cleanup remains visible and can be retried from another context", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    const fixture = window as unknown as {
+      __ASTER_DESKTOP__: { resources: { portForwardStop(id: string): Promise<void> } };
+      allowStop: boolean;
+      stopped: string[];
+    };
+    fixture.allowStop = false;
+    fixture.stopped = [];
+    fixture.__ASTER_DESKTOP__.resources.portForwardStop = async (id) => {
+      if (!fixture.allowStop) throw new Error("Temporary connection failure");
+      fixture.stopped.push(id);
+    };
+  });
+  await connectToDev(page);
+  await page.getByTestId("resource-nav-pods").click();
+  await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+  await page.getByTestId("resource-detail-view").getByRole("tab", { name: "Ports", exact: true }).click();
+  await page.getByTestId("port-forward-row").first().getByTestId("port-forward-start").click();
+  await expect(page.getByTestId("port-forward-local")).toContainText("localhost:12345");
+  await page.getByTestId("change-context").click();
+  const notice = page.getByTestId("port-forward-cleanup");
+  await expect(notice).toContainText("Temporary connection failure");
+  await expect(notice).toContainText("dev · default/pods-0 · localhost:12345");
+  const prod = page.getByTestId("context-option-prod");
+  await prod.click();
+  await prod.dblclick();
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await expect(notice).toBeVisible();
+  await expectNoOverflow(page, "failed port-forward cleanup");
+  await screenshot(page, "port-forward-cleanup-retry-1280");
+  await page.evaluate(() => { (window as unknown as { allowStop: boolean }).allowStop = true; });
+  await notice.getByRole("button", { name: "Retry stopping" }).click();
+  await expect(notice).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { stopped: string[] }).stopped)).toEqual(["pf-1"]);
+  expect(failures).toEqual([]);
+});
