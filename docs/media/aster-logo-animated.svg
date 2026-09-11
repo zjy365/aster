@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title">
+  <title id="title">Rotating Aster logo</title>
+  <g fill="#c65f2d">
+    <animateTransform attributeName="transform" type="rotate" from="0 60 60" to="360 60 60" dur="12s" repeatCount="indefinite"/>
+    <rect x="50.25" y="16" width="19.5" height="88"/>
+    <rect x="50.25" y="16" width="19.5" height="88" transform="rotate(60 60 60)"/>
+    <rect x="50.25" y="16" width="19.5" height="88" transform="rotate(-60 60 60)"/>
+  </g>
+</svg>

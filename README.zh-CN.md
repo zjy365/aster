@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/media/aster-logo-animated.svg" alt="旋转的 Aster Logo" width="120" height="120">
+</p>
+
 <h1 align="center">Aster</h1>
 
 <p align="center">
