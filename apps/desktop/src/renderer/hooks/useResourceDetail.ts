@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ResourceGetResponse, ResourceKind, ResourceRow } from "../../shared/types";
+import type { ResourceGetResponse, ResourceKind, ResourceRow, ResourceWatchBatch } from "../../shared/types";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
@@ -10,6 +10,8 @@ export interface ResourceDetailOptions {
   /** Changes whenever the list scope resets; closes any open selection. */
   generation: number;
   items: ResourceRow[];
+  /** False keeps the live channel idle: no watch, one-shot behavior. */
+  coreReady: boolean;
 }
 
 export interface ResourceDetailState {
@@ -33,6 +35,10 @@ function objectTag(row: ResourceRow): string {
   return `${row.uid || `${row.kind}:${row.namespace}/${row.name}`}@${row.resourceVersion}`;
 }
 
+function objectIdentity(row: ResourceRow): string {
+  return row.uid || `${row.kind}:${row.namespace}/${row.name}`;
+}
+
 /**
  * Kubernetes resource versions are monotonic (the watch pipeline relies on
  * this), so a numerically newer version always wins. Non-numeric values fall
@@ -47,8 +53,16 @@ function isNewerResourceVersion(candidate: string, current: string): boolean {
  * Owns the selected row and its fetched detail. The selection follows list
  * updates (resourceVersion bumps) and closes when the row disappears or the
  * list scope resets.
+ *
+ * While an object is open it also owns that object's live channel: a single
+ * object watch (fieldSelector metadata.name) — lazy, one stream, closed on
+ * leave — so the vitals, conditions and YAML converge during a rollout even
+ * when the underlying list is a snapshot-only scope (All namespaces) whose
+ * watch would otherwise never bump the selection. A delta bumping the object's
+ * resourceVersion re-gets the object once, which refreshes the YAML the same
+ * way an explicit refresh does.
  */
-export function useResourceDetail({ contextId, kind, namespace, generation, items }: ResourceDetailOptions): ResourceDetailState {
+export function useResourceDetail({ contextId, kind, namespace, generation, items, coreReady }: ResourceDetailOptions): ResourceDetailState {
   const [selected, setSelected] = useState<ResourceRow>();
   const [detail, setDetail] = useState<ResourceGetResponse>();
   const [detailError, setDetailError] = useState("");
@@ -113,6 +127,58 @@ export function useResourceDetail({ contextId, kind, namespace, generation, item
     setDetailError("");
     void fetchDetail(selected);
   }, [contextId, kind, selected, fetchDetail]);
+
+  // The live channel keys on the object's identity, never on the selected row
+  // itself: a resourceVersion bump adopts the row without tearing the watch
+  // subscription down and restarting it.
+  const selectedIdentity = selected ? objectIdentity(selected) : "";
+  useEffect(() => {
+    const target = selectedRef.current;
+    if (!target || !contextId || !coreReady) return;
+    let active = true;
+    const adopt = (rows: ResourceRow[]) => {
+      const current = selectedRef.current;
+      if (!active || !current || objectIdentity(current) !== objectIdentity(target)) return;
+      const next = rows.find((row) => objectIdentity(row) === objectIdentity(target)
+        && isNewerResourceVersion(row.resourceVersion, current.resourceVersion));
+      if (!next) return;
+      setSelected(next);
+      // Re-get so the YAML and conditions converge with the vitals; the
+      // request guard inside fetchDetail drops stale reads.
+      void fetchDetail(next);
+    };
+    const stop = desktop.resources.watch({
+      contextId,
+      resourceKind: kind,
+      namespace: target.namespace,
+      fieldSelector: `metadata.name=${target.name}`,
+      limit: 100,
+    }, (batch: ResourceWatchBatch) => {
+      if (batch.kind === "snapshot") {
+        adopt(batch.items);
+        return;
+      }
+      if (batch.kind === "delta") {
+        for (const event of batch.events) {
+          if (event.type === "deleted") {
+            // The open object vanished (deleted out from under the view):
+            // close the detail, exactly like the list-follow path does.
+            if (event.key === objectIdentity(target)) {
+              detailFor.current = "";
+              setSelected(undefined);
+              setDetail(undefined);
+            }
+            continue;
+          }
+          adopt([event.row]);
+        }
+      }
+    });
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [contextId, kind, coreReady, selectedIdentity, fetchDetail]);
 
   const select = useCallback((row: ResourceRow) => setSelected(row), []);
   const clear = useCallback(() => {

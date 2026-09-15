@@ -736,6 +736,153 @@ test("resource detail opens and preserves layout", async ({ page }) => {
   expect(failures).toEqual([]);
 });
 
+test("deployment detail stays live during a rollout without manual refresh", async ({ page }) => {
+  // In the all-namespaces snapshot scope the table never bumps the selection,
+  // so the detail must keep itself live: one single-object watch (fieldSelector
+  // metadata.name) adopts resourceVersion bumps and re-gets the object so the
+  // vitals, conditions and YAML converge — and closing the detail stops it.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: {
+        resources: {
+          watch(request: unknown, listener: (batch: unknown) => void): () => void;
+          list(request: unknown): Promise<unknown>;
+          get(request: unknown): Promise<{ row: Record<string, unknown>; yaml: string }>;
+          events(request: unknown): Promise<unknown[]>;
+        };
+      };
+    }).__ASTER_DESKTOP__;
+    if (!desktop) return;
+    const detailRow = (over: Record<string, unknown>) => ({
+      uid: "deployments-uid-0",
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      name: "deployments-0",
+      namespace: "default",
+      resourceVersion: "1000",
+      createdAt: "2026-08-01T00:00:00Z",
+      status: "Running",
+      desired: 2,
+      ready: 2,
+      available: 2,
+      updated: 2,
+      images: ["nginx:1.27"],
+      ...over,
+    });
+    const watches: Array<{ listener: (batch: unknown) => void; cancelled: boolean }> = [];
+    (window as unknown as { __detailWatches: typeof watches }).__detailWatches = watches;
+    const baseWatch = desktop.resources.watch.bind(desktop.resources);
+    desktop.resources.watch = (request, listener) => {
+      const fieldSelector = String((request as { fieldSelector?: string }).fieldSelector || "");
+      if (!fieldSelector.startsWith("metadata.name=")) return baseWatch(request, listener);
+      const session = { listener, cancelled: false };
+      watches.push(session);
+      setTimeout(() => session.listener({
+        subscriptionId: "detail-watch",
+        kind: "snapshot",
+        items: [detailRow({})],
+      }), 0);
+      return () => { session.cancelled = true; };
+    };
+    // Once the rollout is driven, the live get reports the new generation.
+    const baseGet = desktop.resources.get.bind(desktop.resources);
+    desktop.resources.get = async (request) => {
+      const response = await baseGet(request);
+      if (!(window as unknown as { __rolloutStarted?: boolean }).__rolloutStarted) return response;
+      const yaml = response.yaml.replace(
+        /    - type: Progressing[\s\S]*?lastTransitionTime: "[^"]*"/,
+        [
+          "    - type: Progressing",
+          '      status: "True"',
+          "      reason: ReplicaSetUpdated",
+          '      message: ReplicaSet "deployments-0-7d9" is progressing.',
+          '      lastTransitionTime: "2026-09-15T00:00:05Z"',
+        ].join("\n"),
+      );
+      return {
+        row: detailRow({ resourceVersion: "1002", status: "Progressing", desired: 5, ready: 2, available: 2, updated: 2 }),
+        yaml: yaml.replace("  replicas: 2", "  replicas: 5"),
+      };
+    };
+    // The pod-events poll: one pod event joined to the workload's own pod.
+    const podEvent = {
+      uid: "ev-pull", apiVersion: "v1", kind: "Event", name: "pull.17ab", namespace: "default",
+      resourceVersion: "1", createdAt: "2026-09-15T00:00:01Z", involvedObject: "pods-0",
+      reason: "Pulling", message: "Pulling image nginx:1.28", type: "Normal", count: 1,
+      lastTimestamp: "2026-09-15T00:00:01Z",
+    };
+    (window as unknown as { __podEvents: unknown[] }).__podEvents = [podEvent];
+    const baseList = desktop.resources.list.bind(desktop.resources);
+    desktop.resources.list = async (request) => {
+      if (String((request as { fieldSelector?: string }).fieldSelector || "").startsWith("involvedObject.kind=Pod")) {
+        return { items: (window as unknown as { __podEvents: unknown[] }).__podEvents };
+      }
+      return baseList(request);
+    };
+    // The object's own events grow once the rollout starts.
+    (window as unknown as { __rolloutEvents: unknown[] }).__rolloutEvents = [];
+    desktop.resources.events = async () => {
+      const base = [{ name: "event-1", namespace: "default", reason: "Scheduled", message: "Successfully assigned", type: "Normal", count: 1, lastTimestamp: "2026-08-01T00:00:00Z" }];
+      return [...base, ...((window as unknown as { __rolloutEvents: unknown[] }).__rolloutEvents as unknown[])];
+    };
+    (window as unknown as { __driveRollout: () => void }).__driveRollout = () => {
+      (window as unknown as { __rolloutStarted?: boolean }).__rolloutStarted = true;
+      (window as unknown as { __rolloutEvents: unknown[] }).__rolloutEvents = [
+        { name: "event-2", namespace: "default", reason: "ScalingReplicaSet", message: "Scaled up replica set deployments-0-7d9 from 2 to 5", type: "Normal", count: 1, lastTimestamp: "2026-09-15T00:00:04Z" },
+      ];
+      const session = watches.at(-1);
+      session?.listener({
+        subscriptionId: "detail-watch",
+        kind: "delta",
+        events: [{ type: "modified", row: detailRow({ resourceVersion: "1002", status: "Progressing", desired: 5, ready: 2, available: 2, updated: 2 }) }],
+      });
+    };
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // All-namespaces scope: the table is a snapshot and never bumps the selection.
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "All namespaces" }).click();
+  await page.keyboard.press("Escape");
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
+  await firstRow.click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+
+  // Baseline: the rollout chip reads the live YAML's Progressing condition.
+  await expect(page.getByTestId("rollout-status")).toContainText("Rolled out");
+  await expect(page.getByTestId("overview-pods")).toContainText("pods-0", { timeout: 15_000 });
+  // The pod event joined from the poll shows up beside the object's own.
+  await expect(detail.getByTestId("overview-events")).toContainText("Pulling image nginx:1.28", { timeout: 15_000 });
+
+  // Drive the rollout: a watch delta (rv 1002) plus a get that reports the
+  // new generation. Nothing here touches refresh.
+  await page.evaluate(() => (window as unknown as { __driveRollout: () => void }).__driveRollout());
+
+  // Vitals converge: ready 2 of the new desired 5.
+  const vitals = page.getByTestId("resource-vitals");
+  await expect(vitals).toContainText("2/5", { timeout: 15_000 });
+  // The chip flips to in-progress and the live condition replaces the old one.
+  await expect(page.getByTestId("rollout-status")).toContainText("Rollout in progress");
+  await expect(page.getByTestId("resource-conditions")).toContainText("ReplicaSetUpdated", { timeout: 15_000 });
+  // The object's fresh ScalingReplicaSet event landed without a refresh.
+  await expect(detail.getByTestId("overview-events")).toContainText("Scaled up replica set", { timeout: 15_000 });
+  await expectNoOverflow(page, "detail mid-rollout 1280x800");
+  await screenshot(page, "detail-rollout-live-1280");
+
+  // Leaving the detail tears the single-object watch down.
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __detailWatches: Array<{ cancelled: boolean }> }).__detailWatches.at(-1)?.cancelled)).toBe(true);
+  expect(failures).toEqual([]);
+});
+
 test("YAML editor scrolls long lines horizontally instead of wrapping", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });

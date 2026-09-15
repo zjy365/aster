@@ -83,6 +83,7 @@ export default function App() {
     namespace: namespaces.namespace,
     generation: resources.generation,
     items: resources.list.items,
+    coreReady: core.state === "ready",
   });
   const diagnostics = useDiagnostics({
     contextId,

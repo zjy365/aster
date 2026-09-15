@@ -148,6 +148,8 @@ export interface ResourceRow {
   dataKeys?: string[];
   count?: number;
   lastTimestamp?: string;
+  /** For Event rows: the name of the object the event is about. */
+  involvedObject?: string;
   related?: string[];
 }
 
