@@ -6,7 +6,8 @@ import { desktop } from "../lib/desktop";
 export interface ResourceDetailOptions {
   contextId: string;
   kind: ResourceKind;
-  namespace: string;
+  /** Canonical key of the list's namespace scope; changes close the selection. */
+  namespaceKey: string;
   /** Changes whenever the list scope resets; closes any open selection. */
   generation: number;
   items: ResourceRow[];
@@ -48,7 +49,7 @@ function isNewerResourceVersion(candidate: string, current: string): boolean {
  * updates (resourceVersion bumps) and closes when the row disappears or the
  * list scope resets.
  */
-export function useResourceDetail({ contextId, kind, namespace, generation, items }: ResourceDetailOptions): ResourceDetailState {
+export function useResourceDetail({ contextId, kind, namespaceKey, generation, items }: ResourceDetailOptions): ResourceDetailState {
   const [selected, setSelected] = useState<ResourceRow>();
   const [detail, setDetail] = useState<ResourceGetResponse>();
   const [detailError, setDetailError] = useState("");
@@ -66,7 +67,7 @@ export function useResourceDetail({ contextId, kind, namespace, generation, item
     setDetail(undefined);
     setDetailError("");
     setRefreshing(false);
-  }, [contextId, kind, namespace, generation]);
+  }, [contextId, kind, namespaceKey, generation]);
 
   useEffect(() => {
     if (!selected) return;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ContextInfo, NamespaceInfo } from "../../shared/types";
+import type { ContextInfo, NamespaceInfo, NamespaceScope } from "../../shared/types";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 import {
@@ -16,8 +16,9 @@ export interface NamespacesState {
   loading: boolean;
   /** True after the lazy inventory has completed successfully, including empty results. */
   loaded: boolean;
-  namespace: string;
-  setNamespace(namespace: string): void;
+  /** Ordered namespace selection; [] is the All-namespaces scope. */
+  namespaceScope: NamespaceScope;
+  setNamespaceScope(scope: NamespaceScope): void;
   /** Lazily fetches the namespace list on first use (pickers, ⌘K). */
   load(): void;
 }
@@ -44,7 +45,7 @@ export function useNamespaces(
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [namespace, setNamespace] = useState("");
+  const [namespaceScope, setNamespaceScope] = useState<NamespaceScope>([]);
   const [loaded, setLoaded] = useState(false);
   const loadingRef = useRef(false);
   // Bumped on every context change so a slow fetch started under the previous
@@ -87,12 +88,17 @@ export function useNamespaces(
     setLoading(false);
     setLoaded(false);
     if (!contextId) {
-      setNamespace("");
+      setNamespaceScope((current) => (current.length ? [] : current));
       return;
     }
-    // The context's default namespace is known without the list.
+    // The context's default namespace is known without the list. connectContext
+    // may already have applied the same scope: bail out on equal contents so
+    // the array identity — and with it every scope-keyed effect — stays put.
     const context = contexts.find((item) => item.id === contextId);
-    setNamespace(context?.namespace || "");
+    const defaultNamespace = context?.namespace || "";
+    setNamespaceScope((current) => (
+      current.length === (defaultNamespace ? 1 : 0) && current[0] === defaultNamespace ? current : defaultNamespace ? [defaultNamespace] : []
+    ));
     // A retained list renders at once; a stale one refreshes in the background.
     const cached = readNamespaceCache(contextId);
     if (cached) {
@@ -118,5 +124,5 @@ export function useNamespaces(
     fetchList(true);
   }, [contextId, fetchList]);
 
-  return { namespaces, truncated, loading, loaded, namespace, setNamespace, load };
+  return { namespaces, truncated, loading, loaded, namespaceScope, setNamespaceScope, load };
 }

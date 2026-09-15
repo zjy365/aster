@@ -34,8 +34,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { NamespaceInfo } from "../../shared/types";
+import type { NamespaceInfo, NamespaceScope } from "../../shared/types";
 import { searchNamespaces } from "../lib/namespace-search";
+import { MAX_NAMESPACE_SELECTION, namespaceScopeSummary, toggleNamespace } from "../lib/namespace-scope";
 
 export type AppearanceTheme = "system" | "light" | "dark";
 
@@ -49,8 +50,8 @@ export interface UnifiedToolbarProps {
   namespacesLoaded?: boolean;
   /** Called when the namespace picker opens; the list loads lazily on first use. */
   onNamespaceOpen?(): void;
-  namespace: string;
-  onNamespaceChange(namespace: string): void;
+  namespaceScope: NamespaceScope;
+  onNamespaceScopeChange(scope: NamespaceScope): void;
   namespaceDisabled?: boolean;
   query: string;
   onQueryChange(query: string): void;
@@ -69,11 +70,12 @@ export interface UnifiedToolbarProps {
 }
 
 const ALL_NAMESPACES_VALUE = "__aster_all_namespaces__";
+const ALL_NAMESPACES_ITEM: NamespaceItem = { value: ALL_NAMESPACES_VALUE, label: "All namespaces" };
 /** Cap rendered matches so a 10k-namespace cluster never mounts 10k rows. */
 const NAMESPACE_MATCH_LIMIT = 100;
 
 interface NamespaceItem {
-  value: string | null;
+  value: string;
   label: string;
 }
 
@@ -83,8 +85,8 @@ export function UnifiedToolbar({
   namespacesLoading = false,
   namespacesLoaded = false,
   onNamespaceOpen,
-  namespace,
-  onNamespaceChange,
+  namespaceScope,
+  onNamespaceScopeChange,
   namespaceDisabled = false,
   query,
   onQueryChange,
@@ -102,26 +104,39 @@ export function UnifiedToolbar({
   className,
 }: UnifiedToolbarProps) {
   const ThemeIcon = theme === "dark" ? Moon : theme === "light" ? Sun : SunMoon;
-  // A null-valued first item is the "All namespaces" choice; the label map
-  // keeps the raw value out of the trigger (Base UI renders values by default).
+  // The first item is the "All namespaces" choice under a sentinel value: in
+  // multiple mode every selected value is an array element, so the zero-
+  // selection state is expressed as the sentinel being the only member. The
+  // label map keeps raw values out of the trigger (Base UI renders values by
+  // default).
   const [namespaceQuery, setNamespaceQuery] = useState("");
   // IME composition text for the resource search. While it is non-null the
   // input displays the in-progress composition (a controlled input would
   // otherwise swallow it on the next render), but the query prop — and with it
   // the resource filter — stays on the last committed text.
   const [composingQuery, setComposingQuery] = useState<string | null>(null);
-  // The null row is offered only while the filter is empty: with a query, its
+  // The All row is offered only while the filter is empty: with a query, its
   // "All namespaces" label would collide with a real namespace (e.g. "all") in
-  // Base UI's autoHighlight and let Enter pick cluster scope by mistake, and
+  // Base UI's autoHighlight and let Enter clear the scope by mistake, and
   // during loading it would sit highlighted above the direct-Enter commit.
   const namespaceItems = useMemo<NamespaceItem[]>(() => [
-    ...(!namespaceQuery.trim() ? [{ value: null, label: "All namespaces" }] : []),
-    ...namespaces.map((item) => ({ value: item.name as string | null, label: item.name })),
+    ...(!namespaceQuery.trim() ? [ALL_NAMESPACES_ITEM] : []),
+    ...namespaces.map((item) => ({ value: item.name, label: item.name })),
   ], [namespaces, namespaceQuery]);
-  const selectedNamespace = namespaceItems.find((item) => item.value === (namespace || null)) ?? null;
-  // The popup is controlled so a direct-Enter commit (below) can close it even
-  // when the typed value is not a list row Base UI would auto-select.
+  // Selection values are rebuilt from the scope (selected names need not be
+  // list rows — a direct-Enter commit can add one before the inventory loads),
+  // so item identity is bridged with isItemEqualToValue.
+  const namespaceValue = useMemo<NamespaceItem[]>(() => (
+    namespaceScope.length
+      ? namespaceScope.map((name) => ({ value: name, label: name }))
+      : [ALL_NAMESPACES_ITEM]
+  ), [namespaceScope]);
+  // The popup is controlled so a direct-Enter commit (below) can keep it open
+  // and clear the filter on its own terms.
   const [namespaceOpen, setNamespaceOpen] = useState(false);
+  // Set when a toggle or commit is rejected at the selection cap; the footer
+  // slot explains it until the next successful change or close.
+  const [capReached, setCapReached] = useState(false);
   // Progressive narrowing: a short prefix on a huge cluster matches tens of
   // thousands of names — rendering 100 of them is noise. The hint shows the
   // exact match count instead, and concrete rows appear as the user types.
@@ -129,21 +144,47 @@ export function UnifiedToolbar({
     const names = namespaces.map((item) => item.name);
     return searchNamespaces(names, namespaceQuery);
   }, [namespaces, namespaceQuery]);
-  const namespaceFooter = namespaceSearch.narrowed
-    ? `${namespaceSearch.total.toLocaleString()} namespaces match — keep typing to narrow`
-    : null;
+
+  // Toggling rows applies immediately (no "Done" step). Base UI reports the
+  // post-toggle array; the sentinel's intent — "clear the whole selection" —
+  // is read from it being newly added, since the zero-selection state keeps
+  // the sentinel selected and any later toggle would carry it along.
+  const handleScopeChange = (next: NamespaceItem[]) => {
+    const names = next
+      .filter((item) => item.value !== ALL_NAMESPACES_VALUE)
+      .map((item) => item.value);
+    const allAdded = namespaceScope.length > 0 && next.some((item) => item.value === ALL_NAMESPACES_VALUE);
+    if (allAdded) {
+      setCapReached(false);
+      onNamespaceScopeChange([]);
+      return;
+    }
+    if (names.length > MAX_NAMESPACE_SELECTION) {
+      setCapReached(true);
+      return;
+    }
+    setCapReached(false);
+    onNamespaceScopeChange(names);
+  };
 
   // Direct-Enter: the user knows the exact namespace (e.g. "ns-abcdefg") and
   // should not wait for the whole inventory to load. kubernetes/dashboard's
   // selector does the same: Enter commits the raw input value without a list
   // hit. It only fires when no concrete row is selectable (list loading or
   // zero matches) — with rows on screen, Enter belongs to Base UI's
-  // autoHighlight, which selects the highlighted row instead.
+  // autoHighlight, which toggles the highlighted row instead. In multiple
+  // mode the commit toggles the name into the selection and stays open.
   const commitNamespaceInput = () => {
     const value = namespaceQuery.trim();
     if (!value) return;
-    onNamespaceChange(value);
-    setNamespaceOpen(false);
+    const result = toggleNamespace(namespaceScope, value);
+    if (!result.accepted) {
+      setCapReached(true);
+      return;
+    }
+    setCapReached(false);
+    onNamespaceScopeChange(result.scope);
+    setNamespaceQuery("");
   };
 
   return (
@@ -175,9 +216,12 @@ export function UnifiedToolbar({
 
       <div className="toolbar-namespace">
         <Combobox.Root
+          multiple
           autoHighlight
           disabled={namespaceDisabled}
           items={namespaceItems}
+          isItemEqualToValue={(item, value) => item.value === value.value}
+          inputValue={namespaceQuery}
           limit={NAMESPACE_MATCH_LIMIT}
           // IME-safe: Base UI's input holds composition text back and only
           // fires this for committed text (it calls setInputValue at
@@ -187,22 +231,29 @@ export function UnifiedToolbar({
           onOpenChange={(open) => {
             setNamespaceOpen(open);
             if (open) onNamespaceOpen?.();
-            if (!open) setNamespaceQuery("");
+            if (!open) {
+              setNamespaceQuery("");
+              setCapReached(false);
+            }
           }}
-          onValueChange={(item) => onNamespaceChange(item?.value ?? "")}
+          onValueChange={(value) => handleScopeChange(value)}
           open={namespaceOpen}
-          value={selectedNamespace}
+          value={namespaceValue}
         >
           <Combobox.Trigger
             aria-label="Namespace"
             className="namespace-select"
             data-testid="namespace-select"
           >
-            <span className="namespace-select-value">
-              {/* Rendered from the hook state, not Combobox.Value: a direct-Enter
-                  commit can select a namespace that is not a list item, and
-                  Combobox.Value would fall back to the placeholder for it. */}
-              {namespace || "All namespaces"}
+            <span
+              className="namespace-select-value"
+              title={namespaceScope.length > 3 ? namespaceScope.join(", ") : undefined}
+            >
+              {/* Rendered from the hook state, not Combobox.Value: direct-Enter
+                  commits and cap rejections can select namespaces that are not
+                  list items, and Combobox.Value would fall back to the
+                  placeholder for them. */}
+              {namespaceScopeSummary(namespaceScope) || "All namespaces"}
             </span>
             <Combobox.Icon className="namespace-select-icon">
               <ChevronsUpDown aria-hidden="true" />
@@ -219,7 +270,7 @@ export function UnifiedToolbar({
                     onKeyDown={(event) => {
                       if (event.key !== "Enter") return;
                       // Yield to Base UI whenever a concrete row is selectable:
-                      // with autoHighlight, Enter must select the highlighted
+                      // with autoHighlight, Enter must toggle the highlighted
                       // row (e.g. "kube-system" for the prefix "kube-s"), not
                       // commit the raw prefix.
                       if (namespaceSearch.shown.length > 0) return;
@@ -232,11 +283,11 @@ export function UnifiedToolbar({
                       // Empty filter with no rows: the list is still loading
                       // (or the cluster has no namespaces) and the rendered
                       // "All namespaces" row is the only selectable scope, so
-                      // commit the null scope directly instead of leaning on
+                      // clear the selection directly instead of leaning on
                       // Base UI's autoHighlight, which is unreliable while the
                       // selection is not in the still-loading items.
                       if (!namespaceQuery.trim()) {
-                        onNamespaceChange("");
+                        onNamespaceScopeChange([]);
                         setNamespaceOpen(false);
                         return;
                       }
@@ -259,15 +310,20 @@ export function UnifiedToolbar({
                 )}
                 <Combobox.List className="namespace-combobox-list">
                   {(item: NamespaceItem) => {
-                    if (item.value === null) return renderNamespaceItem(item, ALL_NAMESPACES_VALUE);
                     // Only rows that survive the prefix search are rendered;
                     // the narrowed hint below covers the rest.
-                    if (!namespaceSearch.shown.includes(item.label)) return null;
-                    return renderNamespaceItem(item, item.value as string);
+                    if (item.value !== ALL_NAMESPACES_VALUE && !namespaceSearch.shown.includes(item.label)) return null;
+                    return renderNamespaceItem(item);
                   }}
                 </Combobox.List>
-                {namespaceSearch.narrowed ? (
-                  <div className="namespace-combobox-footer">{namespaceFooter}</div>
+                {capReached ? (
+                  <div className="namespace-combobox-footer" data-testid="namespace-cap-message">
+                    Up to {MAX_NAMESPACE_SELECTION} namespaces can be selected
+                  </div>
+                ) : namespaceSearch.narrowed ? (
+                  <div className="namespace-combobox-footer">
+                    {namespaceSearch.total.toLocaleString()} namespaces match — keep typing to narrow
+                  </div>
                 ) : namespacesTruncated ? (
                   <div className="namespace-combobox-footer">
                     First {namespaces.length.toLocaleString()} namespaces — type to narrow (large cluster)
@@ -369,10 +425,10 @@ export function UnifiedToolbar({
   );
 }
 
-function renderNamespaceItem(item: NamespaceItem, key: string) {
+function renderNamespaceItem(item: NamespaceItem) {
   return (
     <Combobox.Item
-      key={key}
+      key={item.value}
       value={item}
       className="namespace-combobox-item"
     >

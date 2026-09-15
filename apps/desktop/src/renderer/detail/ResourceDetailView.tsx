@@ -171,7 +171,7 @@ export function ResourceDetailView({
   const pods = useResourceList({
     contextId,
     kind: POD_KIND,
-    namespace: row?.namespace ?? "",
+    namespaceScope: row?.namespace ? [row.namespace] : [],
     coreReady,
     setError: setPodsError,
     labelSelector: selector,

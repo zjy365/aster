@@ -4,7 +4,7 @@ import type { AsterSettings, RelatedResource, ResourceKind, ResourceRow, Sources
 import { CommandPalette } from "./components/CommandPalette";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { WelcomeCard } from "./components/WelcomeCard";
-import { ResourceTable, rowKey, TableState } from "./components/ResourceTable";
+import { ResourceTable, podUsageKey, rowKey, TableState } from "./components/ResourceTable";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -31,6 +31,7 @@ import { useTheme } from "./hooks/useTheme";
 import { useUpdater } from "./hooks/useUpdater";
 import { buildCommandItems, objectCommandItems, searchResultItems, type CommandAction } from "./lib/command-palette";
 import { messageOf, pluralize } from "./lib/format";
+import { namespaceScopeKey, namespaceScopeSummary } from "./lib/namespace-scope";
 import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
 import { Sidebar, type SidebarToolGroup } from "./shell/Sidebar";
 import { UnifiedToolbar } from "./shell/UnifiedToolbar";
@@ -70,17 +71,24 @@ export default function App() {
   }, [contextId, core.state]);
   const [kind, setKind] = useState<ResourceKind>(DEFAULT_KIND);
   const namespaces = useNamespaces(contextId, contexts.contexts, setError);
+  const { namespaceScope } = namespaces;
+  // Order-insensitive identity of the scope; reset effects and cache keys
+  // compare this so [a, b] and [b, a] count as the same scope.
+  const scopeKey = useMemo(() => namespaceScopeKey(namespaceScope), [namespaceScope]);
+  // Row-scoped surfaces (create dialog, palette search fallback) only have a
+  // namespace when the scope names exactly one.
+  const primaryNamespace = namespaceScope.length === 1 ? namespaceScope[0] : "";
   const resources = useResourceList({
     contextId,
     kind,
-    namespace: namespaces.namespace,
+    namespaceScope,
     coreReady: core.state === "ready",
     setError,
   });
   const detail = useResourceDetail({
     contextId,
     kind,
-    namespace: namespaces.namespace,
+    namespaceKey: scopeKey,
     generation: resources.generation,
     items: resources.list.items,
   });
@@ -92,7 +100,7 @@ export default function App() {
   const mutation = useMutation({
     contextId,
     kind,
-    namespace: namespaces.namespace,
+    namespace: primaryNamespace,
     selected: detail.selected,
   });
   const [overviewActive, setOverviewActive] = useState(false);
@@ -104,16 +112,18 @@ export default function App() {
   const [helmActive, setHelmActive] = useState(false);
   const helm = useHelm({
     contextId,
-    namespace: namespaces.namespace,
+    namespaceScope,
     coreReady: core.state === "ready" && helmActive,
   });
 
   // Live CPU/memory readouts for the Pod table. Only fetched while the Pod
   // kind is the active pane and the list is namespace-scoped, so a browse
-  // through other kinds never touches metrics.k8s.io.
+  // through other kinds never touches metrics.k8s.io. A multi-namespace scope
+  // issues one ordinary per-namespace call on the same 15s cadence; a failed
+  // namespace degrades to "no usage for its rows".
   const [podUsage, setPodUsage] = useState<ReadonlyMap<string, { cpu?: string; memory?: string }>>(new Map());
   const [podUsageError, setPodUsageError] = useState("");
-  const podPaneActive = kind.id === "pods" && !overviewActive && !helmActive && Boolean(namespaces.namespace);
+  const podPaneActive = kind.id === "pods" && !overviewActive && !helmActive && namespaceScope.length > 0;
   useEffect(() => {
     if (!podPaneActive || !contextId) {
       setPodUsage(new Map());
@@ -121,19 +131,29 @@ export default function App() {
       return;
     }
     let active = true;
+    const scope = namespaceScope;
     const fetchMetrics = async () => {
-      try {
-        const metrics = await desktop.metrics.pods(contextId, namespaces.namespace);
-        if (!active) return;
-        setPodUsage(new Map(metrics.map((pod) => {
+      const results = await Promise.all(scope.map(async (namespace) => {
+        try {
+          return { namespace, metrics: await desktop.metrics.pods(contextId, namespace), failed: false as const };
+        } catch (cause) {
+          return { namespace, metrics: [], failed: true as const, message: messageOf(cause) };
+        }
+      }));
+      if (!active) return;
+      // Only an outage across the whole scope surfaces as a table error;
+      // partial failures just leave those rows without usage.
+      const failures = results.filter((result) => result.failed);
+      setPodUsageError(failures.length === scope.length && failures.length > 0 ? failures[0].message : "");
+      const usage = new Map<string, { cpu?: string; memory?: string }>();
+      for (const { namespace, metrics } of results) {
+        for (const pod of metrics) {
           const cpu = pod.containers.map((container) => container.cpu).find((value) => value);
           const memory = pod.containers.map((container) => container.memory).find((value) => value);
-          return [pod.name, { cpu, memory }];
-        })));
-        setPodUsageError("");
-      } catch (cause) {
-        if (active) setPodUsageError(messageOf(cause));
+          usage.set(podUsageKey(pod.namespace || namespace, pod.name), { cpu, memory });
+        }
       }
+      setPodUsage(usage);
     };
     void fetchMetrics();
     const timer = setInterval(() => void fetchMetrics(), 15_000);
@@ -141,7 +161,7 @@ export default function App() {
       active = false;
       clearInterval(timer);
     };
-  }, [podPaneActive, contextId, namespaces.namespace, kind.id]);
+  }, [podPaneActive, contextId, namespaceScope, kind.id]);
   const helmToolGroups: SidebarToolGroup[] = useMemo(() => [{
     label: "Helm",
     items: [{ id: "helm", label: "Releases", icon: Ship }],
@@ -188,7 +208,7 @@ export default function App() {
   const [checkedKeys, setCheckedKeys] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     setCheckedKeys(new Set());
-  }, [contextId, kind.id, namespaces.namespace]);
+  }, [contextId, kind.id, scopeKey]);
   const checkedRows = useMemo(
     () => resources.visibleRows.filter((row) => checkedKeys.has(rowKey(row))),
     [resources.visibleRows, checkedKeys],
@@ -279,10 +299,12 @@ export default function App() {
     if (!match) return;
     const { icon: _icon, label: _label, enabled: _enabled, ...nextKind } = match;
     const namespace = target.namespace || "";
-    if (namespace !== namespaces.namespace) namespaces.setNamespace(namespace);
+    // Palette/related navigation pins the scope to the one target namespace,
+    // replacing any multi-selection so the pending row cannot get lost.
+    if (!(namespaceScope.length === 1 && namespaceScope[0] === namespace)) namespaces.setNamespaceScope(namespace ? [namespace] : []);
     setPendingSelect({ name: target.name, namespace });
     selectKind(nextKind);
-  }, [resourceGroups, namespaces, selectKind]);
+  }, [resourceGroups, namespaceScope, namespaces, selectKind]);
 
   useEffect(() => {
     if (!pendingSelect) return;
@@ -304,7 +326,7 @@ export default function App() {
       desktop.resources.search({
         contextId,
         query,
-        namespace: namespaces.namespace || contexts.activeContext?.namespace || "default",
+        namespace: primaryNamespace || contexts.activeContext?.namespace || "default",
       })
         .then((items) => { if (active) setSearchResults(items); })
         .catch(() => { if (active) setSearchResults([]); });
@@ -313,7 +335,7 @@ export default function App() {
       active = false;
       clearTimeout(timer);
     };
-  }, [paletteQuery, paletteOpen, contextId, namespaces.namespace, contexts.activeContext]);
+  }, [paletteQuery, paletteOpen, contextId, primaryNamespace, contexts.activeContext]);
 
   // A stale result set is cleared when the palette closes or the query resets.
   useEffect(() => {
@@ -324,7 +346,7 @@ export default function App() {
     const target = targetId ? contexts.contexts.find((item) => item.id === targetId) : contexts.chosenContext;
     if (!target || target.error || core.state !== "ready") return;
     setError("");
-    namespaces.setNamespace(target.namespace || "");
+    namespaces.setNamespaceScope(target.namespace ? [target.namespace] : []);
     contexts.setContextChoice(target.id);
     void setPortForwardContext(target.id).catch((cause) => setError(messageOf(cause)));
     contexts.setContextId(target.id);
@@ -340,7 +362,7 @@ export default function App() {
     contexts.setContextQuery("");
     void setPortForwardContext("").catch((cause) => setError(messageOf(cause)));
     contexts.setContextId("");
-    namespaces.setNamespace("");
+    namespaces.setNamespaceScope([]);
     resources.setQuery("");
     detail.clear();
     resources.reset();
@@ -400,14 +422,14 @@ export default function App() {
       namespaces: namespaces.namespaces,
       namespacesLoading: namespaces.loading,
       namespacesTruncated: namespaces.truncated,
-      activeNamespace: namespaces.namespace,
+      activeNamespace: primaryNamespace,
       theme,
     });
     // Linear-style contextual mode: while a row is selected, the palette leads
     // with object-scoped commands under a "Selected object" group.
     if (detail.selected) return [...objectCommandItems(detail.selected), ...base];
     return base;
-  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.loading, namespaces.namespace, theme, detail.selected]);
+  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.loading, primaryNamespace, theme, detail.selected]);
 
   const executePaletteCommand = useCallback((action: CommandAction) => {
     switch (action.type) {
@@ -421,7 +443,8 @@ export default function App() {
         connectContext(action.contextId);
         return;
       case "select-namespace":
-        namespaces.setNamespace(action.namespace);
+        // Palette navigation stays deterministic: it replaces any selection.
+        namespaces.setNamespaceScope([action.namespace]);
         return;
       case "set-theme":
         setTheme(action.theme);
@@ -602,9 +625,9 @@ export default function App() {
           namespacesTruncated={namespaces.truncated}
           namespacesLoading={namespaces.loading}
           namespacesLoaded={namespaces.loaded}
-          namespace={namespaces.namespace}
+          namespaceScope={namespaceScope}
           onNamespaceOpen={namespaces.load}
-          onNamespaceChange={namespaces.setNamespace}
+          onNamespaceScopeChange={namespaces.setNamespaceScope}
           namespaceDisabled={overviewActive || (!helmActive && !kind.namespaced)}
           query={helmActive || overviewActive ? "" : resources.query}
           onQueryChange={helmActive || overviewActive ? () => undefined : resources.setQuery}
@@ -639,7 +662,7 @@ export default function App() {
           {helmActive && (
             <HelmView
               contextName={contexts.activeContext?.name}
-              namespace={namespaces.namespace}
+              namespace={namespaceScopeSummary(namespaceScope) || "All namespaces"}
               releases={helm.releases}
               progress={helm.progress}
               onCancel={helm.cancel}
@@ -664,7 +687,9 @@ export default function App() {
               <div>
                 <h1>{pluralize(kind.kind)}</h1>
                 <p>{kind.category} · {contexts.activeContext?.name || "Kubernetes"}
-                  {resources.snapshotOnly ? " · All namespaces (snapshot, refresh to update)" : ""}
+                  {resources.snapshotOnly ? (namespaceScope.length > 1
+                    ? ` · ${namespaceScope.length} namespaces (snapshot, refresh to update)`
+                    : " · All namespaces (snapshot, refresh to update)") : ""}
                   {resources.revalidating ? " · Refreshing…" : ""}
                 </p>
               </div>
@@ -802,7 +827,7 @@ export default function App() {
             open={createOpen}
             onOpenChange={setCreateOpen}
             kind={kind}
-            namespace={namespaces.namespace}
+            namespace={primaryNamespace}
             busy={mutation.mutationBusy}
             message={mutation.mutationMessage}
             preview={mutation.mutationPreview}

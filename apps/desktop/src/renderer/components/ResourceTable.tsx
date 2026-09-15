@@ -13,6 +13,15 @@ export function rowKey(row: ResourceRow): string {
   return row.uid || `${row.namespace}/${row.name}`;
 }
 
+/**
+ * Identity of a pod's usage entry: namespace/name rather than uid, because
+ * metrics.k8s.io responses carry no uid and the same pod name in two
+ * selected namespaces must not trade usage rows.
+ */
+export function podUsageKey(namespace: string, name: string): string {
+  return `${namespace}/${name}`;
+}
+
 export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics }: {
   rows: ResourceRow[];
   selected?: ResourceRow;
@@ -25,7 +34,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   loading: boolean;
   error: string;
   onSelect(row: ResourceRow): void;
-  /** Live CPU/memory totals keyed by pod name; present only for the Pod kind. */
+  /** Live CPU/memory totals keyed by namespace/name; present only for the Pod kind. */
   podMetrics?: ReadonlyMap<string, { cpu?: string; memory?: string }>;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -147,7 +156,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
             const row = rows[virtualRow.index];
             const active = selected?.uid === row.uid;
             const checked = checkedRows.has(rowKey(row));
-            const usage = podMetrics?.get(row.name);
+            const usage = podMetrics?.get(podUsageKey(row.namespace, row.name));
             return (
               <div
                 role="row"
