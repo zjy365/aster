@@ -71,6 +71,7 @@ func project(object *unstructured.Unstructured) ResourceRow {
 	case "Namespace":
 		row.Status, _, _ = unstructured.NestedString(object.Object, "status", "phase")
 	case "Event":
+		row.InvolvedObject, _, _ = unstructured.NestedString(object.Object, "involvedObject", "name")
 		row.Reason, _, _ = unstructured.NestedString(object.Object, "reason")
 		row.Message, _, _ = unstructured.NestedString(object.Object, "message")
 		row.Type, _, _ = unstructured.NestedString(object.Object, "type")

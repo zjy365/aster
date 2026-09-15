@@ -91,6 +91,7 @@ export default function App() {
     namespaceKey: scopeKey,
     generation: resources.generation,
     items: resources.list.items,
+    coreReady: core.state === "ready",
   });
   const diagnostics = useDiagnostics({
     contextId,
