@@ -7,12 +7,19 @@ export interface ResourceDetailOptions {
   contextId: string;
   kind: ResourceKind;
   /** Canonical key of the list's namespace scope; changes close the selection. */
-  namespaceKey: string;
+  scopeKey: string;
   /** Changes whenever the list scope resets; closes any open selection. */
   generation: number;
   items: ResourceRow[];
   /** False keeps the live channel idle: no watch, one-shot behavior. */
   coreReady: boolean;
+  /**
+   * True while the open object is a rollout workload, the only kind the live
+   * channel serves (#39): a single-object watch keyed on the object's
+   * identity. Other kinds keep the pre-existing behavior — the list watch
+   * bumps the selection — so no watch ever leaves with an empty namespace.
+   */
+  live: boolean;
 }
 
 export interface ResourceDetailState {
@@ -33,7 +40,7 @@ export interface ResourceDetailState {
 
 /** Identity tag of the object a fetched detail belongs to. */
 function objectTag(row: ResourceRow): string {
-  return `${row.uid || `${row.kind}:${row.namespace}/${row.name}`}@${row.resourceVersion}`;
+  return `${objectIdentity(row)}@${row.resourceVersion}`;
 }
 
 function objectIdentity(row: ResourceRow): string {
@@ -55,15 +62,15 @@ function isNewerResourceVersion(candidate: string, current: string): boolean {
  * updates (resourceVersion bumps) and closes when the row disappears or the
  * list scope resets.
  *
- * While an object is open it also owns that object's live channel: a single
- * object watch (fieldSelector metadata.name) — lazy, one stream, closed on
- * leave — so the vitals, conditions and YAML converge during a rollout even
+ * While a rollout workload is open it also owns that object's live channel: a
+ * single-object watch (fieldSelector metadata.name) — lazy, one stream, closed
+ * on leave — so the vitals, conditions and YAML converge during a rollout even
  * when the underlying list is a snapshot-only scope (All namespaces) whose
  * watch would otherwise never bump the selection. A delta bumping the object's
  * resourceVersion re-gets the object once, which refreshes the YAML the same
  * way an explicit refresh does.
  */
-export function useResourceDetail({ contextId, kind, namespaceKey, generation, items, coreReady }: ResourceDetailOptions): ResourceDetailState {
+export function useResourceDetail({ contextId, kind, scopeKey, generation, items, coreReady, live }: ResourceDetailOptions): ResourceDetailState {
   const [selected, setSelected] = useState<ResourceRow>();
   const [detail, setDetail] = useState<ResourceGetResponse>();
   const [detailError, setDetailError] = useState("");
@@ -81,7 +88,7 @@ export function useResourceDetail({ contextId, kind, namespaceKey, generation, i
     setDetail(undefined);
     setDetailError("");
     setRefreshing(false);
-  }, [contextId, kind, namespaceKey, generation]);
+  }, [contextId, kind, scopeKey, generation]);
 
   useEffect(() => {
     if (!selected) return;
@@ -135,7 +142,7 @@ export function useResourceDetail({ contextId, kind, namespaceKey, generation, i
   const selectedIdentity = selected ? objectIdentity(selected) : "";
   useEffect(() => {
     const target = selectedRef.current;
-    if (!target || !contextId || !coreReady) return;
+    if (!target || !contextId || !coreReady || !live) return;
     let active = true;
     const adopt = (rows: ResourceRow[]) => {
       const current = selectedRef.current;
@@ -179,7 +186,7 @@ export function useResourceDetail({ contextId, kind, namespaceKey, generation, i
       active = false;
       stop();
     };
-  }, [contextId, kind, coreReady, selectedIdentity, fetchDetail]);
+  }, [contextId, kind, coreReady, live, selectedIdentity, fetchDetail]);
 
   const select = useCallback((row: ResourceRow) => setSelected(row), []);
   const clear = useCallback(() => {

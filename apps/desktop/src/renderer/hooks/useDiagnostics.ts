@@ -6,9 +6,8 @@ import type {
   ResourceRow,
 } from "../../shared/types";
 import { desktop } from "../lib/desktop";
-
-/** How often the open object's events refresh while the detail stays open. */
-const EVENTS_REFRESH_MS = 15_000;
+import { SLOW_POLL_MS } from "../lib/poll-cadence";
+import { isRolloutWorkloadKind } from "../detail/workload-detail";
 
 export interface DiagnosticsOptions {
   contextId: string;
@@ -27,13 +26,15 @@ export interface DiagnosticsState {
  * LogViewer component, not here.
  *
  * Events re-fetch when the selection's resourceVersion bumps (the detail's
- * single-object watch adopts those) and on a slow interval as a backstop for
- * child events that do not touch the object itself — so rollout events land
- * without a manual refresh.
+ * single-object watch adopts those) and, for rollout workloads only (#39),
+ * on a slow interval as a backstop for child events that do not touch the
+ * object itself — so rollout events land without a manual refresh. Other
+ * kinds keep the one-shot fetch the selection change already drives.
  */
 export function useDiagnostics({ contextId, kind, selected }: DiagnosticsOptions): DiagnosticsState {
   const [events, setEvents] = useState<ResourceEvent[]>([]);
   const [related, setRelated] = useState<RelatedResource[]>([]);
+  const liveEvents = isRolloutWorkloadKind(kind.kind);
 
   useEffect(() => {
     if (!selected || !contextId || !selected.namespace) {
@@ -47,12 +48,12 @@ export function useDiagnostics({ contextId, kind, selected }: DiagnosticsOptions
         .catch(() => active && setEvents([]));
     };
     load();
-    const timer = setInterval(load, EVENTS_REFRESH_MS);
+    const timer = liveEvents ? setInterval(load, SLOW_POLL_MS) : undefined;
     return () => {
       active = false;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
     };
-  }, [contextId, kind, selected]);
+  }, [contextId, kind, selected, liveEvents]);
 
   useEffect(() => {
     if (!selected || !contextId) {

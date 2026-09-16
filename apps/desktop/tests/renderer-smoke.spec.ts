@@ -2560,7 +2560,7 @@ test("multi-selection caps at 32 namespaces with a footer message", async ({ pag
   }
   // The 33rd click is rejected in place: the footer explains the cap.
   await expect(page.getByTestId("namespace-cap-message")).toContainText("Up to 32 namespaces");
-  await expect(page.getByTestId("namespace-select")).toHaveText("cap-00, cap-01, cap-02 +29");
+  await expect(page.getByTestId("namespace-select")).toHaveText("cap-00, cap-01 +30");
   // Every fan-out is one request per selected namespace; the union across
   // the test is exactly the 32 names that joined, never the rejected 33rd.
   const namespaces = await page.evaluate(() =>

@@ -9,7 +9,8 @@ import { HelmUpgradeDialog } from "./HelmUpgradeDialog";
 
 export interface HelmViewProps {
   contextName?: string;
-  namespace: string;
+  /** Human summary of the namespace scope, e.g. "default, kube-system +1". */
+  scopeLabel: string;
   releases: HelmReleaseSummary[];
   loading: boolean;
   error: string;
@@ -46,7 +47,7 @@ function statusTone(status: string): string {
 
 export function HelmView({
   contextName,
-  namespace,
+  scopeLabel,
   releases,
   loading,
   error,
@@ -71,7 +72,7 @@ export function HelmView({
         <div className="pane-heading">
           <div>
             <h1>Releases</h1>
-            <p>Helm · {contextName ? `${contextName} · ` : ""}{namespace}</p>
+            <p>Helm · {contextName ? `${contextName} · ` : ""}{scopeLabel}</p>
           </div>
           <div className="resource-summary">
             <span>{releases.length} loaded</span>
@@ -104,7 +105,7 @@ export function HelmView({
           onLoadMore={onLoadMore}
           loading={loading}
           error={error}
-          namespace={namespace}
+          scopeLabel={scopeLabel}
           onSelect={onSelect}
         />
       )}
@@ -119,7 +120,7 @@ function ReleaseTable({
   onLoadMore,
   loading,
   error,
-  namespace,
+  scopeLabel,
   onSelect,
 }: {
   releases: HelmReleaseSummary[];
@@ -128,7 +129,7 @@ function ReleaseTable({
   onLoadMore(): void;
   loading: boolean;
   error: string;
-  namespace: string;
+  scopeLabel: string;
   onSelect(name: string, namespace: string): void;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -159,7 +160,7 @@ function ReleaseTable({
   if (releases.length === 0) {
     return (
       <div className="table-state" data-testid="helm-empty">
-        <span>No releases in {namespace}</span>
+        <span>No releases in {scopeLabel}</span>
       </div>
     );
   }

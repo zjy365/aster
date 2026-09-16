@@ -194,6 +194,55 @@ describe("rolloutStatus", () => {
     });
   });
 
+  it("settled counters complete a non-terminal Progressing=True (StatefulSet)", () => {
+    // StatefulSet keeps Progressing=True with a reason like SuccessfulCreate
+    // long after the rollout settles; only the counters can say it is done.
+    const progressing = {
+      type: "Progressing",
+      status: "True",
+      reason: "SuccessfulCreate",
+      message: "create Pod db-0 in StatefulSet db successful",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [progressing] };
+    expect(rolloutStatus(withCondition, { desired: 3, ready: 3, updated: 3 })).toEqual({
+      state: "complete",
+      message: "3/3 ready · 3 updated",
+    });
+  });
+
+  it("lagging updated replicas keep a settled-ready rollout progressing", () => {
+    // Mid-rollout with maxUnavailable=0, ready can sit at desired while the
+    // new revision is still rolling: updated < desired must override.
+    const progressing = {
+      type: "Progressing",
+      status: "True",
+      reason: "ReplicaSetUpdated",
+      message: "ReplicaSet is progressing.",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [progressing] };
+    expect(rolloutStatus(withCondition, { desired: 3, ready: 3, updated: 1 })).toEqual({
+      state: "progressing",
+      message: "ReplicaSetUpdated · 3/3 ready · 1 updated",
+    });
+  });
+
+  it("unknown counters fall back to the condition alone", () => {
+    const progressing = {
+      type: "Progressing",
+      status: "True",
+      reason: "SuccessfulCreate",
+      message: "create Pod db-0 in StatefulSet db successful",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [progressing] };
+    expect(rolloutStatus(withCondition, { desired: undefined, ready: undefined })).toEqual({
+      state: "progressing",
+      message: "SuccessfulCreate",
+    });
+  });
+
   it("without a condition, lagging replicas mean progressing", () => {
     const none = { ...details, conditions: [] };
     expect(rolloutStatus(none, { desired: 3, ready: 1 })).toEqual({

@@ -63,14 +63,14 @@ describe("namespaceScopeSummary", () => {
     expect(namespaceScopeSummary(["kube-system"])).toBe("kube-system");
   });
 
-  it("a few names join with commas in selection order", () => {
+  it("two names join with a comma in selection order", () => {
     expect(namespaceScopeSummary(["a", "b"])).toBe("a, b");
-    expect(namespaceScopeSummary(["a", "b", "c"])).toBe("a, b, c");
   });
 
-  it("longer selections overflow into +N", () => {
-    expect(namespaceScopeSummary(["a", "b", "c", "d"])).toBe("a, b, c +1");
-    expect(namespaceScopeSummary(["a", "b", "c", "d", "e", "f"])).toBe("a, b, c +3");
+  it("longer selections overflow into +N from three on", () => {
+    expect(namespaceScopeSummary(["a", "b", "c"])).toBe("a, b +1");
+    expect(namespaceScopeSummary(["a", "b", "c", "d"])).toBe("a, b +2");
+    expect(namespaceScopeSummary(["a", "b", "c", "d", "e", "f"])).toBe("a, b +4");
   });
 });
 

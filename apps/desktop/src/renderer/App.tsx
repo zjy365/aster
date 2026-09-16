@@ -32,6 +32,8 @@ import { useUpdater } from "./hooks/useUpdater";
 import { buildCommandItems, objectCommandItems, searchResultItems, type CommandAction } from "./lib/command-palette";
 import { messageOf, pluralize } from "./lib/format";
 import { namespaceScopeKey, namespaceScopeSummary } from "./lib/namespace-scope";
+import { SLOW_POLL_MS } from "./lib/poll-cadence";
+import { isRolloutWorkloadKind } from "./detail/workload-detail";
 import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
 import { Sidebar, type SidebarToolGroup } from "./shell/Sidebar";
 import { UnifiedToolbar } from "./shell/UnifiedToolbar";
@@ -78,6 +80,13 @@ export default function App() {
   // Row-scoped surfaces (create dialog, palette search fallback) only have a
   // namespace when the scope names exactly one.
   const primaryNamespace = namespaceScope.length === 1 ? namespaceScope[0] : "";
+  // The create dialog pre-fills a namespace the user actually chose (#31
+  // story 24): the single-selection scope first, else the context's default
+  // for All/multi scopes; the template's literal "default" remains the last
+  // resort for contexts without one.
+  const createNamespace = primaryNamespace
+    || contexts.contexts.find((item) => item.id === contextId)?.namespace
+    || "";
   const resources = useResourceList({
     contextId,
     kind,
@@ -88,10 +97,13 @@ export default function App() {
   const detail = useResourceDetail({
     contextId,
     kind,
-    namespaceKey: scopeKey,
+    scopeKey,
     generation: resources.generation,
     items: resources.list.items,
     coreReady: core.state === "ready",
+    // The single-object live channel is a rollout-workload feature (#39);
+    // every other kind keeps the pre-existing selection-follows-list flow.
+    live: isRolloutWorkloadKind(kind.kind),
   });
   const diagnostics = useDiagnostics({
     contextId,
@@ -157,7 +169,7 @@ export default function App() {
       setPodUsage(usage);
     };
     void fetchMetrics();
-    const timer = setInterval(() => void fetchMetrics(), 15_000);
+    const timer = setInterval(() => void fetchMetrics(), SLOW_POLL_MS);
     return () => {
       active = false;
       clearInterval(timer);
@@ -663,7 +675,7 @@ export default function App() {
           {helmActive && (
             <HelmView
               contextName={contexts.activeContext?.name}
-              namespace={namespaceScopeSummary(namespaceScope) || "All namespaces"}
+              scopeLabel={namespaceScopeSummary(namespaceScope) || "All namespaces"}
               releases={helm.releases}
               progress={helm.progress}
               onCancel={helm.cancel}
@@ -828,7 +840,7 @@ export default function App() {
             open={createOpen}
             onOpenChange={setCreateOpen}
             kind={kind}
-            namespace={primaryNamespace}
+            namespace={createNamespace}
             busy={mutation.mutationBusy}
             message={mutation.mutationMessage}
             preview={mutation.mutationPreview}

@@ -247,7 +247,7 @@ export function UnifiedToolbar({
           >
             <span
               className="namespace-select-value"
-              title={namespaceScope.length > 3 ? namespaceScope.join(", ") : undefined}
+              title={namespaceScope.length > 2 ? namespaceScope.join(", ") : undefined}
             >
               {/* Rendered from the hook state, not Combobox.Value: direct-Enter
                   commits and cap rejections can select namespaces that are not
@@ -318,7 +318,7 @@ export function UnifiedToolbar({
                 </Combobox.List>
                 {capReached ? (
                   <div className="namespace-combobox-footer" data-testid="namespace-cap-message">
-                    Up to {MAX_NAMESPACE_SELECTION} namespaces can be selected
+                    Up to {MAX_NAMESPACE_SELECTION} namespaces selected
                   </div>
                 ) : namespaceSearch.narrowed ? (
                   <div className="namespace-combobox-footer">

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ResourceEvent, ResourceKind, ResourceRow } from "../../shared/types";
 import { desktop } from "../lib/desktop";
+import { SLOW_POLL_MS } from "../lib/poll-cadence";
+import { newestEventsFirst } from "../lib/resource-events";
 
 /** Matches the events one-shot's bound; the poll never loads more than this. */
 const EVENT_LIMIT = 100;
-/** Matches the metrics sampling cadence; events aggregate on a similar clock. */
-const POLL_INTERVAL_MS = 15_000;
 
 const EVENTS_KIND: ResourceKind = {
   id: "events",
@@ -40,14 +40,16 @@ export interface PodEventsOptions {
  */
 export function usePodEvents({ contextId, namespace, names, enabled }: PodEventsOptions): ResourceEvent[] {
   const [events, setEvents] = useState<ResourceEvent[]>([]);
-  // The name set rides a ref so a live pod list refreshing cannot restart the
-  // poll; only the scope (context/namespace/kind) can.
+  // The name set rides a ref: each poll joins against whatever the pods list
+  // currently holds, so a live pod list refreshing cannot restart the poll.
+  // Only the empty↔non-empty transition is a dependency (nothing to join
+  // against means nothing to poll for).
   const namesRef = useRef(names);
   namesRef.current = names;
-  const nameKey = useMemo(() => [...names].sort().join("\u0000"), [names]);
+  const hasNames = names.length > 0;
 
   useEffect(() => {
-    if (!enabled || !contextId || !namespace || !nameKey) {
+    if (!enabled || !contextId || !namespace || !hasNames) {
       setEvents([]);
       return;
     }
@@ -63,7 +65,7 @@ export function usePodEvents({ contextId, namespace, names, enabled }: PodEvents
         if (!active) return;
         const current = new Set(namesRef.current);
         const seen = new Set<string>();
-        const joined: Array<ResourceEvent & { sortKey: string }> = [];
+        const joined: ResourceEvent[] = [];
         for (const row of response.items as EventRow[]) {
           const pod = row.involvedObject || "";
           if (!pod || !current.has(pod)) continue;
@@ -77,22 +79,20 @@ export function usePodEvents({ contextId, namespace, names, enabled }: PodEvents
             type: row.type,
             count: row.count,
             lastTimestamp: row.lastTimestamp,
-            sortKey: row.lastTimestamp || "",
           });
         }
-        joined.sort((a, b) => (a.sortKey < b.sortKey ? 1 : a.sortKey > b.sortKey ? -1 : 0));
-        setEvents(joined.slice(0, EVENT_LIMIT).map(({ sortKey: _sortKey, ...event }) => event));
+        setEvents(newestEventsFirst(joined, EVENT_LIMIT));
       }).catch(() => {
         if (active) setEvents([]);
       });
     };
     load();
-    const timer = setInterval(load, POLL_INTERVAL_MS);
+    const timer = setInterval(load, SLOW_POLL_MS);
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, [contextId, namespace, nameKey, enabled]);
+  }, [contextId, namespace, hasNames, enabled]);
 
   return events;
 }

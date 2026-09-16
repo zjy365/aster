@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { HelmReleaseDetail, HelmReleaseSummary, HelmUpgradeRequest, NamespaceScope } from "../../shared/types";
 import { toast } from "@/components/ui/toast";
 import { desktop } from "../lib/desktop";
+import { namespaceScopeKey } from "../lib/namespace-scope";
 
 export interface UseHelmOptions {
   contextId: string;
@@ -48,7 +49,7 @@ export interface HelmState {
  * action at a time and refreshes the list when it finishes.
  */
 export function useHelm({ contextId, namespaceScope, coreReady }: UseHelmOptions): HelmState {
-  const scopeKey = useMemo(() => [...namespaceScope].sort().join("\u001f"), [namespaceScope]);
+  const scopeKey = namespaceScopeKey(namespaceScope);
   // Row-scoped surfaces (select/upgrade/rollback) always act on a release that
   // carries its own namespace; the primary selection is only the fallback.
   const primaryNamespace = namespaceScope[0] ?? "";
@@ -88,66 +89,10 @@ export function useHelm({ contextId, namespaceScope, coreReady }: UseHelmOptions
     setLoading(Boolean(contextId && coreReady));
     if (!contextId || !coreReady) return;
     // "" keeps its wire meaning of all namespaces, so the scope maps to one
-    // ordinary list request per entry; a single entry is the existing flow.
+    // ordinary list request per entry: a single entry (one namespace or All)
+    // is just the one-entry case of the same per-namespace stream fan-out —
+    // one code path, no special cases.
     const namespaces = scopeRef.current.length ? scopeRef.current : [""];
-    if (namespaces.length === 1) {
-      const namespace = namespaces[0];
-      let active = true;
-      let pending = false;
-      let pageRequest = 0;
-      let cursor = "";
-      let retainedCursor = "";
-      let stop = () => {};
-      const close = (continueToken: string) => {
-        void desktop.helm.closeList({ contextId, namespace, continueToken }).catch(() => {});
-      };
-      const startPage = (continueToken: string) => {
-        if (!active || pending) return;
-        pending = true;
-        const current = ++pageRequest;
-        setLoading(!continueToken);
-        setLoadingMore(Boolean(continueToken));
-        setError("");
-        setProgress("");
-        stop = desktop.helm.list({ contextId, namespace, continueToken: continueToken || undefined }, (event) => {
-          if (!active || current !== pageRequest) {
-            if (!active && event.kind === "done" && event.continueToken) close(event.continueToken);
-            return;
-          }
-          if (event.kind === "progress") return;
-          pending = false;
-          setLoading(false);
-          setLoadingMore(false);
-          if (event.kind === "error") { setError(event.message); return; }
-          // Commit the whole page once; heartbeat/progress never changes rows.
-          setReleases((items) => continueToken ? [...items, ...(event.releases ?? [])] : (event.releases ?? []));
-          cursor = event.continueToken ?? "";
-          if (cursor) retainedCursor = cursor;
-          setHasMore(Boolean(cursor));
-        });
-      };
-      loadNextPage.current = () => { if (cursor) startPage(cursor); };
-      stopList.current = () => {
-        ++pageRequest;
-        pending = false;
-        stop();
-        setLoading(false);
-        setLoadingMore(false);
-        setProgress("Loading cancelled");
-      };
-      startPage("");
-      return () => {
-        active = false;
-        ++pageRequest;
-        stop();
-        if (retainedCursor) close(retainedCursor);
-      };
-    }
-
-    // Multi-namespace fan-out: one ordinary single-namespace stream per
-    // selected namespace, merged in selection order. Each stream pages
-    // independently; load-more advances every namespace that still has a
-    // cursor, and a failed namespace degrades to "no releases from it".
     let active = true;
     let loadingPages = 0;
     let loadingMorePages = 0;
@@ -176,6 +121,8 @@ export function useHelm({ contextId, namespaceScope, coreReady }: UseHelmOptions
       const current = pageRequests[namespace];
       if (continueToken) loadingMorePages += 1; else loadingPages += 1;
       if (!continueToken) setLoading(true); else setLoadingMore(true);
+      setError("");
+      setProgress("");
       const stop = desktop.helm.list({ contextId, namespace, continueToken: continueToken || undefined }, (event) => {
         if (!active || current !== pageRequests[namespace]) {
           if (!active && event.kind === "done" && event.continueToken) close(namespace, event.continueToken);
@@ -186,15 +133,25 @@ export function useHelm({ contextId, namespaceScope, coreReady }: UseHelmOptions
         setLoading(loadingPages > 0);
         setLoadingMore(loadingMorePages > 0);
         if (event.kind === "error") {
-          // The namespace contributes nothing; the others still render.
+          // Keep the loaded rows and the cursor: the namespace contributes
+          // nothing new while the others still render, and the footer's
+          // load-more retries the same page.
           setError(event.message);
-          pages[namespace] = { releases: [], cursor: "" };
-          commit();
           return;
         }
-        pages[namespace] = { releases: event.releases ?? [], cursor: event.continueToken ?? "" };
+        // The first page replaces; a load-more page appends after the ones
+        // already loaded, exactly like the table's appendNamespacePage.
+        pages[namespace] = {
+          releases: continueToken
+            ? [...(pages[namespace]?.releases ?? []), ...(event.releases ?? [])]
+            : (event.releases ?? []),
+          cursor: event.continueToken ?? "",
+        };
+        // Retain the last non-empty token per namespace, even after a page
+        // completes: the leaving view (scope change or refresh) must still
+        // release the server-side session that token pinned — matching the
+        // single-namespace stream's close-on-leave contract.
         if (event.continueToken) retainedCursors[namespace] = event.continueToken;
-        else delete retainedCursors[namespace];
         commit();
       });
       stops.push(stop);

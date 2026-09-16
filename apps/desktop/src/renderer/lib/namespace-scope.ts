@@ -46,14 +46,14 @@ export function namespaceScopeKey(scope: string[]): string {
 }
 
 /**
- * Trigger summary: "" for All, the name alone for one selection, names
- * joined for a handful, and a "+N" overflow past three so long names cannot
- * push the toolbar's search and actions out of reach.
+ * Trigger summary: "" for All, the name alone for one selection, two names
+ * joined, and a "+N" overflow from three on so long names cannot push the
+ * toolbar's search and actions out of reach.
  */
 export function namespaceScopeSummary(scope: string[]): string {
   if (scope.length === 0) return "";
-  if (scope.length <= 3) return scope.join(", ");
-  return `${scope.slice(0, 3).join(", ")} +${scope.length - 3}`;
+  if (scope.length <= 2) return scope.join(", ");
+  return `${scope.slice(0, 2).join(", ")} +${scope.length - 2}`;
 }
 
 export interface MergedNamespacePages {

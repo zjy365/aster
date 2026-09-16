@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NamespaceScope, ResourceKind, ResourceListResponse, ResourceRow, ResourceWatchBatch } from "../../shared/types";
 import { applyResourceWatchBatches } from "../lib/resource-watch";
 import { readResourceListSnapshot, resourceListCacheKey, writeResourceListSnapshot, clearResourceListSnapshots } from "../lib/resource-list-cache";
-import { MULTI_SCOPE_CONTINUE, mergeNamespacePages } from "../lib/namespace-scope";
+import { MULTI_SCOPE_CONTINUE, mergeNamespacePages, namespaceScopeKey } from "../lib/namespace-scope";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
@@ -97,7 +97,7 @@ export function useResourceList({ contextId, kind, namespaceScope, coreReady, se
   // Cluster-scoped kinds ignore the scope entirely — their requests carry no
   // namespace, so a stale multi selection must not fan out for them.
   const multiScope = kind.namespaced && namespaceScope.length > 1;
-  const scopeKey = useMemo(() => [...namespaceScope].sort().join("\u001f"), [namespaceScope]);
+  const scopeKey = useMemo(() => namespaceScopeKey(namespaceScope), [namespaceScope]);
 
   // The multi-scope view derives from the per-namespace pages in selection
   // order; the sentinel token only signals "some namespace has another page"

@@ -109,6 +109,18 @@ export function podSelector(details: WorkloadDetails | undefined): string | unde
 
 export type RolloutState = "progressing" | "complete" | "stuck";
 
+/**
+ * Kinds whose open detail keeps a single-object live channel (#39): the
+ * pod-owning controllers with rollout semantics. Everything else — Pods,
+ * ConfigMaps, cluster-scoped kinds — keeps the pre-existing behavior (the
+ * list watch bumps the selection; snapshot scopes stay frozen), so no watch
+ * request ever leaves with an empty namespace.
+ */
+export function isRolloutWorkloadKind(kind: string): boolean {
+  return kind === "Deployment" || kind === "StatefulSet" || kind === "DaemonSet"
+    || kind === "ReplicaSet" || kind === "ReplicationController";
+}
+
 export interface RolloutStatus {
   state: RolloutState;
   /** Short human summary, e.g. "2/5 ready · 1 updated" or the condition reason. */
@@ -120,6 +132,10 @@ export interface RolloutStatus {
  * counters, so "in progress / complete / stuck" is visible at a glance while
  * a rollout runs. The counters come from the live row, the condition from the
  * live YAML — both converge through the detail's single-object watch.
+ * Counters decide completion whenever they are known: StatefulSet keeps
+ * Progressing=True with a non-terminal reason long after it settles, so only
+ * "ready == desired and updated == desired" can mark it complete (and lagging
+ * counters keep an optimistic condition honest mid-rollout).
  * Returns undefined for objects without rollout semantics (no usable
  * condition and no replica counters, e.g. Pods, ConfigMaps, Jobs without
  * spec.replicas).
@@ -130,6 +146,9 @@ export function rolloutStatus(
 ): RolloutStatus | undefined {
   const condition = details?.conditions.find((item) => item.type === "Progressing");
   const replicas = replicaSummary(row);
+  const countersSettled =
+    row.desired !== undefined && row.ready !== undefined && row.ready === row.desired
+    && (row.updated === undefined || row.updated === row.desired);
   if (condition) {
     if (condition.status === "False") {
       return {
@@ -139,6 +158,9 @@ export function rolloutStatus(
     }
     if (condition.status === "True" && /NewReplicaSetAvailable/i.test(condition.reason)) {
       return { state: "complete", message: [condition.reason, replicas].filter(Boolean).join(" · ") };
+    }
+    if (countersSettled) {
+      return { state: "complete", message: replicas || "Rolled out" };
     }
     return {
       state: "progressing",

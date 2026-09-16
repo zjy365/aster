@@ -34,6 +34,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { usePodMetrics } from "../hooks/usePodMetrics";
 import { useResourceList } from "../hooks/useResourceList";
 import { findEnabledResourceKind } from "../lib/resource-catalog";
+import { newestEventsFirst } from "../lib/resource-events";
 import { DetailHeader } from "./DetailHeader";
 import { LogViewer } from "./LogViewer";
 import { MutationDiffView } from "./MutationDiffView";
@@ -663,15 +664,14 @@ const MERGED_EVENT_LIMIT = 100;
  */
 function mergeEvents(objectEvents: ResourceEvent[], podEvents: ResourceEvent[]): ResourceEvent[] {
   const seen = new Set<string>();
-  const merged: Array<ResourceEvent & { sortKey: string }> = [];
+  const deduped: ResourceEvent[] = [];
   for (const event of [...objectEvents, ...podEvents]) {
     const key = `${event.namespace}/${event.name}|${event.reason || ""}|${event.lastTimestamp || ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    merged.push({ ...event, sortKey: event.lastTimestamp || "" });
+    deduped.push(event);
   }
-  merged.sort((a, b) => (a.sortKey < b.sortKey ? 1 : a.sortKey > b.sortKey ? -1 : 0));
-  return merged.slice(0, MERGED_EVENT_LIMIT).map(({ sortKey: _sortKey, ...event }) => event);
+  return newestEventsFirst(deduped, MERGED_EVENT_LIMIT);
 }
 
 function OperationInputDialog({
