@@ -15,6 +15,7 @@ import {
   Settings,
   Sun,
   SunMoon,
+  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +38,6 @@ import { cn } from "@/lib/utils";
 import type { NamespaceInfo, NamespaceScope } from "../../shared/types";
 import { searchNamespaces } from "../lib/namespace-search";
 import { MAX_NAMESPACE_SELECTION, namespaceScopeSummary, toggleNamespace } from "../lib/namespace-scope";
-
 export type AppearanceTheme = "system" | "light" | "dark";
 
 export interface UnifiedToolbarProps {
@@ -119,10 +119,25 @@ export function UnifiedToolbar({
   // "All namespaces" label would collide with a real namespace (e.g. "all") in
   // Base UI's autoHighlight and let Enter clear the scope by mistake, and
   // during loading it would sit highlighted above the direct-Enter commit.
-  const namespaceItems = useMemo<NamespaceItem[]>(() => [
-    ...(!namespaceQuery.trim() ? [ALL_NAMESPACES_ITEM] : []),
-    ...namespaces.map((item) => ({ value: item.name, label: item.name })),
-  ], [namespaces, namespaceQuery]);
+  // Selected namespaces follow in selection order before the unselected rest,
+  // so the rows a multi-selection act on (toggle off, review) are always at
+  // the top instead of scattered through the alphabetical list.
+  const namespaceItems = useMemo<NamespaceItem[]>(() => {
+    const byName = new Map(namespaces.map((item) => [item.name, { value: item.name, label: item.name }]));
+    const chosen: NamespaceItem[] = [];
+    for (const name of namespaceScope) {
+      const item = byName.get(name);
+      if (item) {
+        chosen.push(item);
+        byName.delete(name);
+      }
+    }
+    return [
+      ...(!namespaceQuery.trim() ? [ALL_NAMESPACES_ITEM] : []),
+      ...chosen,
+      ...byName.values(),
+    ];
+  }, [namespaces, namespaceQuery, namespaceScope]);
   // Selection values are rebuilt from the scope (selected names need not be
   // list rows — a direct-Enter commit can add one before the inventory loads),
   // so item identity is bridged with isItemEqualToValue.
@@ -313,7 +328,10 @@ export function UnifiedToolbar({
                     // Only rows that survive the prefix search are rendered;
                     // the narrowed hint below covers the rest.
                     if (item.value !== ALL_NAMESPACES_VALUE && !namespaceSearch.shown.includes(item.label)) return null;
-                    return renderNamespaceItem(item);
+                    const selected = item.value === ALL_NAMESPACES_VALUE
+                      ? namespaceScope.length === 0
+                      : namespaceScope.includes(item.value);
+                    return renderNamespaceItem(item, selected);
                   }}
                 </Combobox.List>
                 {capReached ? (
@@ -333,6 +351,25 @@ export function UnifiedToolbar({
             </Combobox.Positioner>
           </Combobox.Portal>
         </Combobox.Root>
+        {/* One-click way out of a multi selection (the picker's All row is
+            the two-click one): only for 2+ names — a single namespace is the
+            ordinary scope, not a selection to undo. */}
+        {namespaceScope.length > 1 ? (
+          <Button
+            aria-label="Clear namespace selection"
+            className="namespace-clear"
+            data-testid="namespace-clear"
+            onClick={() => {
+              setNamespaceOpen(false);
+              setCapReached(false);
+              onNamespaceScopeChange([]);
+            }}
+            size="icon"
+            variant="ghost"
+          >
+            <X aria-hidden="true" />
+          </Button>
+        ) : null}
       </div>
 
       <label className="toolbar-search">
@@ -425,12 +462,13 @@ export function UnifiedToolbar({
   );
 }
 
-function renderNamespaceItem(item: NamespaceItem) {
+function renderNamespaceItem(item: NamespaceItem, selected: boolean) {
   return (
     <Combobox.Item
       key={item.value}
       value={item}
       className="namespace-combobox-item"
+      data-selected={selected || undefined}
     >
       <span className="namespace-combobox-check">
         <Combobox.ItemIndicator>

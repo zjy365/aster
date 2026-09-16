@@ -1156,7 +1156,25 @@ h2 {
 }
 
 .toolbar-namespace {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+/* One-click exit from a multi namespace selection; visually part of the
+   picker chip, functionally its own control. */
+.namespace-clear {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+}
+
+.namespace-clear svg {
+  width: 13px;
+  height: 13px;
 }
 
 .toolbar-actions {
@@ -1310,6 +1328,13 @@ h2 {
   user-select: none;
 }
 
+/* Selected rows read at a glance and stay reachable at the top of the list;
+   the same tokens as the table's row checkbox, per the picker spec. */
+.namespace-combobox-item[data-selected] {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
 .namespace-combobox-item[data-highlighted] {
   color: var(--text);
   background: var(--selection);
@@ -1317,14 +1342,80 @@ h2 {
 
 .namespace-combobox-check {
   display: flex;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
   align-items: center;
-  color: var(--focus);
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--primary-foreground);
+  background: transparent;
+}
+
+.namespace-combobox-item[data-selected] .namespace-combobox-check {
+  border-color: var(--focus);
+  background: var(--focus);
 }
 
 .namespace-combobox-check svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Sidebar favorite star: hidden until the row is hovered, persistent (and
+   filled) once starred. A sibling overlay of the row button, so the a11y
+   tree keeps the two controls separate. */
+.source-list-item-row {
+  position: relative;
+}
+
+.source-list-item-row .source-list-item {
+  padding-right: 22px;
+}
+
+.source-list-item-star {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 100ms ease, color 100ms ease, background-color 100ms ease;
+}
+
+.source-list-item-row:hover .source-list-item-star,
+.source-list-item-star:focus-visible,
+.source-list-item-star.starred {
+  opacity: 1;
+}
+
+.source-list-item-star:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.source-list-item-star.starred {
+  /* Interactive blue, not amber: the semantic colors stay reserved for
+     operational status (DESIGN.md), and a star is a user choice. */
+  color: var(--focus);
+}
+
+.source-list-item-star.starred svg {
+  fill: currentColor;
+}
+
+.source-list-item-star svg {
   width: 12px;
   height: 12px;
 }

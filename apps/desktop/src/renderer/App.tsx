@@ -35,6 +35,7 @@ import { namespaceScopeKey, namespaceScopeSummary } from "./lib/namespace-scope"
 import { SLOW_POLL_MS } from "./lib/poll-cadence";
 import { isRolloutWorkloadKind } from "./detail/workload-detail";
 import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
+import { mostUsedKindIds, recordKindUsage, toggleFavoriteKind } from "./lib/resource-favorites";
 import { Sidebar, type SidebarToolGroup } from "./shell/Sidebar";
 import { UnifiedToolbar } from "./shell/UnifiedToolbar";
 import { WorkbenchShell } from "./shell/WorkbenchShell";
@@ -179,6 +180,26 @@ export default function App() {
     label: "Helm",
     items: [{ id: "helm", label: "Releases", icon: Ship }],
   }], []);
+
+  // Sidebar quick access (#competitor parity): starred kinds and the kinds
+  // this operator actually opens most. UI preferences like the sidebar fold
+  // prefs — localStorage, renderer-side, no cluster data.
+  const [favoriteKinds, setFavoriteKinds] = useState<string[]>(() => readStoredStringList("aster.sidebar.favoriteKinds"));
+  const [kindUsage, setKindUsage] = useState<Record<string, number>>(() => readStoredUsage("aster.sidebar.kindUsage"));
+  useEffect(() => {
+    localStorage.setItem("aster.sidebar.favoriteKinds", JSON.stringify(favoriteKinds));
+  }, [favoriteKinds]);
+  useEffect(() => {
+    localStorage.setItem("aster.sidebar.kindUsage", JSON.stringify(kindUsage));
+  }, [kindUsage]);
+  const toggleFavorite = useCallback((id: string) => {
+    setFavoriteKinds((current) => toggleFavoriteKind(current, id));
+  }, []);
+  // Starred kinds need no second pointer in Most used; the top three fill it.
+  const mostUsed = useMemo(
+    () => mostUsedKindIds(kindUsage, new Set(favoriteKinds), 3),
+    [kindUsage, favoriteKinds],
+  );
   const searchRef = useRef<HTMLInputElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -281,9 +302,11 @@ export default function App() {
 
   // Selecting a resource kind always leaves the overview and the Helm pane;
   // the kind switches only when it differs, otherwise the row selection resets.
+  // Every open feeds the Most used ranking, whichever surface triggered it.
   const selectKind = useCallback((next: ResourceKind) => {
     setOverviewActive(false);
     setHelmActive(false);
+    setKindUsage((usage) => recordKindUsage(usage, next.id));
     if (next.id === kind.id) {
       detail.clear();
       return;
@@ -629,6 +652,9 @@ export default function App() {
           onSelectTool={(toolId) => {
             if (toolId === "helm") showHelm();
           }}
+          favoriteKindIds={favoriteKinds}
+          onToggleFavoriteKind={toggleFavorite}
+          mostUsedKindIds={mostUsed}
           onShowContexts={showContextPicker}
         />
       )}
@@ -855,4 +881,28 @@ export default function App() {
       )}
     </WorkbenchShell>
   );
+}
+
+/** Reads a stored string array; corrupt or foreign payloads degrade to empty. */
+function readStoredStringList(key: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+      ? parsed as string[]
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Reads a stored string→number counter map; corrupt payloads degrade to empty. */
+function readStoredUsage(key: string): Record<string, number> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const entries = Object.entries(parsed).filter(([, count]) => typeof count === "number");
+    return Object.fromEntries(entries);
+  } catch {
+    return {};
+  }
 }

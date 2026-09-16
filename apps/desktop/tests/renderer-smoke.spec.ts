@@ -2630,6 +2630,59 @@ test("pod usage covers every selected namespace", async ({ page }) => {
   expect(failures).toEqual([]);
 });
 
+test("sidebar favorites and most used surface frequent kinds", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Starring a kind pins it into the Favorites group at the top of the
+  // sidebar; the star rides the row button as a sibling control.
+  await page.getByTestId("resource-nav-pods").hover();
+  await page.getByTestId("star-pods").click();
+  await expect(page.getByTestId("resource-nav-fav-pods")).toBeVisible();
+
+  // Opening kinds feeds Most used (top three, best first); starred kinds are
+  // not duplicated there.
+  await page.getByTestId("resource-nav-services").click();
+  await page.getByTestId("resource-nav-jobs").click();
+  await expect(page.getByTestId("resource-nav-most-services")).toBeVisible();
+  await expect(page.getByTestId("resource-nav-most-jobs")).toBeVisible();
+  await expect(page.getByTestId("resource-nav-most-pods")).toHaveCount(0);
+  // The quick-access entries navigate like their home rows.
+  await page.getByTestId("resource-nav-most-services").click();
+  await expect(page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1)).toContainText("services-0", { timeout: 15_000 });
+
+  // The star persists in localStorage; unstarring removes the favorite again.
+  expect(await page.evaluate(() => localStorage.getItem("aster.sidebar.favoriteKinds"))).toContain("pods");
+  await page.getByTestId("resource-nav-pods").hover();
+  await page.getByTestId("star-pods").click();
+  await expect(page.getByTestId("resource-nav-fav-pods")).toHaveCount(0);
+  await screenshot(page, "sidebar-favorites-most-used");
+  expect(failures).toEqual([]);
+});
+
+test("a multi namespace selection clears with one click on the trigger x", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Single selection is the ordinary scope: no undo control.
+  await expect(page.getByTestId("namespace-clear")).toHaveCount(0);
+
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "kube-system" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("namespace-select")).toHaveText("default, kube-system");
+  // One click back to the cluster-wide scope, no popup round-trip.
+  await page.getByTestId("namespace-clear").click();
+  await expect(page.getByTestId("namespace-select")).toHaveText("All namespaces");
+  await expect(page.getByTestId("namespace-clear")).toHaveCount(0);
+  await screenshot(page, "namespace-clear-x");
+  expect(failures).toEqual([]);
+});
+
 test("helm view lists releases across namespaces when the picker is on All namespaces", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
