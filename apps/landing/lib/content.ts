@@ -42,15 +42,15 @@ export type FeatureCard = {
 export type FooterLink = NavLink;
 
 export const hero = {
-  titleLine1: "Cluster work,",
-  titleLine2Before: "done ",
-  titleLine2Em: "deliberately",
-  titleLine2After: ".",
+  titleLine1: "Change anything.",
+  titleLine2Before: "",
+  titleLine2Em: "Surprise",
+  titleLine2After: " nothing.",
   sub: "A Kubernetes desktop app that runs entirely on your machine. Find anything in seconds, and see what a change does before it happens.",
   primaryCta: { label: "Download for macOS", href: "#download" },
   secondaryCta: { label: "View on GitHub", href: site.repo, external: true },
   note: "Free and open source · macOS, Windows & Linux · No account required",
-  windowTitle: "Aster — Deployments · production",
+  windowTitle: "Aster — Deployments · dev",
   screenshot: {
     src: "/media/aster-resources.png",
     alt: "The Aster main window: a sidebar of workload kinds beside a dense Deployments table showing status, ready count, and age",
@@ -69,7 +69,7 @@ export const hero = {
 export const demos = {
   find: {
     src: "/media/aster-find.gif",
-    alt: "Typing into Aster's filter box narrows ten thousand deployments to matching rows instantly",
+    alt: "Typing into Aster's filter box narrows a long list of deployments to the matching rows as you type",
     width: 880,
     height: 550,
   },
@@ -102,13 +102,13 @@ export const principles = [
 
 export const features: { head: { title: string; body: string }; cards: FeatureCard[] } = {
   head: {
-    title: "Made for the work you actually do.",
-    body: "Find things fast, understand what you are looking at, and change it without holding your breath.",
+    title: "Find it fast. Change it safely.",
+    body: "Search any kind or namespace and watch results narrow as you type. When it is time to act, every change is previewed before anything applies.",
   },
   cards: [
     {
       title: "Find anything, instantly",
-      body: "Type a name and go. Aster searches across every kind and namespace, and keeps thousands of objects scrolling smoothly — no waiting for a giant list to load first.",
+      body: "Type a name and the list narrows as you type. Jump to any kind or namespace, and keep thousands of objects scrolling smoothly — no waiting for a giant list to load first.",
       span: "lg:col-span-7",
       media: "resources",
     },
@@ -141,7 +141,12 @@ export const features: { head: { title: string; body: string }; cards: FeatureCa
     },
     {
       title: "Helm without the terminal",
-      body: "Browse every release, read its values, roll one back, or remove it — with the same preview-then-confirm step as everything else.",
+      body: "Browse every release, read its values, roll one back, or remove it — an upgrade previews the values diff before anything applies.",
+      span: "lg:col-span-6",
+    },
+    {
+      title: "Port forwarding that stays local",
+      body: "Reach a pod, service, or workload from your machine with one forward. The tunnel is loopback-only, ends when you stop it or close the cluster, and leaves nothing running behind you.",
       span: "lg:col-span-6",
     },
     {
@@ -183,7 +188,7 @@ export const security = {
 export const download = {
   head: {
     title: "Get Aster.",
-    body: "Free and open source. Point it at the kubeconfig you already have and you are working in under a minute.",
+    body: "Free and open source. Point it at the kubeconfig you already have — there is nothing to configure first.",
   },
   unreleased: {
     title: "Not packaged yet",
@@ -203,6 +208,10 @@ export const faq = [
     a: "No. No account, no analytics, no crash reporting, no update pings. The only network traffic Aster makes is to the clusters listed in your own kubeconfig.",
   },
   {
+    q: "Do I need to install anything in my cluster?",
+    a: "No. Aster runs on your machine and talks to the Kubernetes API directly, just like kubectl — there is nothing to deploy inside the cluster, no agent to run, and nothing to clean up if you stop using it.",
+  },
+  {
     q: "What can Aster change in my cluster?",
     a: "Six things: scale a workload, update its image, restart it, apply edited YAML, create a resource, and delete one. Each shows you a preview first and waits for you to confirm. Secrets cannot be edited at all.",
   },
@@ -213,6 +222,10 @@ export const faq = [
   {
     q: "Which clusters does it work with?",
     a: "Any cluster in your kubeconfig — managed, self-hosted, or a local kind or minikube. Aster reads the same file kubectl does and lists every context it finds.",
+  },
+  {
+    q: "Is Aster another Electron app?",
+    a: "No. Aster is built on Tauri — a small Rust shell around your system's own webview, with a local Go helper doing the Kubernetes work. No bundled browser runtime, and nothing left running between sessions.",
   },
   {
     q: "How is this different from a web dashboard?",

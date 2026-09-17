@@ -36,6 +36,7 @@ Aster combines a native desktop workbench with a narrow, loopback-only Go sideca
 - Sanitized resource details; never expose kubeconfig contents, credentials, Secret data, the sidecar token, or its base URL to the renderer.
 - Safe Deployment, StatefulSet, DaemonSet, and ConfigMap mutations use server-side dry-run, semantic Diff, resource-version checks, and explicit Apply.
 - Bounded Pod Logs and one-shot Pod Terminal only; no persistent shell.
+- Local port forwarding for Pods, Services, and workloads: random loopback ports, backing-pod resolution, TCP only. Forwards end with the stop button or the context and nothing persists across restarts.
 - Never create ServiceAccounts, Roles, ClusterRoles, RoleBindings, or ClusterRoleBindings as a convenience feature.
 - This UI redesign does not add cluster aggregation, Metrics APIs, global informer caches, telemetry, user accounts, or remote services.
 
