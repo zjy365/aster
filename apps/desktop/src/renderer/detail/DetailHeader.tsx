@@ -12,9 +12,12 @@ import {
 import type { ResourceRow } from "../../shared/types";
 import { findCatalogIcon } from "../lib/resource-catalog";
 import type { ResourceActionDescriptor, ResourceActionId } from "./resource-actions";
+import type { RolloutStatus } from "./workload-detail";
 
 export interface DetailHeaderProps {
   row: ResourceRow;
+  /** Live rollout state for workload kinds; absent when there is nothing to say. */
+  rollout?: RolloutStatus;
   actions: ResourceActionDescriptor[];
   canMutate: boolean;
   mutationBusy: boolean;
@@ -31,6 +34,7 @@ export interface DetailHeaderProps {
  */
 export function DetailHeader({
   row,
+  rollout,
   actions,
   canMutate,
   mutationBusy,
@@ -59,6 +63,7 @@ export function DetailHeader({
           <div className="resource-detail-title-row">
             <h1 title={row.name}>{row.name}</h1>
             <StatusBadge status={row.status} deleting={row.deleting} />
+            {rollout && <RolloutBadge rollout={rollout} />}
           </div>
         </div>
 
@@ -178,6 +183,37 @@ export function StatusBadge({ status, deleting }: { status?: string; deleting?: 
         <Clock3 aria-hidden="true" />
       )}
       {deleting ? "Terminating" : status || "Unknown"}
+    </Badge>
+  );
+}
+
+/** One row per rollout state: label, badge tone, and icon travel together. */
+const ROLLOUT_BADGE: Record<RolloutStatus["state"], {
+  label: string;
+  variant: "destructive" | "secondary" | "outline";
+  Icon: typeof Clock3;
+}> = {
+  progressing: { label: "Rollout in progress", variant: "outline", Icon: Clock3 },
+  complete: { label: "Rolled out", variant: "secondary", Icon: CheckCircle2 },
+  stuck: { label: "Rollout stuck", variant: "destructive", Icon: AlertCircle },
+};
+
+/**
+ * The rollout chip: distinguishes "rolling out" from "rolled out" and
+ * "stuck" so live updates have somewhere to land at a glance. Tone rides
+ * with text, never color alone.
+ */
+function RolloutBadge({ rollout }: { rollout: RolloutStatus }) {
+  const { label, variant, Icon } = ROLLOUT_BADGE[rollout.state];
+  return (
+    <Badge
+      className="resource-status-badge"
+      variant={variant}
+      title={rollout.message}
+      data-testid="rollout-status"
+    >
+      <Icon aria-hidden="true" />
+      {label}
     </Badge>
   );
 }

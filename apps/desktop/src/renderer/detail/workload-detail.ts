@@ -1,4 +1,5 @@
 import { parse } from "yaml";
+import type { ResourceRow } from "../../shared/types";
 
 export interface WorkloadCondition {
   type: string;
@@ -104,6 +105,85 @@ export function parseWorkloadDetails(yamlText: string): WorkloadDetails | undefi
 export function podSelector(details: WorkloadDetails | undefined): string | undefined {
   if (!details || details.selectorPartial || !details.selector) return undefined;
   return details.selector;
+}
+
+export type RolloutState = "progressing" | "complete" | "stuck";
+
+/**
+ * Kinds whose open detail keeps a single-object live channel (#39): the
+ * pod-owning controllers with rollout semantics. Everything else — Pods,
+ * ConfigMaps, cluster-scoped kinds — keeps the pre-existing behavior (the
+ * list watch bumps the selection; snapshot scopes stay frozen), so no watch
+ * request ever leaves with an empty namespace.
+ */
+export function isRolloutWorkloadKind(kind: string): boolean {
+  return kind === "Deployment" || kind === "StatefulSet" || kind === "DaemonSet"
+    || kind === "ReplicaSet" || kind === "ReplicationController";
+}
+
+export interface RolloutStatus {
+  state: RolloutState;
+  /** Short human summary, e.g. "2/5 ready · 1 updated" or the condition reason. */
+  message: string;
+}
+
+/**
+ * Derives the rollout state from the Progressing condition plus the replica
+ * counters, so "in progress / complete / stuck" is visible at a glance while
+ * a rollout runs. The counters come from the live row, the condition from the
+ * live YAML — both converge through the detail's single-object watch.
+ * Counters decide completion whenever they are known: StatefulSet keeps
+ * Progressing=True with a non-terminal reason long after it settles, so only
+ * "ready == desired and updated == desired" can mark it complete (and lagging
+ * counters keep an optimistic condition honest mid-rollout).
+ * Returns undefined for objects without rollout semantics (no usable
+ * condition and no replica counters, e.g. Pods, ConfigMaps, Jobs without
+ * spec.replicas).
+ */
+export function rolloutStatus(
+  details: WorkloadDetails | undefined,
+  row: Pick<ResourceRow, "desired" | "ready" | "updated">,
+): RolloutStatus | undefined {
+  const condition = details?.conditions.find((item) => item.type === "Progressing");
+  const replicas = replicaSummary(row);
+  const countersSettled =
+    row.desired !== undefined && row.ready !== undefined && row.ready === row.desired
+    && (row.updated === undefined || row.updated === row.desired);
+  if (condition) {
+    if (condition.status === "False") {
+      return {
+        state: "stuck",
+        message: [condition.reason || "Progressing=False", replicas].filter(Boolean).join(" · "),
+      };
+    }
+    if (condition.status === "True" && /NewReplicaSetAvailable/i.test(condition.reason)) {
+      return { state: "complete", message: [condition.reason, replicas].filter(Boolean).join(" · ") };
+    }
+    if (countersSettled) {
+      return { state: "complete", message: replicas || "Rolled out" };
+    }
+    return {
+      state: "progressing",
+      message: [condition.reason || "Rolling out", replicas].filter(Boolean).join(" · "),
+    };
+  }
+  // No usable Progressing condition (DaemonSets, pending first status):
+  // the replica counters alone tell progress from completion.
+  if (row.desired === undefined || row.ready === undefined) return undefined;
+  if (row.ready < row.desired) {
+    return { state: "progressing", message: replicaSummary(row) || "Rolling out" };
+  }
+  if (row.updated !== undefined && row.updated < row.desired) {
+    return { state: "progressing", message: replicaSummary(row) || "Rolling out" };
+  }
+  return { state: "complete", message: replicaSummary(row) || "Ready" };
+}
+
+function replicaSummary(row: Pick<ResourceRow, "desired" | "ready" | "updated">): string {
+  if (row.desired === undefined || row.ready === undefined) return "";
+  const parts = [`${row.ready}/${row.desired} ready`];
+  if (row.updated !== undefined) parts.push(`${row.updated} updated`);
+  return parts.join(" · ");
 }
 
 function parseConditions(value: unknown): WorkloadCondition[] {

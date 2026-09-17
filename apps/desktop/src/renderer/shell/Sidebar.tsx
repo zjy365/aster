@@ -1,9 +1,10 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   Boxes,
   ChevronDown,
   ChevronRight,
   Gauge,
+  Star,
   type LucideProps,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { pluralize } from "../lib/format";
+import { flattenResourceGroups } from "../lib/resource-catalog";
 import type { ContextInfo, ResourceKind } from "../../shared/types";
 
 export type SidebarIcon = ComponentType<LucideProps>;
@@ -54,6 +56,11 @@ export interface SidebarProps {
   toolGroups?: SidebarToolGroup[];
   activeToolId?: string;
   onSelectTool?(id: string): void;
+  /** Kinds starred by the operator, in starring order; rendered at the top. */
+  favoriteKindIds?: string[];
+  onToggleFavoriteKind?(id: string): void;
+  /** Most-opened kinds (best first); hidden when empty. */
+  mostUsedKindIds?: string[];
 }
 
 const GROUP_COLLAPSE_STORAGE_KEY = "aster.sidebar.groupCollapsed";
@@ -87,8 +94,12 @@ export function Sidebar({
   toolGroups,
   activeToolId,
   onSelectTool,
+  favoriteKindIds,
+  onToggleFavoriteKind,
+  mostUsedKindIds,
 }: SidebarProps) {
   const [groupPrefs, setGroupPrefs] = useState<GroupCollapsePrefs>(readGroupCollapsePrefs);
+  const starred = useMemo(() => new Set(favoriteKindIds ?? []), [favoriteKindIds]);
 
   const setGroupCollapsed = (key: string, collapsedValue: boolean) => {
     setGroupPrefs((prefs) => {
@@ -117,39 +128,68 @@ export function Sidebar({
     return pref === undefined ? !defaultCollapsed(group, nested) : !pref;
   };
 
-  const renderItem = (item: SidebarResourceItem) => {
+  const renderItem = (item: SidebarResourceItem, options?: { testIdPrefix?: string; star?: boolean }) => {
     // The kind highlight only applies while the resource table is the active
     // pane; the overview and tool panes highlight their own sidebar entries.
     const active = !overviewActive && !activeToolId && activeKind.id === item.id;
     const enabled = item.enabled !== false;
     const ItemIcon = item.icon;
     const label = item.label || pluralize(item.kind);
+    const testId = `${options?.testIdPrefix ?? "resource-nav"}-${safeTestId(item.id)}`;
+    const favorited = starred.has(item.id);
+    const body = (
+      <>
+        <ItemIcon aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      </>
+    );
 
-    return (
+    const row = (
       <Tooltip key={item.id}>
         <TooltipTrigger
           render={
             <Button
               aria-current={active ? "page" : undefined}
               className={cn("source-list-item", active && "active")}
-              data-testid={`resource-nav-${safeTestId(item.id)}`}
+              data-testid={testId}
               disabled={!enabled}
               onClick={() => onSelectKind(toResourceKind(item))}
               variant="ghost"
             />
           }
         >
-          <ItemIcon aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+          {body}
         </TooltipTrigger>
         <TooltipContent side="right">
           {enabled ? label : `${label} is unavailable`}
         </TooltipContent>
       </Tooltip>
     );
+
+    // The star is a sibling overlay, not a control inside the row button —
+    // nested interactive elements would break both the a11y tree and clicks.
+    if (!options?.star || !onToggleFavoriteKind || !enabled) return row;
+    return (
+      <div className="source-list-item-row" key={item.id}>
+        {row}
+        <button
+          aria-label={favorited ? `Remove ${label} from favorites` : `Add ${label} to favorites`}
+          aria-pressed={favorited}
+          className={cn("source-list-item-star", favorited && "starred")}
+          data-testid={`star-${safeTestId(item.id)}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleFavoriteKind(item.id);
+          }}
+          type="button"
+        >
+          <Star aria-hidden="true" />
+        </button>
+      </div>
+    );
   };
 
-  const renderGroup = (group: SidebarResourceGroup, nested: boolean, parentLabel?: string) => {
+  const renderGroup = (group: SidebarResourceGroup, nested: boolean, parentLabel?: string, options?: { testIdPrefix?: string; star?: boolean }) => {
     const key = parentLabel ? `${parentLabel}/${group.label}` : group.label;
     const open = isGroupOpen(group, nested, key);
 
@@ -181,13 +221,29 @@ export function Sidebar({
         </button>
         {open ? (
           <div className="source-list-group-items grid gap-0.5">
-            {group.items.map((item) => renderItem(item))}
+            {group.items.map((item) => renderItem(item, options))}
             {(group.children ?? []).map((child) => renderGroup(child, true, group.label))}
           </div>
         ) : null}
       </section>
     );
   };
+
+  // Quick access resolves its entries against the full catalog so a starred
+  // kind renders with the same icon/label/enabled state as its home row.
+  const itemsById = useMemo(
+    () => new Map(flattenResourceGroups(resourceGroups).map((item) => [item.id, item])),
+    [resourceGroups],
+  );
+  const resolveItems = (ids: string[]) => ids
+    .map((id) => itemsById.get(id))
+    .filter((item): item is SidebarResourceItem => Boolean(item));
+  const favoriteGroup: SidebarResourceGroup | undefined = favoriteKindIds?.length
+    ? { label: "Favorites", items: resolveItems(favoriteKindIds) }
+    : undefined;
+  const mostUsedGroup: SidebarResourceGroup | undefined = mostUsedKindIds?.length
+    ? { label: "Most used", items: resolveItems(mostUsedKindIds) }
+    : undefined;
 
   return (
     <aside
@@ -249,6 +305,12 @@ export function Sidebar({
           </div>
         ) : null}
 
+        {/* Quick access: the operator's starred kinds, then the kinds this
+            cluster's usage actually opens most — both before the fixed
+            catalog so the frequent rows are always one glance away. */}
+        {favoriteGroup ? renderGroup(favoriteGroup, false, undefined, { testIdPrefix: "resource-nav-fav" }) : null}
+        {mostUsedGroup ? renderGroup(mostUsedGroup, false, undefined, { testIdPrefix: "resource-nav-most" }) : null}
+
         {toolGroups?.length ? (
           <div className="source-list-tools pb-1" data-testid="source-list-tools">
             {toolGroups.map((group) => (
@@ -286,7 +348,7 @@ export function Sidebar({
           </div>
         ) : null}
 
-        {resourceGroups.map((group) => renderGroup(group, false))}
+        {resourceGroups.map((group) => renderGroup(group, false, undefined, { star: true }))}
       </nav>
     </aside>
   );

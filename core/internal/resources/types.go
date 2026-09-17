@@ -257,6 +257,7 @@ type ResourceRow struct {
 	Subjects        []string          `json:"subjects,omitempty"`
 	Version         string            `json:"version,omitempty"`
 	Related         []string          `json:"related,omitempty"`
+	InvolvedObject  string            `json:"involvedObject,omitempty"`
 	Count           *int64            `json:"count,omitempty"`
 	LastTimestamp   *time.Time        `json:"lastTimestamp,omitempty"`
 }

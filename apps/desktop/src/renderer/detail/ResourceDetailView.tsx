@@ -34,6 +34,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { usePodMetrics } from "../hooks/usePodMetrics";
 import { useResourceList } from "../hooks/useResourceList";
 import { findEnabledResourceKind } from "../lib/resource-catalog";
+import { newestEventsFirst } from "../lib/resource-events";
 import { DetailHeader } from "./DetailHeader";
 import { LogViewer } from "./LogViewer";
 import { MutationDiffView } from "./MutationDiffView";
@@ -43,8 +44,9 @@ import { extractForwardPorts } from "./port-forward-ports";
 import { resourceActionsFor, type ResourceActionId } from "./resource-actions";
 import { formatTimestamp } from "./resource-format";
 import { HighlightedYaml } from "./yaml-highlight";
-import { parseWorkloadDetails, podSelector } from "./workload-detail";
+import { parseWorkloadDetails, podSelector, rolloutStatus } from "./workload-detail";
 import { WorkloadPodsPanel } from "./WorkloadPodsPanel";
+import { usePodEvents } from "../hooks/usePodEvents";
 
 type MutationDraft = Omit<
   ResourceMutationRequest,
@@ -171,7 +173,7 @@ export function ResourceDetailView({
   const pods = useResourceList({
     contextId,
     kind: POD_KIND,
-    namespace: row?.namespace ?? "",
+    namespaceScope: row?.namespace ? [row.namespace] : [],
     coreReady,
     setError: setPodsError,
     labelSelector: selector,
@@ -193,6 +195,19 @@ export function ResourceDetailView({
     isPod ? row?.namespace ?? "" : "",
     isPod ? row?.name ?? "" : "",
   );
+  // The rollout's child pod events (Pulling / Created / Started / Killing),
+  // joined to this workload's own pods; one polled list request, never a
+  // watch stream or a per-pod fan-out.
+  const podNames = useMemo(() => pods.visibleRows.map((pod) => pod.name), [pods.visibleRows]);
+  const podEvents = usePodEvents({
+    contextId,
+    namespace: row?.namespace ?? "",
+    names: podNames,
+    enabled: Boolean(workload && selector),
+  });
+  // The Events surface merges the object's own events (ScalingReplicaSet)
+  // with its pods' events, newest first, so a rollout reads as one timeline.
+  const allEvents = useMemo(() => mergeEvents(events, podEvents), [events, podEvents]);
 
   if (!row) {
     return (
@@ -213,6 +228,9 @@ export function ResourceDetailView({
   const actions = resourceActionsFor(currentRow.kind);
   const actionIds = new Set(actions.map((action) => action.id));
   const showLogs = currentRow.kind === "Pod" || isWorkloadLogKind(currentRow.kind);
+  // At-a-glance rollout state (in progress / complete / stuck) from the live
+  // Progressing condition plus the replica counters.
+  const rollout = rolloutStatus(details, currentRow);
   const podsLoading = (!detail && !detailError) || pods.loading;
   const podsFailure = detailError || podsError;
   const podsPreview: PodsPreview | undefined = !workload ? undefined : {
@@ -276,6 +294,7 @@ export function ResourceDetailView({
     <section className="resource-detail-view" data-testid="resource-detail-view">
       <DetailHeader
         row={currentRow}
+        rollout={rollout}
         actions={actions}
         canMutate={canMutate}
         mutationBusy={mutationBusy}
@@ -299,7 +318,7 @@ export function ResourceDetailView({
           {showLogs && <TabsTrigger value="logs">Logs</TabsTrigger>}
           <TabsTrigger value="yaml">YAML</TabsTrigger>
           <TabsTrigger value="events">
-            Events{events.length ? ` (${events.length})` : ""}
+            Events{allEvents.length ? ` (${allEvents.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="related">
             Related{related.length ? ` (${related.length})` : ""}
@@ -312,7 +331,7 @@ export function ResourceDetailView({
               row={currentRow}
               details={details}
               journal={journal}
-              events={events}
+              events={allEvents}
               related={related}
               pods={podsPreview}
               metrics={isPod ? metrics : undefined}
@@ -375,7 +394,7 @@ export function ResourceDetailView({
           </TabsContent>
 
           <TabsContent value="events" className="resource-detail-padded-tab">
-            <EventsView events={events} />
+            <EventsView events={allEvents} />
           </TabsContent>
 
           <TabsContent value="related" className="resource-detail-padded-tab">
@@ -633,6 +652,26 @@ function RelatedView({ related, onNavigate }: { related: RelatedResource[]; onNa
 
 function EmptyTab({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
   return <div className="resource-tab-empty">{icon}<h2>{title}</h2><p>{detail}</p></div>;
+}
+
+/** Bound of the merged events timeline; matches the events one-shot's page cap. */
+const MERGED_EVENT_LIMIT = 100;
+
+/**
+ * Merges the open object's own events with its child pods' events, newest
+ * first. The object's one-shot fetch and the pod-events poll replace their
+ * halves wholesale, so a plain dedupe-and-sort keeps the timeline stable.
+ */
+function mergeEvents(objectEvents: ResourceEvent[], podEvents: ResourceEvent[]): ResourceEvent[] {
+  const seen = new Set<string>();
+  const deduped: ResourceEvent[] = [];
+  for (const event of [...objectEvents, ...podEvents]) {
+    const key = `${event.namespace}/${event.name}|${event.reason || ""}|${event.lastTimestamp || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(event);
+  }
+  return newestEventsFirst(deduped, MERGED_EVENT_LIMIT);
 }
 
 function OperationInputDialog({

@@ -109,6 +109,14 @@ export interface NamespaceInfo {
 }
 
 /**
+ * The list scope carried by renderer state: an ordered selection of namespace
+ * names where the empty array is the "All namespaces" cluster-wide scope.
+ * Renderer-only — the wire format stays single-namespace; a multi selection
+ * fans out as ordinary one-namespace requests.
+ */
+export type NamespaceScope = string[];
+
+/**
  * A hard cap keeps a 100k-namespace cluster from streaming its whole
  * inventory into the renderer. `truncated` is explicit so pickers can
  * degrade honestly (type-to-filter) instead of showing a partial list
@@ -148,6 +156,8 @@ export interface ResourceRow {
   dataKeys?: string[];
   count?: number;
   lastTimestamp?: string;
+  /** For Event rows: the name of the object the event is about. */
+  involvedObject?: string;
   related?: string[];
 }
 

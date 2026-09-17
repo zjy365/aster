@@ -225,6 +225,8 @@ const MOCK_DESKTOP_API = `
     },
     metrics: {
       pods: async (_contextId, namespace) => {
+        // Recorded so the multi-namespace fan-out tests can count calls.
+        (window.__metricsRequests = window.__metricsRequests || []).push(namespace || "");
         // One container per pod, values oscillate so the detail chart shows a
         // line, and the pod detail the test opens (pods-0) reports usage.
         const value = (base, index) => base + (index % 3) * 5;
@@ -253,6 +255,8 @@ const MOCK_DESKTOP_API = `
     },
     helm: {
       list: ({ namespace }, listener) => {
+        // Recorded so the multi-namespace fan-out tests can count streams.
+        (window.__helmRequests = window.__helmRequests || []).push(namespace || "");
         const releases = [
         // An empty namespace means all namespaces; surface releases from
         // distinct namespaces so the All-namespaces list is distinguishable.
@@ -297,7 +301,11 @@ const MOCK_DESKTOP_API = `
       },
     },
     resources: {
-      list: async (request) => pageOf(request),
+      list: async (request) => {
+        // Recorded so the multi-namespace fan-out tests can count requests.
+        (window.__resourceRequests = window.__resourceRequests || []).push({ kind: "list", namespace: request.namespace || "" });
+        return pageOf(request);
+      },
       get: async (request) => {
         // The list may open any row, not just index 0; derive the index from
         // the requested name so the returned uid matches the selected row.
@@ -383,6 +391,7 @@ const MOCK_DESKTOP_API = `
         return { operation: request.operation, dryRun: Boolean(request.dryRun), changed: true, resourceVersion: "1001", name: request.name, yaml };
       },
       watch: (request, listener) => {
+        (window.__resourceRequests = window.__resourceRequests || []).push({ kind: "watch", namespace: request.namespace || "" });
         const timer = setTimeout(() => {
           listener({
             subscriptionId: "fixture-watch",
@@ -733,6 +742,153 @@ test("resource detail opens and preserves layout", async ({ page }) => {
   await expect(actions.getByTestId("delete-resource")).toBeVisible();
   await expectNoOverflow(page, "detail 1280x800");
   await screenshot(page, "detail-1280");
+  expect(failures).toEqual([]);
+});
+
+test("deployment detail stays live during a rollout without manual refresh", async ({ page }) => {
+  // In the all-namespaces snapshot scope the table never bumps the selection,
+  // so the detail must keep itself live: one single-object watch (fieldSelector
+  // metadata.name) adopts resourceVersion bumps and re-gets the object so the
+  // vitals, conditions and YAML converge — and closing the detail stops it.
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: {
+        resources: {
+          watch(request: unknown, listener: (batch: unknown) => void): () => void;
+          list(request: unknown): Promise<unknown>;
+          get(request: unknown): Promise<{ row: Record<string, unknown>; yaml: string }>;
+          events(request: unknown): Promise<unknown[]>;
+        };
+      };
+    }).__ASTER_DESKTOP__;
+    if (!desktop) return;
+    const detailRow = (over: Record<string, unknown>) => ({
+      uid: "deployments-uid-0",
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      name: "deployments-0",
+      namespace: "default",
+      resourceVersion: "1000",
+      createdAt: "2026-08-01T00:00:00Z",
+      status: "Running",
+      desired: 2,
+      ready: 2,
+      available: 2,
+      updated: 2,
+      images: ["nginx:1.27"],
+      ...over,
+    });
+    const watches: Array<{ listener: (batch: unknown) => void; cancelled: boolean }> = [];
+    (window as unknown as { __detailWatches: typeof watches }).__detailWatches = watches;
+    const baseWatch = desktop.resources.watch.bind(desktop.resources);
+    desktop.resources.watch = (request, listener) => {
+      const fieldSelector = String((request as { fieldSelector?: string }).fieldSelector || "");
+      if (!fieldSelector.startsWith("metadata.name=")) return baseWatch(request, listener);
+      const session = { listener, cancelled: false };
+      watches.push(session);
+      setTimeout(() => session.listener({
+        subscriptionId: "detail-watch",
+        kind: "snapshot",
+        items: [detailRow({})],
+      }), 0);
+      return () => { session.cancelled = true; };
+    };
+    // Once the rollout is driven, the live get reports the new generation.
+    const baseGet = desktop.resources.get.bind(desktop.resources);
+    desktop.resources.get = async (request) => {
+      const response = await baseGet(request);
+      if (!(window as unknown as { __rolloutStarted?: boolean }).__rolloutStarted) return response;
+      const yaml = response.yaml.replace(
+        /    - type: Progressing[\s\S]*?lastTransitionTime: "[^"]*"/,
+        [
+          "    - type: Progressing",
+          '      status: "True"',
+          "      reason: ReplicaSetUpdated",
+          '      message: ReplicaSet "deployments-0-7d9" is progressing.',
+          '      lastTransitionTime: "2026-09-15T00:00:05Z"',
+        ].join("\n"),
+      );
+      return {
+        row: detailRow({ resourceVersion: "1002", status: "Progressing", desired: 5, ready: 2, available: 2, updated: 2 }),
+        yaml: yaml.replace("  replicas: 2", "  replicas: 5"),
+      };
+    };
+    // The pod-events poll: one pod event joined to the workload's own pod.
+    const podEvent = {
+      uid: "ev-pull", apiVersion: "v1", kind: "Event", name: "pull.17ab", namespace: "default",
+      resourceVersion: "1", createdAt: "2026-09-15T00:00:01Z", involvedObject: "pods-0",
+      reason: "Pulling", message: "Pulling image nginx:1.28", type: "Normal", count: 1,
+      lastTimestamp: "2026-09-15T00:00:01Z",
+    };
+    (window as unknown as { __podEvents: unknown[] }).__podEvents = [podEvent];
+    const baseList = desktop.resources.list.bind(desktop.resources);
+    desktop.resources.list = async (request) => {
+      if (String((request as { fieldSelector?: string }).fieldSelector || "").startsWith("involvedObject.kind=Pod")) {
+        return { items: (window as unknown as { __podEvents: unknown[] }).__podEvents };
+      }
+      return baseList(request);
+    };
+    // The object's own events grow once the rollout starts.
+    (window as unknown as { __rolloutEvents: unknown[] }).__rolloutEvents = [];
+    desktop.resources.events = async () => {
+      const base = [{ name: "event-1", namespace: "default", reason: "Scheduled", message: "Successfully assigned", type: "Normal", count: 1, lastTimestamp: "2026-08-01T00:00:00Z" }];
+      return [...base, ...((window as unknown as { __rolloutEvents: unknown[] }).__rolloutEvents as unknown[])];
+    };
+    (window as unknown as { __driveRollout: () => void }).__driveRollout = () => {
+      (window as unknown as { __rolloutStarted?: boolean }).__rolloutStarted = true;
+      (window as unknown as { __rolloutEvents: unknown[] }).__rolloutEvents = [
+        { name: "event-2", namespace: "default", reason: "ScalingReplicaSet", message: "Scaled up replica set deployments-0-7d9 from 2 to 5", type: "Normal", count: 1, lastTimestamp: "2026-09-15T00:00:04Z" },
+      ];
+      const session = watches.at(-1);
+      session?.listener({
+        subscriptionId: "detail-watch",
+        kind: "delta",
+        events: [{ type: "modified", row: detailRow({ resourceVersion: "1002", status: "Progressing", desired: 5, ready: 2, available: 2, updated: 2 }) }],
+      });
+    };
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // All-namespaces scope: the table is a snapshot and never bumps the selection.
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "All namespaces" }).click();
+  await page.keyboard.press("Escape");
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("deployments-0", { timeout: 15_000 });
+  await firstRow.click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+
+  // Baseline: the rollout chip reads the live YAML's Progressing condition.
+  await expect(page.getByTestId("rollout-status")).toContainText("Rolled out");
+  await expect(page.getByTestId("overview-pods")).toContainText("pods-0", { timeout: 15_000 });
+  // The pod event joined from the poll shows up beside the object's own.
+  await expect(detail.getByTestId("overview-events")).toContainText("Pulling image nginx:1.28", { timeout: 15_000 });
+
+  // Drive the rollout: a watch delta (rv 1002) plus a get that reports the
+  // new generation. Nothing here touches refresh.
+  await page.evaluate(() => (window as unknown as { __driveRollout: () => void }).__driveRollout());
+
+  // Vitals converge: ready 2 of the new desired 5.
+  const vitals = page.getByTestId("resource-vitals");
+  await expect(vitals).toContainText("2/5", { timeout: 15_000 });
+  // The chip flips to in-progress and the live condition replaces the old one.
+  await expect(page.getByTestId("rollout-status")).toContainText("Rollout in progress");
+  await expect(page.getByTestId("resource-conditions")).toContainText("ReplicaSetUpdated", { timeout: 15_000 });
+  // The object's fresh ScalingReplicaSet event landed without a refresh.
+  await expect(detail.getByTestId("overview-events")).toContainText("Scaled up replica set", { timeout: 15_000 });
+  await expectNoOverflow(page, "detail mid-rollout 1280x800");
+  await screenshot(page, "detail-rollout-live-1280");
+
+  // Leaving the detail tears the single-object watch down.
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __detailWatches: Array<{ cancelled: boolean }> }).__detailWatches.at(-1)?.cancelled)).toBe(true);
   expect(failures).toEqual([]);
 });
 
@@ -1722,7 +1878,13 @@ test("helm loads atomic pages of 50 on demand and cancels stale scopes", async (
   await expect(page.getByText("stale failure")).toHaveCount(0);
   await page.getByTestId("namespace-select").click();
   await page.locator(".namespace-combobox-item", { hasText: "kube-system" }).click();
-  expect(await page.evaluate(() => (window as any).__helmSessions.at(-2).cancelled)).toBe(true);
+  // Multi-select applies immediately and keeps the popup open: the scope is
+  // now default + kube-system, the previous single-scope stream was
+  // cancelled, and one stream per selected namespace replaced it.
+  await page.keyboard.press("Escape");
+  expect(await page.evaluate(() => (window as any).__helmSessions[4].cancelled)).toBe(true);
+  expect(await page.evaluate(() => (window as any).__helmSessions.at(-2).request.namespace)).toBe("default");
+  expect(await page.evaluate(() => (window as any).__helmSessions.at(-1).request.namespace)).toBe("kube-system");
   await page.getByTestId("helm-cancel").click();
   expect(await page.evaluate(() => (window as any).__helmSessions.at(-1).cancelled)).toBe(true);
   await page.getByTestId("helm-refresh").click();
@@ -1936,21 +2098,22 @@ test("namespace picker commits a typed namespace with Enter before the list load
   await connectToDev(page);
 
   // Open the picker, type a namespace that is not in the (still loading) list,
-  // and press Enter: the picker switches scope without waiting.
+  // and press Enter: the name toggles into the selection without waiting —
+  // appended next to the context default, not replacing it.
   await page.getByTestId("namespace-select").click();
   const filter = page.getByTestId("namespace-filter");
   await expect(filter).toBeVisible();
   await filter.fill("ns-abcdefg");
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("namespace-select")).toContainText("ns-abcdefg");
+  await expect(page.getByTestId("namespace-select")).toHaveText("default, ns-abcdefg");
   await screenshot(page, "namespace-enter-commit");
   expect(failures).toEqual([]);
 });
 
 test("namespace picker Enter selects the highlighted row when matches exist", async ({ page }) => {
   // Direct-Enter must not hijack Base UI's autoHighlight: typing a prefix of
-  // a loaded namespace and pressing Enter selects the highlighted row, not
-  // the raw prefix.
+  // a loaded namespace and pressing Enter toggles the highlighted row into
+  // the selection, not the raw prefix.
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
@@ -1961,7 +2124,7 @@ test("namespace picker Enter selects the highlighted row when matches exist", as
   await filter.fill("kube");
   await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("namespace-select")).toContainText("kube-system");
+  await expect(page.getByTestId("namespace-select")).toHaveText("default, kube-system");
   await screenshot(page, "namespace-enter-highlighted-row");
   expect(failures).toEqual([]);
 });
@@ -2091,10 +2254,12 @@ test("namespace picker Enter respects the All-namespaces row while loading", asy
   await expect(page.getByTestId("namespace-loading")).toBeVisible();
 
   // Non-empty filter while loading: the null row is gone, nothing is
-  // highlighted, so direct-Enter commits the raw input.
+  // highlighted, so direct-Enter appends the raw input to the selection.
   await filter.fill("all");
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("namespace-select")).toHaveText("all");
+  await expect(page.getByTestId("namespace-select")).toHaveText("default, all");
+  // Toggling never closes the popup on its own; close it before reopening.
+  await page.keyboard.press("Escape");
   await expect(filter).toBeHidden();
 
   // Reopen with an empty filter while the fetch is still in flight: the
@@ -2144,7 +2309,7 @@ test("namespace picker Enter prefers a real namespace named all over cluster sco
   await expect(rows.filter({ hasText: /^all$/ })).toBeVisible();
   await expect(rows.filter({ hasText: "All namespaces" })).toHaveCount(0);
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("namespace-select")).toHaveText("all");
+  await expect(page.getByTestId("namespace-select")).toHaveText("default, all");
   await screenshot(page, "namespace-enter-named-all");
   expect(failures).toEqual([]);
 });
@@ -2265,16 +2430,22 @@ test("switching back to a namespace restores the cached snapshot instantly", asy
   await expect(loadingState).toBeVisible();
   await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
 
-  // Cold first visit to kube-system: the full-pane spinner returns.
+  // Toggle to the kube-system scope: kube-system in, default out. The fresh
+  // watch for the new single-namespace scope shows the spinner again.
   await page.getByTestId("namespace-select").click();
   await namespaceItem("kube-system").click();
+  await namespaceItem("default").click();
+  await page.keyboard.press("Escape");
   await expect(loadingState).toBeVisible();
   await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
 
-  // Switching back to default is a revisit: retained rows render at once and
-  // the loading state never appears, while the heading reports the refresh.
+  // Toggling back (kube-system out, default in) is a revisit: retained rows
+  // render at once and the loading state never appears, while the heading
+  // reports the refresh.
   await page.getByTestId("namespace-select").click();
+  await namespaceItem("kube-system").click();
   await namespaceItem("default").click();
+  await page.keyboard.press("Escape");
   await expect(loadingState).toHaveCount(0);
   await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0");
   const heading = page.locator(".pane-heading");
@@ -2290,6 +2461,225 @@ test("switching back to a namespace restores the cached snapshot instantly", asy
   await expect(grid.getByRole("row").nth(1)).toContainText("fresh-default");
   await expect(grid).not.toContainText("late-2");
   await screenshot(page, "namespace-revisit-cached");
+  expect(failures).toEqual([]);
+});
+
+test("namespace picker multi-selects namespaces and merges the table", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const requests = () => page.evaluate(() => (window as unknown as { __resourceRequests?: Array<{ kind: string; namespace: string }> }).__resourceRequests ?? []);
+  const listNamespaces = async () => (await requests()).filter((request) => request.kind === "list").map((request) => request.namespace);
+  const watchNamespaces = async () => (await requests()).filter((request) => request.kind === "watch").map((request) => request.namespace);
+
+  // Baseline: the default scope is a live watch, no list requests.
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+  expect(await listNamespaces()).toEqual([]);
+
+  // A checked row is about to go stale: it must not survive the scope change.
+  await grid.getByTestId("select-row-deployments-0").click();
+  await expect(page.getByTestId("selection-count")).toContainText("1 selected");
+
+  // Toggle kube-system in: the trigger summarizes the pair and the table
+  // merges one snapshot page per namespace in selection order — with no
+  // watch stream, ever.
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "kube-system" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("namespace-select")).toHaveText("default, kube-system");
+  const rows = grid.getByRole("row");
+  await expect(rows.nth(1)).toContainText("deployments-0");
+  await expect(rows.nth(1)).toContainText("default");
+  // Only the visible virtualized window renders; scroll into the
+  // kube-system block to prove its rows merged after the default ones.
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 105 * 36; });
+  const kubeRow = grid.getByRole("row", { name: /Select deployments-0 .*kube-system/ });
+  await expect(kubeRow).toBeVisible();
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 0; });
+  expect(await listNamespaces()).toEqual(["default", "kube-system"]);
+  expect(await watchNamespaces()).toEqual(["default"]);
+  // The merged list says honestly that it is a manual snapshot.
+  await expect(page.locator(".pane-heading")).toContainText("2 namespaces (snapshot, refresh to update)");
+  // The stale checked row cleared with the scope.
+  await expect(page.getByTestId("selection-count")).toHaveCount(0);
+
+  // The All-namespaces row is the zero-selection state: one click clears.
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "All namespaces" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("namespace-select")).toHaveText("All namespaces");
+  expect(await listNamespaces()).toEqual(["default", "kube-system", ""]);
+
+  // Direct-Enter appends a namespace that is not even in the list.
+  await page.getByTestId("namespace-select").click();
+  const filter = page.getByTestId("namespace-filter");
+  await filter.fill("apps");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("namespace-select")).toHaveText("apps");
+  // A single-namespace selection is a live watch again, exactly as before.
+  expect(await watchNamespaces()).toEqual(["default", "apps"]);
+
+  // Context switch resets the selection to the context's default namespace.
+  await page.getByTestId("change-context").click();
+  const prod = page.getByTestId("context-option-prod");
+  await prod.click();
+  await prod.dblclick();
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await expect(page.getByTestId("namespace-select")).toHaveText("default");
+  await screenshot(page, "namespace-multiselect-merged");
+  expect(failures).toEqual([]);
+});
+
+test("multi-selection caps at 32 namespaces with a footer message", async ({ page }) => {
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__?: { namespaces: { list(contextId: string): Promise<unknown> } };
+    }).__ASTER_DESKTOP__;
+    if (desktop) {
+      desktop.namespaces.list = async () => ({
+        namespaces: Array.from({ length: 40 }, (_, index) => ({ name: `cap-${String(index).padStart(2, "0")}`, status: "Active" })),
+        truncated: false,
+      });
+    }
+  });
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "All namespaces" }).click();
+  // The All row cleared the context-default selection; now the cap counts
+  // pure additions.
+  for (let index = 0; index < 33; index++) {
+    await page.locator(".namespace-combobox-item", { hasText: `cap-${String(index).padStart(2, "0")}` }).click();
+  }
+  // The 33rd click is rejected in place: the footer explains the cap.
+  await expect(page.getByTestId("namespace-cap-message")).toContainText("Up to 32 namespaces");
+  await expect(page.getByTestId("namespace-select")).toHaveText("cap-00, cap-01 +30");
+  // Every fan-out is one request per selected namespace; the union across
+  // the test is exactly the 32 names that joined, never the rejected 33rd.
+  const namespaces = await page.evaluate(() =>
+    ((window as unknown as { __resourceRequests?: Array<{ kind: string; namespace: string }> }).__resourceRequests ?? [])
+      .filter((request) => request.kind === "list" && request.namespace.startsWith("cap-"))
+      .map((request) => request.namespace),
+  );
+  expect(new Set(namespaces).size).toBe(32);
+  expect(namespaces).not.toContain("cap-32");
+  await screenshot(page, "namespace-cap-32");
+  expect(failures).toEqual([]);
+});
+
+test("helm merges releases across a multi-namespace selection", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "kube-system" }).click();
+  await page.keyboard.press("Escape");
+
+  await page.getByTestId("tool-nav-helm").click();
+  const view = page.getByTestId("helm-view");
+  await expect(view).toBeVisible();
+  // One stream per selected namespace; releases render per namespace.
+  expect(await page.evaluate(() => (window as unknown as { __helmRequests?: string[] }).__helmRequests)).toEqual(["default", "kube-system"]);
+  await expect(view.getByTestId("helm-release-web")).toHaveCount(2);
+  const first = view.getByTestId("helm-release-web").first();
+  await first.click();
+  const detail = page.getByTestId("helm-detail");
+  await expect(detail).toBeVisible();
+  // Opening a merged release reads the release's own namespace.
+  await expect(detail).toContainText("default");
+  await expectNoOverflow(page, "helm multi-namespace 1280x800");
+  await screenshot(page, "helm-multiselect-1280");
+  expect(failures).toEqual([]);
+});
+
+test("pod usage covers every selected namespace", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "kube-system" }).click();
+  await page.keyboard.press("Escape");
+
+  await page.getByTestId("resource-nav-pods").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await expect(grid.getByRole("row").nth(1)).toContainText("pods-0", { timeout: 15_000 });
+  // One ordinary metrics call per selected namespace, merged by ns/name.
+  expect(await page.evaluate(() => (window as unknown as { __metricsRequests?: string[] }).__metricsRequests)).toEqual(["default", "kube-system"]);
+  // The default block's pods-0 reports 120m on screen...
+  await expect(grid.locator(".pod-usage-cell", { hasText: "120m" }).first()).toBeVisible();
+  // ...and so does the kube-system block's pods-0: same pod name, its own
+  // usage row, no trading across namespaces.
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 100 * 36; });
+  const kubePodRow = grid.getByRole("row", { name: /Select pods-0 .*kube-system/ });
+  await expect(kubePodRow).toBeVisible();
+  await expect(kubePodRow.locator(".pod-usage-cell").first()).toHaveText("120m");
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 0; });
+  await expectNoOverflow(page, "pods multi-namespace 1280x800");
+  await screenshot(page, "pods-multiselect-usage-1280");
+  expect(failures).toEqual([]);
+});
+
+test("sidebar favorites and most used surface frequent kinds", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Starring a kind pins it into the Favorites group at the top of the
+  // sidebar; the star rides the row button as a sibling control.
+  await page.getByTestId("resource-nav-pods").hover();
+  await page.getByTestId("star-pods").click();
+  await expect(page.getByTestId("resource-nav-fav-pods")).toBeVisible();
+
+  // Opening kinds feeds Most used (top three, best first); starred kinds are
+  // not duplicated there.
+  await page.getByTestId("resource-nav-services").click();
+  await page.getByTestId("resource-nav-jobs").click();
+  await expect(page.getByTestId("resource-nav-most-services")).toBeVisible();
+  await expect(page.getByTestId("resource-nav-most-jobs")).toBeVisible();
+  await expect(page.getByTestId("resource-nav-most-pods")).toHaveCount(0);
+  // The quick-access entries navigate like their home rows.
+  await page.getByTestId("resource-nav-most-services").click();
+  await expect(page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1)).toContainText("services-0", { timeout: 15_000 });
+
+  // The star persists in localStorage; unstarring removes the favorite again.
+  expect(await page.evaluate(() => localStorage.getItem("aster.sidebar.favoriteKinds"))).toContain("pods");
+  await page.getByTestId("resource-nav-pods").hover();
+  await page.getByTestId("star-pods").click();
+  await expect(page.getByTestId("resource-nav-fav-pods")).toHaveCount(0);
+  await screenshot(page, "sidebar-favorites-most-used");
+  expect(failures).toEqual([]);
+});
+
+test("a multi namespace selection clears with one click on the trigger x", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  // Single selection is the ordinary scope: no undo control.
+  await expect(page.getByTestId("namespace-clear")).toHaveCount(0);
+
+  await page.getByTestId("namespace-select").click();
+  await page.locator(".namespace-combobox-item", { hasText: "kube-system" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("namespace-select")).toHaveText("default, kube-system");
+  // One click back to the cluster-wide scope, no popup round-trip.
+  await page.getByTestId("namespace-clear").click();
+  await expect(page.getByTestId("namespace-select")).toHaveText("All namespaces");
+  await expect(page.getByTestId("namespace-clear")).toHaveCount(0);
+  await screenshot(page, "namespace-clear-x");
   expect(failures).toEqual([]);
 });
 

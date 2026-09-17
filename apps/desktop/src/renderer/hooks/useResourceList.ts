@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ResourceKind, ResourceListResponse, ResourceRow, ResourceWatchBatch } from "../../shared/types";
+import type { NamespaceScope, ResourceKind, ResourceListResponse, ResourceRow, ResourceWatchBatch } from "../../shared/types";
 import { applyResourceWatchBatches } from "../lib/resource-watch";
 import { readResourceListSnapshot, resourceListCacheKey, writeResourceListSnapshot, clearResourceListSnapshots } from "../lib/resource-list-cache";
+import { MULTI_SCOPE_CONTINUE, mergeNamespacePages, namespaceScopeKey } from "../lib/namespace-scope";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
 export interface ResourceListOptions {
   contextId: string;
   kind: ResourceKind;
-  namespace: string;
+  /**
+   * Ordered namespace selection: [] is the cluster-wide All-namespaces scope,
+   * one name is the live-watch scope, two or more fan out as per-namespace
+   * snapshot requests merged in selection order.
+   */
+  namespaceScope: NamespaceScope;
   coreReady: boolean;
   setError(message: string): void;
   /** Server-side selector pinning the list, e.g. a workload's pod selector. */
@@ -36,13 +42,16 @@ export interface ResourceListState {
 }
 
 /**
- * A cluster-wide list (namespace unset on a namespaced kind) is never watched.
- * Watching it would open one cluster-scoped watch stream whose per-object
- * deltas flood the IPC channel and the API server in a 100k-namespace cluster,
- * so the table gets the first snapshot page and manual refresh only.
+ * A cluster-wide list (All-namespaces scope on a namespaced kind) is never
+ * watched. Watching it would open one cluster-scoped watch stream whose
+ * per-object deltas flood the IPC channel and the API server in a 100k-
+ * namespace cluster, so the table gets the first snapshot page and manual
+ * refresh only. A multi-namespace selection is a bounded fan-out of ordinary
+ * single-namespace snapshot requests — also never watched, so the invariant
+ * "at most one watch per list view" survives.
  */
-function watchEnabled(kind: ResourceKind, namespace: string, enabled: boolean): boolean {
-  return enabled && (kind.namespaced ? namespace !== "" : true);
+function liveWatchEnabled(kind: ResourceKind, scopeSize: number, enabled: boolean): boolean {
+  return enabled && (kind.namespaced ? scopeSize === 1 : true);
 }
 
 /**
@@ -51,7 +60,7 @@ function watchEnabled(kind: ResourceKind, namespace: string, enabled: boolean): 
  * the filter query, and the visible error. Selection resets triggered by
  * list scope changes live in useResourceDetail via `generation`.
  */
-export function useResourceList({ contextId, kind, namespace, coreReady, setError, labelSelector, enabled = true }: ResourceListOptions): ResourceListState {
+export function useResourceList({ contextId, kind, namespaceScope, coreReady, setError, labelSelector, enabled = true }: ResourceListOptions): ResourceListState {
   const [list, setList] = useState<ResourceListResponse>({ items: [] });
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -73,14 +82,86 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
     }
     listRef.current = list;
   }, [contextId, list]);
-  const liveWatch = watchEnabled(kind, namespace, enabled);
+
+  // Multi-scope fan-out state: one snapshot page per selected namespace,
+  // merged in selection order. The ref backs loadMore; the scope ref keeps
+  // effects keyed on the order-insensitive scope key from re-running (and
+  // re-fetching everything) on a mere reordering.
+  const [multiPages, setMultiPages] = useState<Record<string, ResourceListResponse>>({});
+  const multiPagesRef = useRef(multiPages);
+  const scopeRef = useRef(namespaceScope);
+  scopeRef.current = namespaceScope;
+  multiPagesRef.current = multiPages;
+
+  const liveWatch = liveWatchEnabled(kind, namespaceScope.length, enabled);
+  // Cluster-scoped kinds ignore the scope entirely — their requests carry no
+  // namespace, so a stale multi selection must not fan out for them.
+  const multiScope = kind.namespaced && namespaceScope.length > 1;
+  const scopeKey = useMemo(() => namespaceScopeKey(namespaceScope), [namespaceScope]);
+
+  // The multi-scope view derives from the per-namespace pages in selection
+  // order; the sentinel token only signals "some namespace has another page"
+  // and is never sent back to the core.
+  const merged = useMemo(
+    () => mergeNamespacePages(namespaceScope, multiScope ? multiPages : {}),
+    [namespaceScope, multiScope, multiPages],
+  );
+  const listView: ResourceListResponse = multiScope
+    ? { items: merged.items, ...(merged.hasMore ? { continueToken: MULTI_SCOPE_CONTINUE } : {}) }
+    : list;
+  useEffect(() => {
+    listRef.current = listView;
+  }, [listView]);
 
   const loadMore = useCallback(async () => {
-    if (!contextId || !coreReady || !enabled || !list.continueToken) return;
+    if (!contextId || !coreReady || !enabled) return;
+    if (multiScope) {
+      const pages = multiPagesRef.current;
+      const pending = scopeRef.current.filter((namespace) => pages[namespace]?.continueToken);
+      if (!pending.length) return;
+      const request = ++listRequest.current;
+      setLoadingMore(true);
+      setError("");
+      let next = pages;
+      await Promise.all(pending.map(async (namespace) => {
+        try {
+          const response = await desktop.resources.list({
+            contextId,
+            resourceKind: kind,
+            namespace,
+            ...(labelSelector ? { labelSelector } : {}),
+            limit: 100,
+            continueToken: pages[namespace].continueToken,
+          });
+          if (request !== listRequest.current) return;
+          next = {
+            ...next,
+            [namespace]: {
+              ...response,
+              items: [...(next[namespace]?.items ?? []), ...response.items],
+            },
+          };
+        } catch {
+          // Keep that namespace's loaded page and token; the footer button
+          // retries only the namespaces that still have one.
+        }
+      }));
+      if (request !== listRequest.current) {
+        setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
+      multiPagesRef.current = next;
+      setMultiPages(next);
+      setLoadingMore(false);
+      return;
+    }
+    if (!list.continueToken) return;
     const request = ++listRequest.current;
     setLoadingMore(true);
     setError("");
     try {
+      const namespace = scopeRef.current[0] ?? "";
       const response = await desktop.resources.list({
         contextId,
         resourceKind: kind,
@@ -99,18 +180,23 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
         setLoadingMore(false);
       }
     }
-  }, [contextId, coreReady, enabled, kind, labelSelector, list.continueToken, namespace, setError]);
+  }, [contextId, coreReady, enabled, kind, labelSelector, list.continueToken, multiScope, setError]);
 
   useEffect(() => {
     if (!contextId || !coreReady || !enabled) return;
+    if (multiScope) return; // handled by the fan-out effect below
     ++listRequest.current;
     setError("");
     watchQueue.current = [];
     watchHasSnapshot.current = false;
+    // Read through the ref: the effect keys on the canonical scope key, so a
+    // reordering (or an upstream array re-creation with equal contents)
+    // cannot tear the subscription down.
+    const namespace = scopeRef.current[0] ?? "";
 
     // Only watched (namespace-scoped) views retain snapshots; cluster-wide
     // snapshot-only scopes keep their manual-refresh behavior untouched.
-    const cacheKey = liveWatch ? resourceListCacheKey(contextId, kind.id, namespace, labelSelector) : "";
+    const cacheKey = liveWatch ? resourceListCacheKey(contextId, kind.id, scopeKey, labelSelector) : "";
     const cached = cacheKey ? readResourceListSnapshot(cacheKey) : undefined;
     if (cached) {
       // Stale-while-revalidate: revisit renders the retained snapshot at once
@@ -124,8 +210,8 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
       setList({ items: [] });
     }
 
-    // Cluster-wide namespaced lists are snapshot-only (see watchEnabled): the
-    // initial page is fetched, watch never starts, and refresh re-fetches.
+    // Cluster-wide namespaced lists are snapshot-only (see liveWatchEnabled):
+    // the initial page is fetched, watch never starts, and refresh re-fetches.
     if (!liveWatch) {
       let active = true;
       desktop.resources.list({
@@ -190,23 +276,97 @@ export function useResourceList({ contextId, kind, namespace, coreReady, setErro
         writeResourceListSnapshot(cacheKey, listRef.current);
       }
     };
-  }, [contextId, namespace, kind, coreReady, enabled, labelSelector, generation, setError, liveWatch]);
+  }, [contextId, kind, coreReady, enabled, labelSelector, generation, setError, liveWatch, multiScope, scopeKey]);
+
+  // Multi-namespace fan-out: one ordinary single-namespace snapshot request
+  // per selected namespace (never a watch), merged in selection order. The
+  // request generation supersedes every in-flight page on scope change or
+  // refresh; a failed namespace degrades to "no rows from it" while the rest
+  // still render.
+  useEffect(() => {
+    if (!multiScope || !contextId || !coreReady || !enabled) return;
+    ++listRequest.current;
+    const request = listRequest.current;
+    setError("");
+    const scope = scopeRef.current;
+    const cacheKey = resourceListCacheKey(contextId, kind.id, scopeKey, labelSelector);
+    const cached = readResourceListSnapshot(cacheKey);
+    let pages: Record<string, ResourceListResponse> = {};
+    let completed = false;
+    if (cached) {
+      // Stale-while-revalidate: the retained merged view renders at once
+      // (without page tokens — they are not part of the merged snapshot)
+      // while every namespace re-fetches its fresh snapshot in place.
+      setList(cached);
+      setMultiPages({});
+      setLoading(false);
+      setRevalidating(true);
+    } else {
+      setLoading(true);
+      setRevalidating(false);
+      setList({ items: [] });
+    }
+
+    const remaining = new Set(scope);
+    const settle = () => {
+      if (remaining.size > 0 || request !== listRequest.current) return;
+      completed = true;
+      setLoading(false);
+      setRevalidating(false);
+    };
+    const fetchOne = async (namespace: string) => {
+      try {
+        const response = await desktop.resources.list({
+          contextId,
+          resourceKind: kind,
+          namespace,
+          ...(labelSelector ? { labelSelector } : {}),
+          limit: 100,
+        });
+        if (request !== listRequest.current) return;
+        pages = { ...pages, [namespace]: response };
+        setMultiPages(pages);
+        remaining.delete(namespace);
+        settle();
+      } catch (cause) {
+        if (request !== listRequest.current) return;
+        setError(messageOf(cause));
+        remaining.delete(namespace);
+        settle();
+      }
+    };
+    for (const namespace of scope) void fetchOne(namespace);
+
+    return () => {
+      if (request !== listRequest.current) return;
+      // Retain the leaving scope's merged rows for the next revisit.
+      if (completed && scope.length) {
+        const mergedSnapshot = mergeNamespacePages(scope, pages);
+        if (mergedSnapshot.items.length) {
+          writeResourceListSnapshot(cacheKey, { items: mergedSnapshot.items });
+        }
+      }
+    };
+  }, [contextId, multiScope, scopeKey, kind, coreReady, enabled, labelSelector, generation, setError]);
 
   const visibleRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return list.items;
-    return list.items.filter((item) =>
+    if (!needle) return listView.items;
+    return listView.items.filter((item) =>
       item.name.toLowerCase().includes(needle)
       || item.namespace.toLowerCase().includes(needle)
       || item.status?.toLowerCase().includes(needle),
     );
-  }, [list.items, query]);
+  }, [listView.items, query]);
 
   const refresh = useCallback(() => setGeneration((value) => value + 1), []);
-  const reset = useCallback(() => setList({ items: [] }), []);
+  const reset = useCallback(() => {
+    setList({ items: [] });
+    setMultiPages({});
+  }, []);
 
   return {
-    list,
+    list: listView,
     loading,
     loadingMore,
     revalidating,

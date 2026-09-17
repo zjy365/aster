@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseWorkloadDetails, podSelector } from "./workload-detail";
+import { parseWorkloadDetails, podSelector, rolloutStatus } from "./workload-detail";
 
 const DEPLOYMENT = `
 apiVersion: apps/v1
@@ -141,5 +141,126 @@ spec:
 describe("podSelector", () => {
   it("returns the matchLabels selector when complete", () => {
     expect(podSelector(parseWorkloadDetails(DEPLOYMENT))).toBe("app=brain-ui,tier=web");
+  });
+});
+
+describe("rolloutStatus", () => {
+  const details = parseWorkloadDetails(DEPLOYMENT)!;
+
+  it("Progressing=True with NewReplicaSetAvailable is complete", () => {
+    const progressing = {
+      type: "Progressing",
+      status: "True",
+      reason: "NewReplicaSetAvailable",
+      message: "Deployment has minimum availability.",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [progressing] };
+    expect(withCondition.conditions).toHaveLength(1);
+    expect(rolloutStatus(withCondition, { desired: 2, ready: 2, updated: 2 })).toEqual({
+      state: "complete",
+      message: "NewReplicaSetAvailable · 2/2 ready · 2 updated",
+    });
+  });
+
+  it("Progressing=True mid-rollout is progressing with the replica counters", () => {
+    const progressing = {
+      type: "Progressing",
+      status: "True",
+      reason: "ReplicaSetUpdated",
+      message: "ReplicaSet is progressing.",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [progressing] };
+    expect(withCondition.conditions).toHaveLength(1);
+    expect(rolloutStatus(withCondition, { desired: 5, ready: 2, updated: 2 })).toEqual({
+      state: "progressing",
+      message: "ReplicaSetUpdated · 2/5 ready · 2 updated",
+    });
+  });
+
+  it("Progressing=False is stuck (progress deadline exceeded)", () => {
+    const failing = {
+      type: "Progressing",
+      status: "False",
+      reason: "ProgressDeadlineExceeded",
+      message: "Progress deadline exceeded.",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [failing] };
+    expect(rolloutStatus(withCondition, { desired: 2, ready: 1, updated: 1 })).toEqual({
+      state: "stuck",
+      message: "ProgressDeadlineExceeded · 1/2 ready · 1 updated",
+    });
+  });
+
+  it("settled counters complete a non-terminal Progressing=True (StatefulSet)", () => {
+    // StatefulSet keeps Progressing=True with a reason like SuccessfulCreate
+    // long after the rollout settles; only the counters can say it is done.
+    const progressing = {
+      type: "Progressing",
+      status: "True",
+      reason: "SuccessfulCreate",
+      message: "create Pod db-0 in StatefulSet db successful",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [progressing] };
+    expect(rolloutStatus(withCondition, { desired: 3, ready: 3, updated: 3 })).toEqual({
+      state: "complete",
+      message: "3/3 ready · 3 updated",
+    });
+  });
+
+  it("lagging updated replicas keep a settled-ready rollout progressing", () => {
+    // Mid-rollout with maxUnavailable=0, ready can sit at desired while the
+    // new revision is still rolling: updated < desired must override.
+    const progressing = {
+      type: "Progressing",
+      status: "True",
+      reason: "ReplicaSetUpdated",
+      message: "ReplicaSet is progressing.",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [progressing] };
+    expect(rolloutStatus(withCondition, { desired: 3, ready: 3, updated: 1 })).toEqual({
+      state: "progressing",
+      message: "ReplicaSetUpdated · 3/3 ready · 1 updated",
+    });
+  });
+
+  it("unknown counters fall back to the condition alone", () => {
+    const progressing = {
+      type: "Progressing",
+      status: "True",
+      reason: "SuccessfulCreate",
+      message: "create Pod db-0 in StatefulSet db successful",
+      lastTransitionTime: "2026-08-12T13:49:39Z",
+    };
+    const withCondition = { ...details, conditions: [progressing] };
+    expect(rolloutStatus(withCondition, { desired: undefined, ready: undefined })).toEqual({
+      state: "progressing",
+      message: "SuccessfulCreate",
+    });
+  });
+
+  it("without a condition, lagging replicas mean progressing", () => {
+    const none = { ...details, conditions: [] };
+    expect(rolloutStatus(none, { desired: 3, ready: 1 })).toEqual({
+      state: "progressing",
+      message: "1/3 ready",
+    });
+  });
+
+  it("without a condition, fully ready replicas mean complete", () => {
+    const none = { ...details, conditions: [] };
+    expect(rolloutStatus(none, { desired: 3, ready: 3, updated: 3 })).toEqual({
+      state: "complete",
+      message: "3/3 ready · 3 updated",
+    });
+  });
+
+  it("objects without rollout semantics return undefined", () => {
+    expect(rolloutStatus(undefined, {})).toBeUndefined();
+    expect(rolloutStatus({ ...details, conditions: [] }, { desired: undefined, ready: undefined })).toBeUndefined();
   });
 });
