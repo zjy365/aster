@@ -32,6 +32,7 @@ import { useUpdater } from "./hooks/useUpdater";
 import { buildCommandItems, objectCommandItems, searchResultItems, type CommandAction } from "./lib/command-palette";
 import { messageOf, pluralize } from "./lib/format";
 import { namespaceScopeKey, namespaceScopeSummary } from "./lib/namespace-scope";
+import { contextDisplayName } from "./lib/context-picker";
 import { SLOW_POLL_MS } from "./lib/poll-cadence";
 import { isRolloutWorkloadKind } from "./detail/workload-detail";
 import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
@@ -53,7 +54,7 @@ const CreateResourceDialog = lazy(() => import("./detail/CreateResourceDialog").
 })));
 
 /** The settings shape used before the shell answers, and as its fallback. */
-const emptySettings: AsterSettings = { kubeconfigSources: [], includeStandardChain: true, welcomedAt: null };
+const emptySettings: AsterSettings = { kubeconfigSources: [], includeStandardChain: true, welcomedAt: null, contextAliases: {} };
 
 /**
  * Composition root: every domain owns its state in a hook above; this
@@ -64,7 +65,20 @@ export default function App() {
   const core = useCoreStatus();
   const updateCard = useUpdater();
   const { theme, effectiveTheme, palette, setTheme, setPalette } = useTheme();
-  const contexts = useContexts(core);
+  const [settings, setSettings] = useState<AsterSettings>(emptySettings);
+  // The welcome decision reads the *persisted* stamp, so it is inert until
+  // the shell has answered settings.get(): showing the card off the
+  // emptySettings fallback could flash it at returning users.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  // First-run welcome: shown the first time a context apply lands on the
+  // workbench, gone forever once dismissed (the stamp lives in shell-owned
+  // settings; this is the only place that decides when it appears).
+  const [welcomeVisible, setWelcomeVisible] = useState(false);
+  const dismissWelcome = useCallback(() => {
+    setWelcomeVisible(false);
+    void desktop.settings.markWelcomed().then(setSettings).catch(() => undefined);
+  }, []);
+  const contexts = useContexts(core, settings.contextAliases);
   const { contextId } = contexts;
   const [error, setError] = useState("");
   const pendingForwardStops = usePendingForwardStops();
@@ -203,19 +217,6 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [settings, setSettings] = useState<AsterSettings>(emptySettings);
-  // The welcome decision reads the *persisted* stamp, so it is inert until
-  // the shell has answered settings.get(): showing the card off the
-  // emptySettings fallback could flash it at returning users.
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  // First-run welcome: shown the first time a context apply lands on the
-  // workbench, gone forever once dismissed (the stamp lives in shell-owned
-  // settings; this is the only place that decides when it appears).
-  const [welcomeVisible, setWelcomeVisible] = useState(false);
-  const dismissWelcome = useCallback(() => {
-    setWelcomeVisible(false);
-    void desktop.settings.markWelcomed().then(setSettings).catch(() => undefined);
-  }, []);
   const [sourcesReport, setSourcesReport] = useState<SourcesReport>({ chain: [], configured: [] });
   const [appVersion, setAppVersion] = useState("");
   const reloadSources = useCallback(async () => {
@@ -452,6 +453,7 @@ export default function App() {
     const base = buildCommandItems({
       coreReady: core.state === "ready",
       contexts: contexts.contexts,
+      contextAliases: settings.contextAliases,
       activeContextId: contextId,
       resourceGroups,
       activeKindId: kind.id,
@@ -465,7 +467,7 @@ export default function App() {
     // with object-scoped commands under a "Selected object" group.
     if (detail.selected) return [...objectCommandItems(detail.selected), ...base];
     return base;
-  }, [core.state, contexts.contexts, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.loading, primaryNamespace, theme, detail.selected]);
+  }, [core.state, contexts.contexts, settings.contextAliases, contextId, resourceGroups, kind.id, namespaces.namespaces, namespaces.loading, primaryNamespace, theme, detail.selected]);
 
   const executePaletteCommand = useCallback((action: CommandAction) => {
     switch (action.type) {
@@ -530,6 +532,11 @@ export default function App() {
   }), [detail, showContextPicker, contexts.view, refreshActive, helm, helmActive]);
 
   const searchItems = useMemo(() => searchResultItems(searchResults, paletteQuery), [searchResults, paletteQuery]);
+  // The workbench headers show the aliased name; the raw context name stays
+  // visible in the picker's subtitle and the palette hints.
+  const activeContextLabel = contexts.activeContext
+    ? contextDisplayName(contexts.activeContext, settings.contextAliases)
+    : undefined;
 
   useEffect(() => {
     void desktop.settings.get()
@@ -573,7 +580,7 @@ export default function App() {
         onRefreshSources={reloadSources}
         onApply={async (sources, includeStandardChain) => {
           await desktop.settings.applyKubeconfigSources(sources, includeStandardChain);
-          setSettings({ kubeconfigSources: sources, includeStandardChain, welcomedAt: settings.welcomedAt });
+          setSettings((current) => ({ ...current, kubeconfigSources: sources, includeStandardChain }));
           await reloadSources();
         }}
         onPickFile={() => desktop.settings.pickKubeconfigFile()}
@@ -622,13 +629,17 @@ export default function App() {
             ? settings.kubeconfigSources
             : [...settings.kubeconfigSources, path];
           await desktop.settings.applyKubeconfigSources(sources, settings.includeStandardChain);
-          setSettings({ kubeconfigSources: sources, includeStandardChain: settings.includeStandardChain, welcomedAt: settings.welcomedAt });
+          setSettings((current) => ({ ...current, kubeconfigSources: sources }));
           await contexts.loadContexts();
           return path;
         }}
         onRenameConflict={async (request) => {
           await desktop.contexts.renameConflict(request);
           await contexts.loadContexts();
+        }}
+        aliases={settings.contextAliases}
+        onSetAlias={async (contextId, alias) => {
+          setSettings(await desktop.settings.setContextAlias(contextId, alias));
         }}
         onOpenExternal={(url) => void desktop.app.openExternal(url)}
       />
@@ -642,6 +653,7 @@ export default function App() {
       sidebar={(
         <Sidebar
           context={contexts.activeContext}
+          contextAlias={contexts.activeContext ? settings.contextAliases[contexts.activeContext.id] : undefined}
           resourceGroups={resourceGroups}
           activeKind={kind}
           onSelectKind={selectKind}
@@ -690,7 +702,7 @@ export default function App() {
               overview={overview.overview}
               loading={overview.loading}
               error={overview.error}
-              contextName={contexts.activeContext?.name}
+              contextName={activeContextLabel}
               onRefresh={overview.refresh}
               onNavigate={(kindId) => {
                 const next = findKindInGroups(resourceGroups, kindId);
@@ -700,7 +712,7 @@ export default function App() {
           )}
           {helmActive && (
             <HelmView
-              contextName={contexts.activeContext?.name}
+              contextName={activeContextLabel}
               scopeLabel={namespaceScopeSummary(namespaceScope) || "All namespaces"}
               releases={helm.releases}
               progress={helm.progress}

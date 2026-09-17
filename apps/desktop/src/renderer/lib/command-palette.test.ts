@@ -22,6 +22,7 @@ function makeState(overrides: Partial<CommandPaletteState> = {}): CommandPalette
   return {
     coreReady: true,
     contexts,
+    contextAliases: {},
     activeContextId: "prod",
     resourceGroups: [
       {
@@ -68,6 +69,21 @@ describe("buildCommandItems", () => {
     expect(byId.get("context:prod")?.disabled).toBe(true);
     expect(byId.get("action:refresh")?.disabled).toBe(true);
     expect(byId.has("kind:off")).toBe(false);
+  });
+
+  it("labels aliased contexts with the alias and demotes the raw name to the hint", () => {
+    const items = buildCommandItems(makeState({ contextAliases: { dev: "Dev local" } }));
+    const byId = new Map(items.map((item) => [item.id, item]));
+
+    const aliased = byId.get("context:dev");
+    expect(aliased?.label).toBe("Dev local");
+    expect(aliased?.hint).toBe("dev-local");
+    // Both names match the palette filter.
+    expect(commandFilter(aliased!.label, "dev local", aliased!.keywords)).toBeGreaterThan(0);
+    expect(commandFilter(aliased!.label, "dev-local", aliased!.keywords)).toBeGreaterThan(0);
+    // Unaliased contexts keep the cluster hint as before.
+    expect(byId.get("context:prod")?.label).toBe("prod-eu");
+    expect(byId.get("context:prod")?.hint).toBe("prod-cluster");
   });
 
   it("caps namespace commands and flags the remainder as a disabled hint", () => {
