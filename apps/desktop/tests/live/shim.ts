@@ -93,9 +93,12 @@ async function listAllNamespaces(contextId: string): Promise<{ namespaces: Names
   return { namespaces, truncated: truncated || Boolean(continueToken) };
 }
 
+// In-memory alias store for the settings namespace below — the shell's
+// settings document has no browser counterpart here.
+const shimAliases: Record<string, string> = {};
+
 const api: DesktopApi = {
-  platform: "darwin",
-  app: {
+  platform: "darwin",  app: {
     version: () => Promise.resolve("live-web"),
     onCommand: () => () => {},
     openExternal: () => Promise.resolve(),
@@ -125,10 +128,16 @@ const api: DesktopApi = {
   },
   settings: {
     // Live tests target the core pipeline; a pre-welcomed stamp keeps the
-    // first-run card out of their way.
-    get: () => Promise.resolve({ kubeconfigSources: [], includeStandardChain: false, welcomedAt: "2026-08-01T00:00:00Z" }),
-    setKubeconfigSources: (sources, includeStandardChain) => Promise.resolve({ kubeconfigSources: sources, includeStandardChain, welcomedAt: "2026-08-01T00:00:00Z" }),
-    markWelcomed: () => Promise.resolve({ kubeconfigSources: [], includeStandardChain: false, welcomedAt: "2026-08-01T00:00:00Z" }),
+    // first-run card out of their way. Aliases live in a plain map — the
+    // shell's settings document has no browser counterpart here.
+    get: () => Promise.resolve({ kubeconfigSources: [], includeStandardChain: false, welcomedAt: "2026-08-01T00:00:00Z", contextAliases: { ...shimAliases } }),
+    setKubeconfigSources: (sources, includeStandardChain) => Promise.resolve({ kubeconfigSources: sources, includeStandardChain, welcomedAt: "2026-08-01T00:00:00Z", contextAliases: { ...shimAliases } }),
+    markWelcomed: () => Promise.resolve({ kubeconfigSources: [], includeStandardChain: false, welcomedAt: "2026-08-01T00:00:00Z", contextAliases: { ...shimAliases } }),
+    setContextAlias: (contextId, alias) => {
+      if (alias === null) delete shimAliases[contextId];
+      else shimAliases[contextId] = alias;
+      return Promise.resolve({ kubeconfigSources: [], includeStandardChain: false, welcomedAt: "2026-08-01T00:00:00Z", contextAliases: { ...shimAliases } });
+    },
     pickKubeconfigFile: () => Promise.resolve(null),
     pickKubeconfigFolder: () => Promise.resolve(null),
     // Paste import writes through the shell filesystem; there is no shell here.

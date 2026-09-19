@@ -28,6 +28,25 @@ const MOCK_DESKTOP_API = `
     return stored === null ? "2026-08-01T00:00:00Z" : (stored || null);
   };
 
+  // Context aliases persist the same way, so the rename test can also prove
+  // the alias survives a reload into the picker.
+  const readAliases = () => {
+    try {
+      return JSON.parse(window.sessionStorage.getItem("aster.mockAliases") || "{}");
+    } catch {
+      return {};
+    }
+  };
+  const writeAliases = (aliases) => {
+    window.sessionStorage.setItem("aster.mockAliases", JSON.stringify(aliases));
+  };
+  const mockSettings = () => ({
+    kubeconfigSources: [],
+    includeStandardChain: true,
+    welcomedAt: mockWelcomedAt(),
+    contextAliases: readAliases(),
+  });
+
   const contexts = [
     { id: "dev", name: "dev", cluster: "dev-cluster", server: "https://dev.invalid", user: "dev", namespace: "default", current: true, source: "fixture", conflicts: [{ path: "/Users/fixture/other.yaml", kind: "cluster", name: "dev-cluster", suggestion: "dev-cluster-hzh" }] },
     { id: "prod", name: "prod", cluster: "prod-cluster", server: "https://prod.invalid", user: "prod", namespace: "default", current: false, source: "fixture" },
@@ -191,12 +210,20 @@ const MOCK_DESKTOP_API = `
       // Default is a returning user (welcomed) so the first-run card stays
       // out of unrelated tests; the welcome-card tests opt in via
       // sessionStorage below.
-      get: async () => ({ kubeconfigSources: [], includeStandardChain: true, welcomedAt: mockWelcomedAt() }),
-      setKubeconfigSources: async (sources, includeStandardChain) => ({ kubeconfigSources: sources, includeStandardChain, welcomedAt: mockWelcomedAt() }),
+      get: async () => mockSettings(),
+      setKubeconfigSources: async (sources, includeStandardChain) => ({ ...mockSettings(), kubeconfigSources: sources, includeStandardChain }),
       markWelcomed: async () => {
         window.sessionStorage.setItem("aster.mockWelcomedAt", "2026-09-02T04:00:00Z");
         window.__asterWelcomed = (window.__asterWelcomed || 0) + 1;
-        return { kubeconfigSources: [], includeStandardChain: true, welcomedAt: "2026-09-02T04:00:00Z" };
+        return mockSettings();
+      },
+      setContextAlias: async (contextId, alias) => {
+        const aliases = readAliases();
+        if (alias === null) delete aliases[contextId];
+        else aliases[contextId] = alias;
+        writeAliases(aliases);
+        window.__asterSetAlias = { contextId, alias };
+        return mockSettings();
       },
       applyKubeconfigSources: async () => undefined,
       pickKubeconfigFile: async () => null,
@@ -522,6 +549,76 @@ test("context picker marks a context with kubeconfig name conflicts", async ({ p
     name: "dev-cluster",
     newName: "dev-cluster-renamed",
   });
+  expect(failures).toEqual([]);
+});
+
+test("context alias renames a cluster row and follows it everywhere", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  // Hover reveals the pencil; it swaps the row for an inline editor.
+  const option = page.getByTestId("context-option-dev");
+  await option.hover();
+  await page.getByTestId("context-alias-edit-dev").click();
+  const input = page.getByTestId("context-alias-input-dev");
+  await expect(input).toBeFocused();
+  await input.fill("Aster dev");
+  await input.press("Enter");
+
+  // The alias becomes the row title; the raw context name demotes into the
+  // subtitle, ahead of the cluster.
+  await expect(option.locator("strong")).toHaveText("Aster dev");
+  await expect(option.locator(".context-card-cluster")).toHaveText("dev · dev-cluster");
+  expect(
+    await page.evaluate(() => (window as unknown as { __asterSetAlias: unknown }).__asterSetAlias),
+  ).toEqual({ contextId: "dev", alias: "Aster dev" });
+
+  // Display-name ordering: the aliased row rises to the top over the ctx-*s.
+  await expect(page.getByTestId("context-picker-list").locator("[data-context-option]").first())
+    .toHaveAttribute("data-context-id", "dev");
+
+  // Both names find the row in the picker search.
+  const search = page.getByTestId("context-picker-search");
+  await search.fill("Aster dev");
+  await expect(page.getByTestId("context-picker-list").locator("[data-context-option]")).toHaveCount(1);
+  await search.fill("dev");
+  await expect(page.getByTestId("context-picker-list").locator("[data-context-option]")).toHaveCount(1);
+  await search.fill("");
+
+  // The alias persists across a reload (the settings document in the shell).
+  await page.reload();
+  await expect(page.getByTestId("context-option-dev").locator("strong")).toHaveText("Aster dev");
+  await expectNoOverflow(page, "aliased picker 1280x800");
+  await screenshot(page, "picker-alias");
+
+  // In the workbench the sidebar shows the alias; the raw name stays one
+  // hover away.
+  await connectToDev(page);
+  const switcher = page.getByTestId("change-context");
+  await expect(switcher).toContainText("Aster dev");
+  await expect(switcher.locator(".context-switcher-text > span").first()).toHaveAttribute("title", "dev");
+
+  // The palette lists the alias as the label and the raw name as the hint.
+  await page.keyboard.press("Meta+k");
+  await page.keyboard.type("aster dev");
+  const paletteItem = page.getByTestId("command-item-context:dev");
+  await expect(paletteItem).toBeVisible();
+  await expect(paletteItem.locator(".command-palette-item-label")).toHaveText("Aster dev");
+  await expect(paletteItem.locator(".command-palette-item-hint")).toHaveText("dev");
+  await page.keyboard.press("Escape");
+
+  // Clearing the editor removes the alias: the raw name takes the title back
+  // and the persisted map loses the entry.
+  await switcher.click();
+  await page.getByTestId("context-option-dev").hover();
+  await page.getByTestId("context-alias-edit-dev").click();
+  await page.getByTestId("context-alias-input-dev").fill("");
+  await page.getByTestId("context-alias-input-dev").press("Enter");
+  await expect(page.getByTestId("context-option-dev").locator("strong")).toHaveText("dev");
+  expect(
+    await page.evaluate(() => (window as unknown as { __asterSetAlias: unknown }).__asterSetAlias),
+  ).toEqual({ contextId: "dev", alias: null });
   expect(failures).toEqual([]);
 });
 

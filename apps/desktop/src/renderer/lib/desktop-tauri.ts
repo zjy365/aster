@@ -121,6 +121,8 @@ export function createTauriDesktopApi(): DesktopApi {
       setKubeconfigSources: (sources, includeStandardChain) =>
         invoke<AsterSettings>("settings_set_kubeconfig_sources", { sources, includeStandardChain }),
       markWelcomed: () => invoke<AsterSettings>("settings_mark_welcomed"),
+      setContextAlias: (contextId, alias) =>
+        invoke<AsterSettings>("settings_set_context_alias", { contextId, alias }),
       applyKubeconfigSources: (sources, includeStandardChain) =>
         invoke<void>("settings_apply_kubeconfig_sources", { sources, includeStandardChain }),
       pickKubeconfigFile: () => invoke<string | null>("settings_pick_kubeconfig_file"),

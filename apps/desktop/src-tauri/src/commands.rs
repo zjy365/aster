@@ -242,6 +242,30 @@ pub fn settings_mark_welcomed(state: State<'_, AppState>) -> AsterSettings {
     state.settings.mark_welcomed_with(&now_rfc3339_utc())
 }
 
+/// Sets one context's display alias. `null` (or a blank string — the picker
+/// commits a cleared field the same way) removes it; the alias never touches
+/// the kubeconfig file, only the settings document.
+#[tauri::command]
+pub fn settings_set_context_alias(
+    state: State<'_, AppState>,
+    context_id: String,
+    alias: Option<String>,
+) -> Result<AsterSettings, String> {
+    let id = context_id.trim();
+    if id.is_empty() || id.len() > 512 {
+        return Err("invalid context id".to_string());
+    }
+    let normalized = alias.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    if let Some(value) = normalized {
+        // The renderer caps its input at 64 UTF-16 units; chars() here is the
+        // looser Unicode-scalar count, so nothing typed in the UI is rejected.
+        if value.chars().count() > crate::settings::MAX_ALIAS_LENGTH {
+            return Err(format!("alias must be at most {} characters", crate::settings::MAX_ALIAS_LENGTH));
+        }
+    }
+    Ok(state.settings.set_context_alias(id, normalized))
+}
+
 fn now_rfc3339_utc() -> String {
     use time::format_description::well_known::Rfc3339;
     time::OffsetDateTime::now_utc()

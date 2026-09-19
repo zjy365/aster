@@ -49,6 +49,8 @@ export interface PaletteResourceGroup {
 export interface CommandPaletteState {
   coreReady: boolean;
   contexts: ContextInfo[];
+  /** Display aliases keyed by context id; labels prefer them over raw names. */
+  contextAliases: Record<string, string>;
   activeContextId: string;
   resourceGroups: PaletteResourceGroup[];
   activeKindId: string;
@@ -164,12 +166,15 @@ export function buildCommandItems(state: CommandPaletteState): CommandItem[] {
   ];
 
   for (const context of state.contexts) {
+    const alias = state.contextAliases[context.id];
     items.push({
       id: `context:${context.id}`,
       group: "contexts",
-      label: context.name,
-      hint: context.cluster || undefined,
-      keywords: ["context", "cluster", "switch", context.name, context.cluster],
+      label: alias || context.name,
+      // An aliased context demotes its raw name to the hint — the one line
+      // that keeps palette rows reconcilable with kubectl.
+      hint: alias ? context.name : context.cluster || undefined,
+      keywords: ["context", "cluster", "switch", context.name, context.cluster, ...(alias ? [alias] : [])],
       disabled: Boolean(context.error) || !state.coreReady,
       current: context.id === state.activeContextId,
       action: { type: "connect-context", contextId: context.id },

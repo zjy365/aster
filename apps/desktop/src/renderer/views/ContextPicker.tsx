@@ -11,12 +11,13 @@ import {
   LayoutGrid,
   List as ListIcon,
   LoaderCircle,
+  Pencil,
   RefreshCw,
   Search,
   Settings,
 } from "lucide-react";
 import { AsterMark } from "../components/AsterMark";
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { ContextHealthMap, ContextInfo, CoreStatus, RenameConflictRequest } from "../../shared/types";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { ContextLayout } from "../lib/context-picker";
+import {
+  contextDisplayName,
+  MAX_CONTEXT_ALIAS_LENGTH,
+  sortContexts,
+  type ContextAliases,
+  type ContextLayout,
+} from "../lib/context-picker";
 import { QUICKSTART_URL } from "../lib/links";
 import { PasteKubeconfigDialog } from "./PasteKubeconfigDialog";
 
@@ -57,6 +64,10 @@ interface ContextPickerProps {
   /** Per-context reachability; a missing entry means unknown or still probing. */
   health: ContextHealthMap;
   healthProbing: boolean;
+  /** Display aliases keyed by context id; row titles prefer them. */
+  aliases: ContextAliases;
+  /** Persists one context's alias (null clears); resolves once stored. */
+  onSetAlias(contextId: string, alias: string | null): Promise<void>;
   onQueryChange(value: string): void;
   onLayoutChange(value: ContextLayout): void;
   onSelect(value: string): void;
@@ -85,6 +96,8 @@ function ContextPicker({
   error,
   health,
   healthProbing,
+  aliases,
+  onSetAlias,
   onQueryChange,
   onLayoutChange,
   onSelect,
@@ -103,6 +116,14 @@ function ContextPicker({
   const [newName, setNewName] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState("");
+  // Inline alias editing: the row being edited (context id) and its draft.
+  const [aliasEditing, setAliasEditing] = useState<string | null>(null);
+  const [aliasDraft, setAliasDraft] = useState("");
+  const [aliasError, setAliasError] = useState("");
+  // Escape closes the editor; the blur that unmounts it must not also commit.
+  const aliasCancelled = useRef(false);
+  // The picker orders rows by display name, so a rename can reseat a row.
+  const orderedContexts = useMemo(() => sortContexts(contexts, aliases), [contexts, aliases]);
   const selected = contexts.find((context) => context.id === selectedId);
   const firstSelectableId = contexts.find((context) => !context.error)?.id;
   const canConnect =
@@ -138,6 +159,26 @@ function ContextPicker({
       setRenameError(error instanceof Error ? error.message : String(error));
     } finally {
       setRenameBusy(false);
+    }
+  }
+
+  function openAliasEdit(context: ContextInfo) {
+    aliasCancelled.current = false;
+    setAliasError("");
+    setAliasDraft(aliases[context.id] ?? "");
+    setAliasEditing(context.id);
+  }
+
+  /** Enter or blur commits, Esc bailed out first; an empty commit clears. */
+  async function commitAlias(context: ContextInfo) {
+    const trimmed = aliasDraft.trim();
+    setAliasEditing(null);
+    if (trimmed === (aliases[context.id] ?? "")) return;
+    try {
+      await onSetAlias(context.id, trimmed || null);
+      setAliasError("");
+    } catch (cause) {
+      setAliasError(cause instanceof Error ? cause.message : String(cause));
     }
   }
 
@@ -405,10 +446,11 @@ function ContextPicker({
                 }
               />
             ) : contexts.length ? (
-              contexts.map((context) => {
+              orderedContexts.map((context) => {
                 const isSelected = context.id === selectedId;
                 const isTabStop = isSelected || (!selected && context.id === firstSelectableId);
                 const hasConflicts = Boolean(context.conflicts?.length);
+                const alias = aliases[context.id];
                 const healthEntry = health[context.id];
                 // Static config errors already render below the name; the dot
                 // is only for dialable contexts. A missing entry is "checking"
@@ -428,6 +470,51 @@ function ContextPicker({
                     : healthState === "error"
                       ? `Unreachable${healthEntry?.message ? `: ${healthEntry.message}` : ""}`
                       : "Checking reachability…";
+
+                // While this row's alias editor is open it replaces the
+                // option: the input owns focus and keys, and Enter/blur
+                // commit (see openAliasEdit/commitAlias).
+                if (aliasEditing === context.id) {
+                  return (
+                    <form
+                      key={context.id}
+                      className="context-card context-alias-form"
+                      data-testid={`context-alias-form-${context.id}`}
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void commitAlias(context);
+                      }}
+                    >
+                      <input
+                        className="context-conflict-input context-alias-input"
+                        value={aliasDraft}
+                        onChange={(event) => setAliasDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.nativeEvent.isComposing) return;
+                          if (event.key === "Escape") {
+                            event.stopPropagation();
+                            aliasCancelled.current = true;
+                            setAliasEditing(null);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (aliasCancelled.current) {
+                            aliasCancelled.current = false;
+                            return;
+                          }
+                          void commitAlias(context);
+                        }}
+                        aria-label="Cluster name"
+                        placeholder={context.name}
+                        maxLength={MAX_CONTEXT_ALIAS_LENGTH}
+                        autoFocus
+                        spellCheck={false}
+                        data-testid={`context-alias-input-${context.id}`}
+                        onFocus={(event) => event.target.select()}
+                      />
+                    </form>
+                  );
+                }
 
                 return (
                   <Button
@@ -474,9 +561,14 @@ function ContextPicker({
                       )}
                     </span>
                     <span className="context-card-copy">
-                      <strong>{context.name}</strong>
+                      <strong title={alias ? context.name : undefined}>
+                        {alias || context.name}
+                      </strong>
                       <span className="context-card-sub">
                         <span className="context-card-cluster">
+                          {/* The raw context name stays on the row (before the
+                              cluster) whenever an alias replaces it up top. */}
+                          {alias ? `${context.name} · ` : ""}
                           {context.cluster || "Kubernetes cluster"}
                         </span>
                         {hasConflicts && (
@@ -515,6 +607,33 @@ function ContextPicker({
                     {isSelected && (
                       <span className="current-context-badge">Current</span>
                     )}
+                    {/* Cosmetic rename: stored in app settings, the kubeconfig
+                        file itself is never touched. A span (not a button) so
+                        it can nest in the option button like the conflict
+                        warning; role/tabIndex keep it keyboard reachable. */}
+                    <span
+                      className="context-alias-edit"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Rename ${alias || context.name}`}
+                      title="Rename cluster"
+                      data-testid={`context-alias-edit-${context.id}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openAliasEdit(context);
+                      }}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openAliasEdit(context);
+                        }
+                      }}
+                    >
+                      <Pencil aria-hidden="true" />
+                    </span>
                     <span className="context-selected-indicator" aria-hidden="true">
                       <CheckCircle2 />
                     </span>
@@ -567,10 +686,15 @@ function ContextPicker({
             <span className="context-picker-selection" role="status" aria-live="polite">
               {selected ? (
                 <>
-                  <strong>{selected.name}</strong> selected
+                  <strong>{contextDisplayName(selected, aliases)}</strong> selected
                 </>
               ) : (
                 `${totalContexts} context${totalContexts === 1 ? "" : "s"} available`
+              )}
+              {aliasError && (
+                <span className="context-alias-error" role="alert">
+                  {aliasError}
+                </span>
               )}
             </span>
             <Button
