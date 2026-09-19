@@ -21,7 +21,7 @@ const jbmono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: site.title,
   description: site.description,
-  metadataBase: new URL("https://zjy365.github.io/aster"),
+  metadataBase: new URL("https://aster.zjy365.dev"),
   openGraph: {
     title: site.title,
     description: site.description,
