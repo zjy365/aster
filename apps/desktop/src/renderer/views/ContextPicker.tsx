@@ -43,6 +43,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  contextAlias,
   contextDisplayName,
   MAX_CONTEXT_ALIAS_LENGTH,
   sortContexts,
@@ -165,7 +166,7 @@ function ContextPicker({
   function openAliasEdit(context: ContextInfo) {
     aliasCancelled.current = false;
     setAliasError("");
-    setAliasDraft(aliases[context.id] ?? "");
+    setAliasDraft(contextAlias(context.id, aliases) ?? "");
     setAliasEditing(context.id);
   }
 
@@ -173,7 +174,7 @@ function ContextPicker({
   async function commitAlias(context: ContextInfo) {
     const trimmed = aliasDraft.trim();
     setAliasEditing(null);
-    if (trimmed === (aliases[context.id] ?? "")) return;
+    if (trimmed === (contextAlias(context.id, aliases) ?? "")) return;
     try {
       await onSetAlias(context.id, trimmed || null);
       setAliasError("");
@@ -450,7 +451,7 @@ function ContextPicker({
                 const isSelected = context.id === selectedId;
                 const isTabStop = isSelected || (!selected && context.id === firstSelectableId);
                 const hasConflicts = Boolean(context.conflicts?.length);
-                const alias = aliases[context.id];
+                const alias = contextAlias(context.id, aliases);
                 const healthEntry = health[context.id];
                 // Static config errors already render below the name; the dot
                 // is only for dialable contexts. A missing entry is "checking"

@@ -21,6 +21,16 @@ describe("context picker", () => {
 });
 
 describe("context aliases", () => {
+  it.each(["constructor", "toString", "__proto__"])("only reads own aliases for %s", (id) => {
+    const context = { ...contexts[2], id, name: id };
+    expect(contextDisplayName(context, {})).toBe(id);
+    expect(filterContexts([context], "missing", {})).toEqual([]);
+    expect(sortContexts([context, contexts[2]], { dev: "ZZZ" })[0]).toEqual(context);
+    const aliases = JSON.parse(`{"${id}":"Custom name"}`);
+    expect(contextDisplayName(context, aliases)).toBe("Custom name");
+    expect(filterContexts([context], "custom", aliases)).toEqual([context]);
+  });
+
   it("prefers the alias for the display name and falls back to the raw one", () => {
     const aliases = { dev: "Dev local" };
     expect(contextDisplayName(contexts[2], aliases)).toBe("Dev local");

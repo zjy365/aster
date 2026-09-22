@@ -251,8 +251,8 @@ pub fn settings_set_context_alias(
     context_id: String,
     alias: Option<String>,
 ) -> Result<AsterSettings, String> {
-    let id = context_id.trim();
-    if id.is_empty() || id.len() > 512 {
+    let id = context_id.as_str();
+    if id.trim().is_empty() || id.len() > 512 {
         return Err("invalid context id".to_string());
     }
     let normalized = alias.as_deref().map(str::trim).filter(|value| !value.is_empty());
@@ -263,7 +263,7 @@ pub fn settings_set_context_alias(
             return Err(format!("alias must be at most {} characters", crate::settings::MAX_ALIAS_LENGTH));
         }
     }
-    Ok(state.settings.set_context_alias(id, normalized))
+    state.settings.set_context_alias(id, normalized)
 }
 
 fn now_rfc3339_utc() -> String {

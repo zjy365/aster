@@ -45,6 +45,17 @@ function makeState(overrides: Partial<CommandPaletteState> = {}): CommandPalette
 }
 
 describe("buildCommandItems", () => {
+  it.each(["constructor", "toString", "__proto__"])("ignores inherited aliases for %s", (id) => {
+    const context = { ...contexts[0], id, name: id };
+    const item = buildCommandItems(makeState({ contexts: [context] })).find((item) => item.id === `context:${id}`);
+    expect(item?.label).toBe(id);
+    expect(item?.hint).toBe(context.cluster);
+    const contextAliases = JSON.parse(`{"${id}":"My cluster"}`);
+    const renamed = buildCommandItems(makeState({ contexts: [context], contextAliases })).find((item) => item.id === `context:${id}`);
+    expect(renamed?.label).toBe("My cluster");
+    expect(renamed?.hint).toBe(id);
+  });
+
   it("builds actions, contexts, resources, namespaces and theme commands with markers", () => {
     const items = buildCommandItems(makeState());
     const byId = new Map(items.map((item) => [item.id, item]));

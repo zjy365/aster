@@ -8,9 +8,13 @@ export type ContextAliases = Readonly<Record<string, string>>;
 /** Mirrors the shell-side cap (settings.rs MAX_ALIAS_LENGTH). */
 export const MAX_CONTEXT_ALIAS_LENGTH = 64;
 
+export function contextAlias(contextId: string, aliases: ContextAliases): string | undefined {
+  return Object.hasOwn(aliases, contextId) ? aliases[contextId] : undefined;
+}
+
 /** The picker's title for a context: its alias when set, else its own name. */
 export function contextDisplayName(context: ContextInfo, aliases: ContextAliases): string {
-  return aliases[context.id] || context.name;
+  return contextAlias(context.id, aliases) || context.name;
 }
 
 /**
@@ -27,7 +31,7 @@ export function sortContexts(contexts: ContextInfo[], aliases: ContextAliases): 
 export function filterContexts(contexts: ContextInfo[], query: string, aliases: ContextAliases = {}): ContextInfo[] {
   const needle = query.trim().toLocaleLowerCase();
   const filtered = needle
-    ? contexts.filter((context) => [context.name, context.cluster, context.id, aliases[context.id]]
+    ? contexts.filter((context) => [context.name, context.cluster, context.id, contextAlias(context.id, aliases)]
         .some((value) => Boolean(value?.toLocaleLowerCase().includes(needle))))
     : contexts;
   return sortContexts(filtered, aliases);

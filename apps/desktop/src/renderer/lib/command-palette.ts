@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AppearanceTheme, ContextInfo, NamespaceInfo, RelatedResource, ResourceRow } from "../../shared/types";
+import { contextAlias } from "./context-picker";
 
 export type PaletteGroupId = "search" | "actions" | "contexts" | "resources" | "namespaces" | "appearance" | "object";
 
@@ -166,7 +167,7 @@ export function buildCommandItems(state: CommandPaletteState): CommandItem[] {
   ];
 
   for (const context of state.contexts) {
-    const alias = state.contextAliases[context.id];
+    const alias = contextAlias(context.id, state.contextAliases);
     items.push({
       id: `context:${context.id}`,
       group: "contexts",

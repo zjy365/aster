@@ -32,7 +32,7 @@ import { useUpdater } from "./hooks/useUpdater";
 import { buildCommandItems, objectCommandItems, searchResultItems, type CommandAction } from "./lib/command-palette";
 import { messageOf, pluralize } from "./lib/format";
 import { namespaceScopeKey, namespaceScopeSummary } from "./lib/namespace-scope";
-import { contextDisplayName } from "./lib/context-picker";
+import { contextAlias, contextDisplayName } from "./lib/context-picker";
 import { SLOW_POLL_MS } from "./lib/poll-cadence";
 import { isRolloutWorkloadKind } from "./detail/workload-detail";
 import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
@@ -653,7 +653,7 @@ export default function App() {
       sidebar={(
         <Sidebar
           context={contexts.activeContext}
-          contextAlias={contexts.activeContext ? settings.contextAliases[contexts.activeContext.id] : undefined}
+          contextAlias={contexts.activeContext ? contextAlias(contexts.activeContext.id, settings.contextAliases) : undefined}
           resourceGroups={resourceGroups}
           activeKind={kind}
           onSelectKind={selectKind}

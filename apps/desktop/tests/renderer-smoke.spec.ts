@@ -220,7 +220,7 @@ const MOCK_DESKTOP_API = `
       setContextAlias: async (contextId, alias) => {
         const aliases = readAliases();
         if (alias === null) delete aliases[contextId];
-        else aliases[contextId] = alias;
+        else Object.defineProperty(aliases, contextId, { value: alias, enumerable: true, configurable: true, writable: true });
         writeAliases(aliases);
         window.__asterSetAlias = { contextId, alias };
         return mockSettings();
@@ -619,6 +619,40 @@ test("context alias renames a cluster row and follows it everywhere", async ({ p
   expect(
     await page.evaluate(() => (window as unknown as { __asterSetAlias: unknown }).__asterSetAlias),
   ).toEqual({ contextId: "dev", alias: null });
+  expect(failures).toEqual([]);
+});
+
+test("prototype-named contexts support display, search and aliases", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.addInitScript(() => {
+    const api = window.__ASTER_DESKTOP__!;
+    const originalList = api.contexts.list;
+    api.contexts.list = async () => (await originalList()).map((context) =>
+      context.id === "dev" ? { ...context, id: "__proto__", name: "__proto__" } : context);
+  });
+  await page.goto("/");
+  const option = page.getByTestId("context-option-__proto__");
+  await expect(option.locator("strong")).toHaveText("__proto__");
+  const search = page.getByTestId("context-picker-search");
+  await search.fill("missing context");
+  await expect(option).toHaveCount(0);
+  await search.fill("");
+  await option.hover();
+  await page.getByTestId("context-alias-edit-__proto__").click();
+  const input = page.getByTestId("context-alias-input-__proto__");
+  await expect(input).toHaveValue("");
+  await input.fill("Named cluster");
+  await input.press("Enter");
+  await page.reload();
+  await expect(option.locator("strong")).toHaveText("Named cluster");
+  await option.scrollIntoViewIfNeeded();
+  await expectNoOverflow(page, "prototype context alias");
+  await screenshot(page, "picker-prototype-alias");
+  await option.dblclick();
+  await expect(page.getByTestId("change-context")).toContainText("Named cluster");
+  await page.keyboard.press("Meta+k");
+  await page.keyboard.type("named cluster");
+  await expect(page.getByTestId("command-item-context:__proto__")).toBeVisible();
   expect(failures).toEqual([]);
 });
 

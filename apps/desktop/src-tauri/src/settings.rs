@@ -96,12 +96,15 @@ impl SettingsFile {
 
     /// Sets one context's display alias, or removes it when `alias` normalizes
     /// to nothing (None, blank, or overlong). Unrelated fields carry forward.
-    pub fn set_context_alias(&self, context_id: &str, alias: Option<&str>) -> AsterSettings {
+    pub fn set_context_alias(&self, context_id: &str, alias: Option<&str>) -> Result<AsterSettings, String> {
         let mut settings = self.read();
-        let id = context_id.trim();
-        if !id.is_empty() && id.len() <= MAX_CONTEXT_ID_LENGTH {
+        let id = context_id;
+        if !id.trim().is_empty() && id.len() <= MAX_CONTEXT_ID_LENGTH {
             match normalize_alias(alias) {
                 Some(value) => {
+                    if settings.context_aliases.len() >= MAX_ALIASES && !settings.context_aliases.contains_key(id) {
+                        return Err(format!("at most {MAX_ALIASES} context aliases can be saved"));
+                    }
                     settings.context_aliases.insert(id.to_string(), value);
                 }
                 None => {
@@ -110,7 +113,7 @@ impl SettingsFile {
             }
             self.write(&settings);
         }
-        settings
+        Ok(settings)
     }
 }
 
@@ -465,18 +468,57 @@ mod tests {
         let file = SettingsFile::new(directory.join("config.yaml"));
         file.write(&AsterSettings::default());
 
-        let set = file.set_context_alias("dev", Some("  Dev local  "));
+        let set = file.set_context_alias("dev", Some("  Dev local  ")).unwrap();
         assert_eq!(set.context_aliases.get("dev").map(String::as_str), Some("Dev local"));
         assert_eq!(file.read().context_aliases.get("dev").map(String::as_str), Some("Dev local"));
 
         // Blank and overlong aliases both mean removal; unrelated keys stay.
-        let cleared = file.set_context_alias("dev", Some("   "));
+        let cleared = file.set_context_alias("dev", Some("   ")).unwrap();
         assert!(!cleared.context_aliases.contains_key("dev"));
-        let too_long = file.set_context_alias("dev", Some(&"x".repeat(MAX_ALIAS_LENGTH + 1)));
+        let too_long = file.set_context_alias("dev", Some(&"x".repeat(MAX_ALIAS_LENGTH + 1))).unwrap();
         assert!(!too_long.context_aliases.contains_key("dev"));
         // A blank context id never writes an entry under the empty key.
-        let empty_id = file.set_context_alias("   ", Some("Alias"));
+        let empty_id = file.set_context_alias("   ", Some("Alias")).unwrap();
         assert!(empty_id.context_aliases.is_empty());
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn aliases_preserve_exact_context_ids() {
+        let directory = std::env::temp_dir().join(format!("aster-alias-id-test-{}", std::process::id()));
+        let file = SettingsFile::new(directory.join("config.yaml"));
+        file.write(&AsterSettings::default());
+        file.set_context_alias("dev", Some("Plain")).unwrap();
+        let settings = file.set_context_alias(" dev ", Some("Padded")).unwrap();
+        assert_eq!(settings.context_aliases.get("dev").map(String::as_str), Some("Plain"));
+        assert_eq!(settings.context_aliases.get(" dev ").map(String::as_str), Some("Padded"));
+        assert_eq!(file.read().context_aliases, settings.context_aliases);
+        let cleared = file.set_context_alias(" dev ", None).unwrap();
+        assert!(!cleared.context_aliases.contains_key(" dev "));
+        assert_eq!(cleared.context_aliases.get("dev").map(String::as_str), Some("Plain"));
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn alias_limit_rejects_additions_without_losing_saved_entries() {
+        let directory = std::env::temp_dir().join(format!("aster-alias-limit-test-{}", std::process::id()));
+        let file = SettingsFile::new(directory.join("config.yaml"));
+        let settings = AsterSettings {
+            context_aliases: (0..MAX_ALIASES).map(|index| (format!("context-{index:03}"), "Saved".into())).collect(),
+            ..AsterSettings::default()
+        };
+        file.write(&settings);
+        for id in ["aaa-new", "zzz-new"] {
+            assert!(file.set_context_alias(id, Some("New")).is_err());
+            assert_eq!(file.read().context_aliases, settings.context_aliases);
+        }
+        let updated = file.set_context_alias("context-000", Some("Updated")).unwrap();
+        assert_eq!(updated.context_aliases.len(), MAX_ALIASES);
+        assert_eq!(file.read().context_aliases, updated.context_aliases);
+        file.set_context_alias("context-000", None).unwrap();
+        let added = file.set_context_alias("aaa-new", Some("New")).unwrap();
+        assert_eq!(added.context_aliases.len(), MAX_ALIASES);
+        assert_eq!(file.read().context_aliases, added.context_aliases);
+        let _ = fs::remove_dir_all(directory);
     }
 }
