@@ -74,6 +74,13 @@ export interface AsterSettings {
    * card shows is the renderer's.
    */
   welcomedAt: string | null;
+  /**
+   * Display aliases for kubeconfig contexts, keyed by context id (the
+   * kubeconfig context name). Cosmetic only — the kubeconfig files are never
+   * rewritten. Aliases for contexts that no longer exist are kept and simply
+   * stay unused until the context returns.
+   */
+  contextAliases: Record<string, string>;
 }
 
 /**
@@ -553,6 +560,11 @@ export interface DesktopApi {
     setKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<AsterSettings>;
     /** Stamps the first-run welcome dismissal (shell-side time); idempotent. */
     markWelcomed(): Promise<AsterSettings>;
+    /**
+     * Sets one context's display alias; null (or a blank string) removes it.
+     * Persists in the shell's settings document — the kubeconfig is untouched.
+     */
+    setContextAlias(contextId: string, alias: string | null): Promise<AsterSettings>;
     pickKubeconfigFile(): Promise<string | null>;
     pickKubeconfigFolder(): Promise<string | null>;
     /**

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ContextHealthMap, ContextInfo, CoreStatus } from "../../shared/types";
-import { filterContexts, retainedContextChoice, type ContextLayout } from "../lib/context-picker";
+import { filterContexts, retainedContextChoice, type ContextAliases, type ContextLayout } from "../lib/context-picker";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
 
@@ -36,9 +36,10 @@ export interface ContextsState {
 /**
  * Owns the kubeconfig context inventory and which context the workbench is
  * connected to. Cross-domain resets on connect/disconnect stay in the
- * composition root (App), which orchestrates the other hooks.
+ * composition root (App), which orchestrates the other hooks. The alias map
+ * only affects presentation: filtering, ordering, and display names.
  */
-export function useContexts(core: CoreStatus): ContextsState {
+export function useContexts(core: CoreStatus, aliases: ContextAliases): ContextsState {
   const [view, setView] = useState<AppView>("contexts");
   // Where settings was opened from, so its back button returns there. Only
   // the contexts view opens settings today; recording the origin keeps a
@@ -112,7 +113,7 @@ export function useContexts(core: CoreStatus): ContextsState {
 
   const activeContext = contexts.find((item) => item.id === contextId);
   const chosenContext = contexts.find((item) => item.id === contextChoice);
-  const visibleContexts = useMemo(() => filterContexts(contexts, contextQuery), [contextQuery, contexts]);
+  const visibleContexts = useMemo(() => filterContexts(contexts, contextQuery, aliases), [contextQuery, contexts, aliases]);
 
   return {
     view,

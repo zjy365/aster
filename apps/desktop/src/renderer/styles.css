@@ -442,7 +442,8 @@ h2 {
 .context-card {
   position: relative;
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto 20px;
+  /* icon | copy | Current badge | alias pencil | selected indicator */
+  grid-template-columns: 36px minmax(0, 1fr) auto auto 20px;
   align-items: center;
   width: 100%;
   min-height: 58px;
@@ -716,6 +717,7 @@ h2 {
 }
 
 .current-context-badge {
+  grid-column: 3;
   align-self: center;
   padding: 2px 6px;
   border-radius: 999px;
@@ -727,6 +729,7 @@ h2 {
 }
 
 .context-selected-indicator {
+  grid-column: 5;
   position: static;
   color: var(--focus);
   opacity: 0;
@@ -740,6 +743,59 @@ h2 {
 
 .context-card[data-selected="true"] .context-selected-indicator {
   opacity: 1;
+}
+
+/* The cosmetic-rename pencil. Always mounted for keyboard reachability,
+   revealed on row hover/focus; clicking it swaps the row for an input. */
+.context-alias-edit {
+  grid-column: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  margin-inline-end: 2px;
+  padding: 5px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.context-alias-edit > svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+.context-card:hover:not(:disabled) .context-alias-edit,
+.context-card:focus-visible .context-alias-edit,
+.context-card:focus-within .context-alias-edit,
+.context-alias-edit:focus-visible {
+  opacity: 1;
+}
+
+.context-alias-edit:hover {
+  color: var(--text);
+}
+
+/* The editing row: the option button is replaced by this form, so the input
+   owns focus and keys without fighting the option's keydown handler. */
+.context-alias-form {
+  display: flex;
+  align-items: center;
+  cursor: default;
+  border-radius: 6px;
+  background: var(--surface-hover);
+}
+
+.context-alias-form .context-alias-input {
+  height: 32px;
+  font-size: 13px;
+}
+
+.context-alias-error {
+  margin-left: 8px;
+  color: var(--failed);
 }
 
 .context-picker-state {

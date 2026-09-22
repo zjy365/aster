@@ -46,6 +46,8 @@ export interface SidebarToolGroup {
 
 export interface SidebarProps {
   context?: Pick<ContextInfo, "name" | "cluster">;
+  /** Display alias for the active context; shown in place of its raw name. */
+  contextAlias?: string;
   resourceGroups: SidebarResourceGroup[];
   activeKind: ResourceKind;
   onSelectKind(kind: ResourceKind): void;
@@ -84,6 +86,7 @@ function defaultCollapsed(group: SidebarResourceGroup, nested: boolean): boolean
 
 export function Sidebar({
   context,
+  contextAlias,
   resourceGroups,
   activeKind,
   onSelectKind,
@@ -270,8 +273,13 @@ export function Sidebar({
           >
             <Boxes aria-hidden="true" className="size-4 shrink-0 text-primary" />
             <span className="min-w-0 flex-1 context-switcher-text">
-              <span className="block truncate text-sm font-medium">
-                {context?.name || "Choose a cluster"}
+              <span
+                className="block truncate text-sm font-medium"
+                // An aliased context keeps its raw name one hover away — the
+                // line that reconciles the sidebar with kubectl output.
+                title={contextAlias ? context?.name : undefined}
+              >
+                {contextAlias || context?.name || "Choose a cluster"}
               </span>
               <span className="mt-0.5 block truncate text-[0.6875rem] font-normal text-muted-foreground">
                 {context?.cluster || "No context connected"}

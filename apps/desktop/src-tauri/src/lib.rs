@@ -141,6 +141,7 @@ pub fn run() {
             commands::settings_get,
             commands::settings_set_kubeconfig_sources,
             commands::settings_mark_welcomed,
+            commands::settings_set_context_alias,
             commands::settings_apply_kubeconfig_sources,
             commands::settings_pick_kubeconfig_file,
             commands::settings_pick_kubeconfig_folder,
