@@ -201,6 +201,34 @@ type PortForwardStopRequest struct {
 	ID string `json:"id"`
 }
 
+// PortForwardResourceRef names the object a forward was requested for, before
+// any Service/workload-to-pod resolution.
+type PortForwardResourceRef struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// PortForwardSession is the read-only view of one active forward in the
+// service registry, served by GET /v1/portforwards. Sessions live only as
+// long as the sidecar process; nothing persists across restarts.
+type PortForwardSession struct {
+	ID          string                 `json:"id"`
+	ContextID   string                 `json:"contextId"`
+	Namespace   string                 `json:"namespace"`
+	ResourceRef PortForwardResourceRef `json:"resourceRef"`
+	LocalPort   int                    `json:"localPort"`
+	// TargetPort is the resolved pod port the forward terminates on (named
+	// ports are already translated).
+	TargetPort int64     `json:"targetPort"`
+	StartedAt  time.Time `json:"startedAt"`
+	// Pod carries the backing pod for service/workload forwards.
+	Pod string `json:"pod,omitempty"`
+}
+
+type PortForwardListResponse struct {
+	Forwards []PortForwardSession `json:"forwards"`
+}
+
 type DiscoveryResponse struct {
 	Resources []DiscoveredResource `json:"resources"`
 }

@@ -18,6 +18,7 @@ import type {
   NamespaceInfo,
   Overview,
   PodLogsRequest,
+  PortForwardSession,
   ResourceGetRequest,
   ResourceListRequest,
   ResourceWatchBatch,
@@ -261,6 +262,10 @@ export function createTauriDesktopApi(): DesktopApi {
       exec: (request) => invoke("pods_exec", { request }),
       portForwardStart: (request) => invoke("pods_portforward_start", { request }),
       portForwardStop: (id) => invoke<void>("pods_portforward_stop", { request: { id } }),
+      portForwardList: async (contextId) => {
+        const value = await invoke<{ forwards: PortForwardSession[] }>("pods_portforward_list", { contextId: contextId || null });
+        return value.forwards || [];
+      },
       mutate: (request) => invoke("resources_mutate", {
         request: {
           contextId: request.contextId,

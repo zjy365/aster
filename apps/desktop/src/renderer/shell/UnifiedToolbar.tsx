@@ -34,6 +34,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { PortForwardsIndicator } from "../components/PortForwardsIndicator";
 import { cn } from "@/lib/utils";
 import type { NamespaceInfo, NamespaceScope } from "../../shared/types";
 import { searchNamespaces } from "../lib/namespace-search";
@@ -62,6 +63,10 @@ export interface UnifiedToolbarProps {
   theme: AppearanceTheme;
   onThemeChange(theme: AppearanceTheme): void;
   onOpenSettings?(): void;
+  /** Resolves a context id to its display name for the port-forwards panel. */
+  portForwardContextLabel?(contextId: string): string;
+  /** True once the sidecar is ready to answer the session list. */
+  coreReady?: boolean;
   canGoBack?: boolean;
   canGoForward?: boolean;
   onBack?(): void;
@@ -97,6 +102,8 @@ export function UnifiedToolbar({
   theme,
   onThemeChange,
   onOpenSettings,
+  portForwardContextLabel,
+  coreReady = false,
   canGoBack = false,
   canGoForward = false,
   onBack,
@@ -407,6 +414,11 @@ export function UnifiedToolbar({
       </label>
 
       <div className="toolbar-actions">
+        <PortForwardsIndicator
+          contextLabel={portForwardContextLabel ?? ((contextId) => contextId)}
+          coreReady={coreReady}
+        />
+
         <ToolbarIconButton
           disabled={refreshing}
           label="Refresh resources"

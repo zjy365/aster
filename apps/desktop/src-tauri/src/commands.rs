@@ -216,6 +216,21 @@ pub async fn pods_portforward_stop(state: State<'_, AppState>, request: Value) -
     state.core.post("/v1/pods/portforward/stop", request).await
 }
 
+/// Lists the sidecar's active forward sessions (read-only). The optional
+/// context filter is bounded here and re-validated by the core.
+#[tauri::command]
+pub async fn pods_portforward_list(state: State<'_, AppState>, context_id: Option<String>) -> Result<Value, String> {
+    let mut path = String::from("/v1/portforwards");
+    if let Some(context_id) = context_id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        if context_id.len() > 512 {
+            return Err("invalid context id".to_string());
+        }
+        path.push_str("?contextId=");
+        path.push_str(&url_encode(context_id));
+    }
+    state.core.get(&path).await
+}
+
 #[tauri::command]
 pub fn settings_get(state: State<'_, AppState>) -> AsterSettings {
     state.settings.read()

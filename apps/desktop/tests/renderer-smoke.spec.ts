@@ -396,6 +396,9 @@ const MOCK_DESKTOP_API = `
       exec: async () => ({ stdout: "", stderr: "" }),
       portForwardStart: async (request) => ({ id: "pf-1", localPort: request.localPort || 12_345 }),
       portForwardStop: async () => undefined,
+      // Mirrors the sidecar registry; tests seed window.__portForwardSessions
+      // to stage sessions the renderer never started.
+      portForwardList: async () => window.__portForwardSessions || [],
       mutate: async (request) => {
         // Mirror the API server's optimistic concurrency: the live object sits
         // at resourceVersion 1001 (the dry-run response reports it), so an apply
@@ -2978,6 +2981,59 @@ test("manual forwards show addresses, survive navigation and stop on context exi
   await detail.getByRole("tab", { name: "Overview", exact: true }).click();
   await page.getByTestId("change-context").click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { stopped: string[] }).stopped)).toEqual(["pf-8080", "pf-8080"]);
+  expect(failures).toEqual([]);
+});
+
+test("toolbar panel lists sidecar forward sessions across contexts and stops them", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  // Stage sessions only the sidecar knows about (the renderer-lost case) and
+  // record stops: the panel must list them read-only-with-stop.
+  await page.evaluate(() => {
+    const scope = window as unknown as {
+      __portForwardSessions?: Array<Record<string, unknown>>;
+      __pfStopped: string[];
+      __ASTER_DESKTOP__: { resources: { portForwardStop(id: string): Promise<void> } };
+    };
+    scope.__pfStopped = [];
+    scope.__portForwardSessions = [
+      { id: "pf-sidecar-dev", contextId: "dev", namespace: "monitoring", resourceRef: { kind: "Service", name: "grafana" }, localPort: 43123, targetPort: 3000, startedAt: "2026-10-17T08:00:00Z", pod: "grafana-abc" },
+      { id: "pf-sidecar-prod", contextId: "prod", namespace: "apps", resourceRef: { kind: "Pod", name: "api-0" }, localPort: 43124, targetPort: 443, startedAt: "2026-10-17T09:30:00Z" },
+    ];
+    scope.__ASTER_DESKTOP__.resources.portForwardStop = async (id) => {
+      scope.__pfStopped.push(id);
+      scope.__portForwardSessions = (scope.__portForwardSessions || []).filter((session) => session.id !== id);
+    };
+  });
+  await connectToDev(page);
+
+  const indicator = page.getByTestId("port-forwards-indicator");
+  await expect(indicator).toBeVisible();
+  await expect(page.getByTestId("port-forwards-count")).toHaveText("2");
+
+  await page.getByTestId("port-forwards-toggle").click();
+  const panel = page.getByTestId("port-forwards-panel");
+  await expect(panel).toBeVisible();
+  const rows = panel.getByTestId("port-forward-session-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("grafana");
+  await expect(rows.first()).toContainText("43123 → 3000");
+  await expect(rows.first()).toContainText("via grafana-abc");
+  await expect(rows.nth(1)).toContainText("prod");
+  await expect(rows.nth(1)).toContainText("43124 → 443");
+  await expectNoOverflow(page, "port forwards panel 1280x800");
+  await screenshot(page, "port-forwards-panel-1280");
+
+  await rows.nth(1).getByTestId("port-forward-session-stop").click();
+  await expect(rows).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __pfStopped: string[] }).__pfStopped)).toEqual(["pf-sidecar-prod"]);
+
+  // Stop all drains the remaining session per row, and the badge follows.
+  await page.getByTestId("port-forwards-stop-all").click();
+  await expect(panel.getByTestId("port-forward-session-row")).toHaveCount(0);
+  await expect(page.getByTestId("port-forwards-count")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __pfStopped: string[] }).__pfStopped)).toEqual(["pf-sidecar-prod", "pf-sidecar-dev"]);
   expect(failures).toEqual([]);
 });
 

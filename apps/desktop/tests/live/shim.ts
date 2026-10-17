@@ -240,6 +240,7 @@ const api: DesktopApi = {
     followWorkloadLogs: () => () => {},
     portForwardStart: () => unsupported("portForwardStart"),
     portForwardStop: () => Promise.resolve(),
+    portForwardList: () => Promise.resolve([]),
     exec: () => unsupported("exec"),
     mutate: (request) => corePost("/v1/resources/mutate", {
       contextId: request.contextId,

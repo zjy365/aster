@@ -131,6 +131,7 @@ pub fn run() {
             commands::pods_exec,
             commands::pods_portforward_start,
             commands::pods_portforward_stop,
+            commands::pods_portforward_list,
             commands::resources_mutate,
             commands::resources_watch_start,
             commands::resources_watch_stop,

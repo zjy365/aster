@@ -691,6 +691,11 @@ export default function App() {
             contexts.setSettingsFrom("workbench");
             contexts.setView("settings");
           }}
+          coreReady={core.state === "ready"}
+          portForwardContextLabel={(id) => {
+            const context = contexts.contexts.find((item) => item.id === id);
+            return context ? contextDisplayName(context, settings.contextAliases) : id;
+          }}
           canGoBack={helmActive ? Boolean(helm.selected) : Boolean(detail.selected)}
           onBack={helmActive ? helm.clear : detail.clear}
         />
