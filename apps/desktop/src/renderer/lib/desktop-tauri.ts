@@ -116,6 +116,10 @@ export function createTauriDesktopApi(): DesktopApi {
         await invoke("sources_rename", { request });
       },
     },
+    terminal: {
+      kubectlAvailable: () => invoke<boolean>("terminal_kubectl_available"),
+      openKubectl: (contextId) => invoke<void>("terminal_open_kubectl", { contextId }),
+    },
     settings: {
       get: () => invoke<AsterSettings>("settings_get"),
       setKubeconfigSources: (sources, includeStandardChain) =>

@@ -187,6 +187,17 @@ func (m *Manager) RenameEntry(path, kind, name, newName string) error {
 	return m.loader.RenameEntry(path, kind, name, newName)
 }
 
+// ExportContext narrows the merged kubeconfig to one self-contained context
+// (see Loader.ExportContext) for the shell's terminal handoff. The YAML
+// carries real credentials and stays shell-bound — it never crosses into the
+// renderer.
+func (m *Manager) ExportContext(contextID string) ([]byte, error) {
+	if contextID == "" {
+		return nil, fmt.Errorf("%w: %q", ErrContextNotFound, contextID)
+	}
+	return m.loader.ExportContext(contextID)
+}
+
 // ClientConfig exposes the context's client config to other domains (Helm).
 // It performs no connection and validates the context id like the lazy
 // clients do.

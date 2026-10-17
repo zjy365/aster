@@ -237,6 +237,18 @@ const MOCK_DESKTOP_API = `
       },
     },
     discovery: { list: async () => discovery },
+    terminal: {
+      kubectlAvailable: async () => {
+        return window.sessionStorage.getItem("aster.mockKubectl") !== "missing";
+      },
+      openKubectl: async (contextId) => {
+        window.__asterOpenedKubectl = window.__asterOpenedKubectl || [];
+        window.__asterOpenedKubectl.push(contextId);
+        if (window.sessionStorage.getItem("aster.mockKubectlFails") === "1") {
+          throw new Error("no supported terminal found");
+        }
+      },
+    },
     namespaces: {
       // Per-context lists: dev has two namespaces, prod only one, so the
       // context-switch regression test can tell a stale list apart.
@@ -653,6 +665,71 @@ test("prototype-named contexts support display, search and aliases", async ({ pa
   await page.keyboard.press("Meta+k");
   await page.keyboard.type("named cluster");
   await expect(page.getByTestId("command-item-context:__proto__")).toBeVisible();
+  expect(failures).toEqual([]);
+});
+
+test("open kubectl hands the selected context to the terminal", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  const dev = page.getByTestId("context-option-dev");
+  await expect(dev).toBeVisible();
+  await dev.click();
+
+  // kubectl is present in the default mock: the action is enabled for the
+  // selected context and hands exactly that context id to the shell.
+  const openKubectl = page.getByTestId("context-picker-kubectl");
+  await expect(openKubectl).toBeEnabled();
+  await openKubectl.click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterOpenedKubectl?: string[] }).__asterOpenedKubectl))
+    .toEqual(["dev"]);
+
+  // Selecting another row hands that context over instead.
+  await page.getByTestId("context-option-prod").click();
+  await openKubectl.click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterOpenedKubectl?: string[] }).__asterOpenedKubectl))
+    .toEqual(["dev", "prod"]);
+
+  await expectNoOverflow(page, "picker footer with the kubectl action");
+  expect(failures).toEqual([]);
+});
+
+test("open kubectl is disabled when kubectl is missing, and failures surface in the footer", async ({ page }) => {
+  const failures = collectFailures(page);
+  // Init scripts re-run on every load, so the marker doubles as the "stop
+  // forcing missing" switch the second phase flips before reloading.
+  await page.addInitScript(() => {
+    if (window.sessionStorage.getItem("aster.mockKubectl") !== "present") {
+      window.sessionStorage.setItem("aster.mockKubectl", "missing");
+    }
+  });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  const dev = page.getByTestId("context-option-dev");
+  await expect(dev).toBeVisible();
+  await dev.click();
+
+  const openKubectl = page.getByTestId("context-picker-kubectl");
+  await expect(openKubectl).toBeDisabled();
+  await openKubectl.click({ force: true }).catch(() => undefined);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __asterOpenedKubectl?: string[] }).__asterOpenedKubectl ?? []))
+    .toEqual([]);
+
+  // With kubectl present but the shell failing the handoff, the reason lands
+  // in the footer status, next to the alias errors.
+  await page.evaluate(() => {
+    window.sessionStorage.setItem("aster.mockKubectl", "present");
+    window.sessionStorage.setItem("aster.mockKubectlFails", "1");
+  });
+  await page.reload();
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await page.getByTestId("context-option-dev").click();
+  await expect(page.getByTestId("context-picker-kubectl")).toBeEnabled();
+  await page.getByTestId("context-picker-kubectl").click();
+  await expect(page.locator(".context-picker-selection [role=alert]")).toContainText("no supported terminal found");
   expect(failures).toEqual([]);
 });
 

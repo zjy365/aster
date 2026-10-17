@@ -555,6 +555,24 @@ export interface DesktopApi {
      */
     renameConflict(request: RenameConflictRequest): Promise<void>;
   };
+  terminal: {
+    /**
+     * Whether a usable local kubectl exists (probe: `kubectl version --client`
+     * with a short timeout). Disables the terminal handoff when false; aster
+     * never installs or downloads kubectl for the user.
+     */
+    kubectlAvailable(): Promise<boolean>;
+    /**
+     * Opens the user's terminal (iTerm2, WezTerm, Kitty, Ghostty, then
+     * Terminal.app) with a single-context kubeconfig staged by the shell in a
+     * 0600 temp file: KUBECONFIG points at it, a banner names the context,
+     * then an interactive shell takes over. Only the context id travels
+     * renderer → shell; the kubeconfig contents never cross into the
+     * renderer, nothing is logged, and the file is deleted when aster exits.
+     * Fire-and-forget: no terminal output flows back. macOS only.
+     */
+    openKubectl(contextId: string): Promise<void>;
+  };
   settings: {
     get(): Promise<AsterSettings>;
     setKubeconfigSources(sources: string[], includeStandardChain: boolean): Promise<AsterSettings>;

@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  SquareTerminal,
 } from "lucide-react";
 import { AsterMark } from "../components/AsterMark";
 import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -84,6 +85,17 @@ interface ContextPickerProps {
   onRenameConflict(request: RenameConflictRequest): Promise<void>;
   /** Opens an external URL (quickstart docs) in the system browser via the shell. */
   onOpenExternal(url: string): void;
+  /**
+   * Whether a local kubectl was found (null while the shell probe is still
+   * pending). Drives the "Open kubectl" availability below.
+   */
+  kubectlAvailable: boolean | null;
+  /**
+   * Hands the context to the shell, which stages a single-context kubeconfig
+   * (0600, deleted on exit) and opens the user's terminal with KUBECONFIG
+   * set. Rejects with a human-readable reason when the handoff fails.
+   */
+  onOpenKubectl(contextId: string): Promise<void>;
 }
 
 function ContextPicker({
@@ -108,6 +120,8 @@ function ContextPicker({
   onPasteKubeconfig,
   onRenameConflict,
   onOpenExternal,
+  kubectlAvailable,
+  onOpenKubectl,
 }: ContextPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [conflictDialog, setConflictDialog] = useState<ContextInfo | null>(null);
@@ -121,6 +135,10 @@ function ContextPicker({
   const [aliasEditing, setAliasEditing] = useState<string | null>(null);
   const [aliasDraft, setAliasDraft] = useState("");
   const [aliasError, setAliasError] = useState("");
+  // Terminal handoff failure surfaced next to the footer status (the launch
+  // itself happens in the user's terminal; only the handoff can fail here).
+  const [kubectlError, setKubectlError] = useState("");
+  const [kubectlBusy, setKubectlBusy] = useState(false);
   // Escape closes the editor; the blur that unmounts it must not also commit.
   const aliasCancelled = useRef(false);
   // The picker orders rows by display name, so a rename can reseat a row.
@@ -129,6 +147,10 @@ function ContextPicker({
   const firstSelectableId = contexts.find((context) => !context.error)?.id;
   const canConnect =
     core.state === "ready" && !loading && Boolean(selected) && !selected?.error;
+  // The handoff needs the core (it exports the kubeconfig) and a usable
+  // local kubectl; aster never installs one for the user.
+  const canOpenKubectl =
+    core.state === "ready" && Boolean(selected) && !selected?.error && kubectlAvailable === true;
   const coreLabel = {
     ready: "Core ready",
     starting: "Starting",
@@ -180,6 +202,19 @@ function ContextPicker({
       setAliasError("");
     } catch (cause) {
       setAliasError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  async function openKubectl() {
+    if (!selected || !canOpenKubectl) return;
+    setKubectlBusy(true);
+    setKubectlError("");
+    try {
+      await onOpenKubectl(selected.id);
+    } catch (cause) {
+      setKubectlError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setKubectlBusy(false);
     }
   }
 
@@ -697,18 +732,56 @@ function ContextPicker({
                   {aliasError}
                 </span>
               )}
+              {kubectlError && (
+                <span className="context-alias-error" role="alert">
+                  {kubectlError}
+                </span>
+              )}
             </span>
-            <Button
-              type="button"
-              className="connect-context"
-              size="lg"
-              disabled={!canConnect}
-              onClick={() => selected && connect(selected)}
-              data-testid="context-picker-connect"
-            >
-              Connect
-              <ArrowRight data-icon="inline-end" aria-hidden="true" />
-            </Button>
+            <div className="context-picker-footer-actions">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      className="open-kubectl"
+                      variant="outline"
+                      size="sm"
+                      disabled={!canOpenKubectl || kubectlBusy}
+                      onClick={() => void openKubectl()}
+                      data-testid="context-picker-kubectl"
+                    />
+                  }
+                >
+                  <SquareTerminal
+                    className={kubectlBusy ? "spin" : undefined}
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                  />
+                  Open kubectl
+                </TooltipTrigger>
+                <TooltipContent className="block max-w-sm leading-relaxed">
+                  {kubectlAvailable === null
+                    ? "Checking for kubectl…"
+                    : kubectlAvailable === false
+                      ? "kubectl is required. Install kubectl on your PATH, then reopen this screen — aster does not install it for you."
+                      : selected?.error
+                        ? "This context has a configuration error."
+                        : "Open a terminal with kubectl preconfigured for this cluster."}
+                </TooltipContent>
+              </Tooltip>
+              <Button
+                type="button"
+                className="connect-context"
+                size="lg"
+                disabled={!canConnect}
+                onClick={() => selected && connect(selected)}
+                data-testid="context-picker-connect"
+              >
+                Connect
+                <ArrowRight data-icon="inline-end" aria-hidden="true" />
+              </Button>
+            </div>
           </footer>
         </section>
       </main>

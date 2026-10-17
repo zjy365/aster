@@ -394,6 +394,32 @@ pub fn updater_state(state: State<'_, AppState>) -> crate::updater::UpdaterSnaps
     state.updater.current_state()
 }
 
+/// Whether a usable local kubectl exists (`kubectl version --client`, short
+/// timeout). The renderer uses this to disable the handoff with an
+/// explanation; nothing is ever installed for the user.
+#[tauri::command]
+pub async fn terminal_kubectl_available() -> bool {
+    crate::terminal::kubectl_available().await
+}
+
+/// Opens the user's terminal with a single-context kubeconfig staged in a
+/// 0600 temp file and KUBECONFIG exported. The renderer sends only the
+/// context id; the exported YAML travels core → shell and is never logged,
+/// returned, or sent back to the renderer.
+#[tauri::command]
+pub async fn terminal_open_kubectl(state: State<'_, AppState>, context_id: String) -> Result<(), String> {
+    let id = context_id.trim();
+    if id.is_empty() || id.len() > 512 {
+        return Err("invalid context id".to_string());
+    }
+    let response = state.core.post("/v1/contexts/export", json!({ "contextId": id })).await?;
+    let kubeconfig = response
+        .get("kubeconfig")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "core returned no kubeconfig".to_string())?;
+    state.terminal.open_kubectl(id, kubeconfig).await
+}
+
 #[tauri::command]
 pub async fn updater_check(state: State<'_, AppState>) -> Result<(), String> {
     state.updater.check().await;

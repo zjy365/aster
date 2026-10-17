@@ -126,6 +126,12 @@ const api: DesktopApi = {
     sourcesReport: () => coreGet("/v1/sources"),
     renameConflict: async (request) => { await corePost("/v1/sources/rename", request); },
   },
+  terminal: {
+    // The live web harness has no shell, so there is no kubectl to find and
+    // no terminal to open; the picker simply shows the action as unavailable.
+    kubectlAvailable: () => Promise.resolve(false),
+    openKubectl: () => unsupported("terminal.openKubectl"),
+  },
   settings: {
     // Live tests target the core pipeline; a pre-welcomed stamp keeps the
     // first-run card out of their way. Aliases live in a plain map — the

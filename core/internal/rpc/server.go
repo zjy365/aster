@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ type contextService interface {
 	Health(ctx context.Context, ids []string) []session.ContextHealth
 	SourceReports() session.SourcesReport
 	RenameEntry(path, kind, name, newName string) error
+	ExportContext(contextID string) ([]byte, error)
 }
 
 type Server struct {
@@ -40,6 +42,7 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("GET /v1/contexts", server.listContexts)
 	mux.HandleFunc("POST /v1/contexts/health", server.contextsHealth)
+	mux.HandleFunc("POST /v1/contexts/export", server.exportContext)
 	mux.HandleFunc("GET /v1/sources", server.listSources)
 	mux.HandleFunc("POST /v1/sources/rename", server.renameSource)
 	mux.HandleFunc("GET /v1/namespaces", server.listNamespaces)
@@ -141,6 +144,34 @@ func (s *Server) renameSource(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"renamed": true})
+}
+
+// contextExportRequest asks the core to narrow the merged kubeconfig to the
+// one named context. The response is consumed by the desktop shell only: the
+// YAML carries real credentials and is staged into a 0600 temp file behind
+// KUBECONFIG for the terminal handoff. It never crosses into the renderer.
+type contextExportRequest struct {
+	ContextID string `json:"contextId"`
+}
+
+func (s *Server) exportContext(writer http.ResponseWriter, request *http.Request) {
+	var value contextExportRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateContextID(value.ContextID)) {
+		return
+	}
+	data, err := s.contexts.ExportContext(value.ContextID)
+	if err != nil {
+		if errors.Is(err, session.ErrContextNotFound) {
+			writeError(writer, http.StatusNotFound, "not_found", err)
+			return
+		}
+		writeError(writer, http.StatusInternalServerError, "kubeconfig_error", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"kubeconfig": string(data)})
 }
 
 func (s *Server) listNamespaces(writer http.ResponseWriter, request *http.Request) {

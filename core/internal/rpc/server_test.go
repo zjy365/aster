@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,6 +45,23 @@ func (fakeContexts) SourceReports() session.SourcesReport {
 
 func (fakeContexts) RenameEntry(_, _, _, _ string) error {
 	return nil
+}
+
+func (fakeContexts) ExportContext(contextID string) ([]byte, error) {
+	return nil, fmt.Errorf("%w: %q", session.ErrContextNotFound, contextID)
+}
+
+// exportContexts fakes the export endpoint's backend with a fixed document.
+type exportContexts struct {
+	fakeContexts
+	document string
+}
+
+func (e exportContexts) ExportContext(contextID string) ([]byte, error) {
+	if contextID != "dev" {
+		return nil, fmt.Errorf("%w: %q", session.ErrContextNotFound, contextID)
+	}
+	return []byte(e.document), nil
 }
 
 type rpcClientProvider struct {
@@ -322,6 +340,50 @@ func TestServerContextsHealth(t *testing.T) {
 
 	for _, payload := range []string{`{}`, `{"contextIds":[]}`, `{"contextIds":[""]}`} {
 		invalid := httptest.NewRequest(http.MethodPost, "/v1/contexts/health", bytes.NewBufferString(payload))
+		invalid.Header.Set("Authorization", "Bearer token")
+		response = httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, invalid)
+		if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
+			t.Fatalf("payload %s: status=%d body=%s", payload, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestServerExportsSingleContextKubeconfig(t *testing.T) {
+	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
+	server, err := NewServer("token", exportContexts{document: "apiVersion: v1\nkind: Config\ncurrent-context: dev\n"}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/contexts/export", bytes.NewBufferString(`{"contextId":"dev"}`))
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Kubeconfig string `json:"kubeconfig"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body.Kubeconfig, "current-context: dev") {
+		t.Fatalf("kubeconfig = %q", body.Kubeconfig)
+	}
+
+	// Unknown context: 404, not a 500 — the shell surfaces it as a stale id.
+	missing := httptest.NewRequest(http.MethodPost, "/v1/contexts/export", bytes.NewBufferString(`{"contextId":"gone"}`))
+	missing.Header.Set("Authorization", "Bearer token")
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, missing)
+	if response.Code != http.StatusNotFound || !contains(response.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	for _, payload := range []string{`{}`, `{"contextId":""}`} {
+		invalid := httptest.NewRequest(http.MethodPost, "/v1/contexts/export", bytes.NewBufferString(payload))
 		invalid.Header.Set("Authorization", "Bearer token")
 		response = httptest.NewRecorder()
 		server.Handler().ServeHTTP(response, invalid)
