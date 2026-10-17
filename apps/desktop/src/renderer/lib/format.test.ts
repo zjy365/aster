@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCpuUsage, formatMemoryUsage, formatReady } from "./format";
+import { formatCpuUsage, formatMemoryUsage, formatReady, usagePercent } from "./format";
 
 describe("formatCpuUsage", () => {
   it("keeps millicores compact", () => {
@@ -64,5 +64,18 @@ describe("formatReady", () => {
     expect(formatReady({ ready: 2, desired: 3 } as never)).toBe("2/3");
     expect(formatReady({ ready: 1 } as never)).toBe("1");
     expect(formatReady({} as never)).toBe("-");
+  });
+});
+
+describe("usagePercent", () => {
+  it("renders usage relative to capacity", () => {
+    expect(usagePercent(620, 4000)).toBeCloseTo(15.5);
+    expect(usagePercent(1024, 2048)).toBe(50);
+  });
+
+  it("is undefined without parsable, positive capacity", () => {
+    expect(usagePercent(100, undefined)).toBeUndefined();
+    expect(usagePercent(undefined, 100)).toBeUndefined();
+    expect(usagePercent(100, 0)).toBeUndefined();
   });
 });

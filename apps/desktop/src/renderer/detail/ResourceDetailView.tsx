@@ -32,6 +32,7 @@ import {
 } from "../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { usePodMetrics } from "../hooks/usePodMetrics";
+import { useNodeMetrics } from "../hooks/useNodeMetrics";
 import { useResourceList } from "../hooks/useResourceList";
 import { findEnabledResourceKind } from "../lib/resource-catalog";
 import { newestEventsFirst } from "../lib/resource-events";
@@ -181,6 +182,14 @@ export function ResourceDetailView({
   });
   // Live CPU/memory for a single Pod; the hook idles (no polls) for other kinds.
   const isPod = row?.kind === "Pod";
+  const metrics = usePodMetrics(
+    contextId,
+    isPod ? row?.namespace ?? "" : "",
+    isPod ? row?.name ?? "" : "",
+  );
+  // Live CPU/memory for a single Node, same lazy semantics as the pod hook.
+  const isNode = row?.kind === "Node";
+  const nodeMetrics = useNodeMetrics(contextId, isNode ? row?.name ?? "" : "");
   // The Ports tab serves every kind whose forward the core can resolve; it
   // stays visible even without declared ports (manual input covers those).
   const canForward = Boolean(row && isPortForwardKind(row.kind));
@@ -189,11 +198,6 @@ export function ResourceDetailView({
   const forwardPorts = useMemo(
     () => (detail && row && isPortForwardKind(row.kind) ? extractForwardPorts(row.kind, detail.yaml) : []),
     [detail, row],
-  );
-  const metrics = usePodMetrics(
-    contextId,
-    isPod ? row?.namespace ?? "" : "",
-    isPod ? row?.name ?? "" : "",
   );
   // The rollout's child pod events (Pulling / Created / Started / Killing),
   // joined to this workload's own pods; one polled list request, never a
@@ -335,6 +339,7 @@ export function ResourceDetailView({
               related={related}
               pods={podsPreview}
               metrics={isPod ? metrics : undefined}
+              nodeMetrics={isNode ? nodeMetrics : undefined}
               onOpenEvents={() => setTab("events")}
               onOpenRelated={() => setTab("related")}
               onOpenPods={workload ? () => setTab("pods") : undefined}

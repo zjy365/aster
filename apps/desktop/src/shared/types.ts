@@ -166,6 +166,10 @@ export interface ResourceRow {
   /** For Event rows: the name of the object the event is about. */
   involvedObject?: string;
   related?: string[];
+  /** For Node rows: allocatable capacity as raw quantities ("4", "16Gi"),
+   * read by the usage columns to show pressure relative to capacity. */
+  allocatableCpu?: string;
+  allocatableMemory?: string;
 }
 
 export interface ResourceListRequest {
@@ -274,6 +278,16 @@ export interface PodMetric {
   name: string;
   namespace?: string;
   containers: ContainerMetric[];
+}
+
+/** One metrics.k8s.io NodeMetrics item: raw usage quantities plus the
+ * aggregation window and sample timestamp. */
+export interface NodeMetric {
+  name: string;
+  cpu: string;
+  memory: string;
+  window?: string;
+  timestamp?: string;
 }
 
 export interface PodPortForward {
@@ -586,6 +600,7 @@ export interface DesktopApi {
   };
   metrics: {
     pods(contextId: string, namespace?: string): Promise<PodMetric[]>;
+    nodes(contextId: string): Promise<NodeMetric[]>;
   };
   overview: {
     get(contextId: string): Promise<Overview>;

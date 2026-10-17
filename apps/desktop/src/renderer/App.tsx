@@ -190,6 +190,43 @@ export default function App() {
       clearInterval(timer);
     };
   }, [podPaneActive, contextId, namespaceScope, kind.id]);
+
+  // Live CPU/memory readouts for the Node table. Nodes are cluster-scoped, so
+  // one snapshot serves the whole table; like the Pod pane it only polls while
+  // the Node list is the active surface, and a missing Metrics Server degrades
+  // to the same table-level notice.
+  const [nodeUsage, setNodeUsage] = useState<ReadonlyMap<string, { cpu?: string; memory?: string }>>(new Map());
+  const [nodeUsageError, setNodeUsageError] = useState("");
+  const nodePaneActive = kind.id === "nodes" && !overviewActive && !helmActive;
+  useEffect(() => {
+    if (!nodePaneActive || !contextId) {
+      setNodeUsage(new Map());
+      setNodeUsageError("");
+      return;
+    }
+    let active = true;
+    const fetchMetrics = async () => {
+      try {
+        const metrics = await desktop.metrics.nodes(contextId);
+        if (!active) return;
+        const usage = new Map<string, { cpu?: string; memory?: string }>();
+        for (const node of metrics) {
+          usage.set(node.name, { cpu: node.cpu, memory: node.memory });
+        }
+        setNodeUsage(usage);
+        setNodeUsageError("");
+      } catch (cause) {
+        // Keep the last snapshot; the notice explains the gap.
+        if (active) setNodeUsageError(messageOf(cause));
+      }
+    };
+    void fetchMetrics();
+    const timer = setInterval(() => void fetchMetrics(), SLOW_POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [nodePaneActive, contextId, kind.id]);
   const helmToolGroups: SidebarToolGroup[] = useMemo(() => [{
     label: "Helm",
     items: [{ id: "helm", label: "Releases", icon: Ship }],
@@ -806,9 +843,12 @@ export default function App() {
               loadingMore={resources.loadingMore}
               onLoadMore={() => void resources.loadMore()}
               loading={resources.loading}
-              error={error || (kind.id === "pods" && podUsageError ? `Metrics unavailable: ${podUsageError}` : "")}
+              error={error
+                || (kind.id === "pods" && podUsageError ? `Metrics unavailable: ${podUsageError}` : "")
+                || (kind.id === "nodes" && nodeUsageError ? `Metrics unavailable: ${nodeUsageError}` : "")}
               onSelect={detail.select}
               podMetrics={kind.id === "pods" ? podUsage : undefined}
+              nodeMetrics={kind.id === "nodes" ? nodeUsage : undefined}
             />
           </section>
 

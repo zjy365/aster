@@ -120,7 +120,11 @@ export function PodUsageChart({ metrics }: { metrics: PodMetricsState }) {
   );
 }
 
-function UsageArea({
+/**
+ * One titled area chart (a CPU or memory series). Shared with the Node
+ * usage chart — the rendering is identical for any usage sample series.
+ */
+export function UsageArea({
   title,
   value,
   unit,

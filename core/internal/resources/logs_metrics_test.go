@@ -147,3 +147,83 @@ func TestPodMetricsFollowsPagination(t *testing.T) {
 		t.Fatalf("expected both pages collected, got %#v", response.Pods)
 	}
 }
+
+func TestNodeMetrics(t *testing.T) {
+	nodeMetric := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1",
+		"kind":       "NodeMetrics",
+		"metadata":   map[string]any{"name": "worker-1"},
+		"timestamp":  "2026-10-17T00:00:00Z",
+		"window":     "30s",
+		"usage":      map[string]any{"cpu": "62110470n", "memory": "8388608Ki"},
+	}}
+	gvr := schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: "NodeMetricsList"})
+	client.PrependReactor("list", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
+		list := &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "metrics.k8s.io/v1beta1", "kind": "NodeMetricsList"}}
+		list.Items = []unstructured.Unstructured{*nodeMetric}
+		return true, list, nil
+	})
+	service := NewService(fakeProvider{client: client})
+
+	response, err := service.NodeMetrics(context.Background(), NodeMetricsRequest{ContextID: "context"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Nodes) != 1 {
+		t.Fatalf("nodes=%#v", response.Nodes)
+	}
+	node := response.Nodes[0]
+	if node.Name != "worker-1" || node.CPU != "62110470n" || node.Memory != "8388608Ki" || node.Window != "30s" || node.Timestamp != "2026-10-17T00:00:00Z" {
+		t.Fatalf("node=%#v", node)
+	}
+
+	if _, err := service.NodeMetrics(context.Background(), NodeMetricsRequest{}); err == nil {
+		t.Fatal("missing contextId was accepted")
+	}
+}
+
+func TestNodeMetricsFollowsPagination(t *testing.T) {
+	first := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1",
+		"kind":       "NodeMetrics",
+		"metadata":   map[string]any{"name": "worker-a"},
+		"usage":      map[string]any{"cpu": "100m", "memory": "1Gi"}},
+	}
+	second := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1",
+		"kind":       "NodeMetrics",
+		"metadata":   map[string]any{"name": "worker-b"},
+		"usage":      map[string]any{"cpu": "200m", "memory": "2Gi"}},
+	}
+	gvr := schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: "NodeMetricsList"})
+	// The fake dynamic client drops Continue from cluster-scoped list actions,
+	// so pages key off the call count instead of the token; the service must
+	// still issue the second request because page one returned a token.
+	calls := 0
+	client.PrependReactor("list", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
+		list := &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "metrics.k8s.io/v1beta1", "kind": "NodeMetricsList"}}
+		switch calls {
+		case 0:
+			list.Items = []unstructured.Unstructured{*first}
+			list.SetContinue("page-1")
+		case 1:
+			list.Items = []unstructured.Unstructured{*second}
+		}
+		calls++
+		return true, list, nil
+	})
+	service := NewService(fakeProvider{client: client})
+
+	response, err := service.NodeMetrics(context.Background(), NodeMetricsRequest{ContextID: "context"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected the continue token to drive a second page, calls=%d", calls)
+	}
+	if len(response.Nodes) != 2 || response.Nodes[0].Name != "worker-a" || response.Nodes[1].Name != "worker-b" {
+		t.Fatalf("expected both pages collected, got %#v", response.Nodes)
+	}
+}

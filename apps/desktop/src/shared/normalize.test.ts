@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  nodeMetricList,
   normalizeRow,
   releaseNotesText,
   resourceEventList,
@@ -34,6 +35,28 @@ describe("resourceEventList", () => {
     ])).toEqual([
       { name: "e1", namespace: "", reason: "Scheduled", message: "ok", type: "Normal", count: 2, lastTimestamp: "2026-01-01" },
     ]);
+  });
+});
+
+describe("nodeMetricList", () => {
+  it("maps raw core rows, keeping usage quantities and the sampling window", () => {
+    expect(nodeMetricList({
+      nodes: [
+        { name: "worker-1", cpu: "62110470n", memory: "8388608Ki", window: "30s", timestamp: "2026-10-17T00:00:00Z" },
+        { name: "worker-2", cpu: "", memory: "" },
+      ],
+    })).toEqual([
+      { name: "worker-1", cpu: "62110470n", memory: "8388608Ki", window: "30s", timestamp: "2026-10-17T00:00:00Z" },
+      { name: "worker-2", cpu: "", memory: "" },
+    ]);
+  });
+
+  it("degrades a non-array payload to an empty list", () => {
+    expect(nodeMetricList({})).toEqual([]);
+  });
+
+  it("rejects entries without a name", () => {
+    expect(() => nodeMetricList({ nodes: [{ cpu: "1m" }] })).toThrow();
   });
 });
 

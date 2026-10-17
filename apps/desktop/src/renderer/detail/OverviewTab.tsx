@@ -10,7 +10,9 @@ import { formatReady } from "../lib/format";
 import { formatAge, formatTimestamp } from "./resource-format";
 import type { WorkloadCondition, WorkloadDetails } from "./workload-detail";
 import type { PodMetricsState } from "../hooks/usePodMetrics";
+import type { NodeMetricsState } from "../hooks/useNodeMetrics";
 import { PodUsageChart } from "./PodUsageChart";
+import { NodeUsageChart } from "./NodeUsageChart";
 /** How many aside entries preview before deferring to the dedicated tab. */
 const EVENT_PREVIEW = 3;
 const RELATED_PREVIEW = 5;
@@ -37,6 +39,8 @@ export interface OverviewTabProps {
   pods?: PodsPreview;
   /** Live CPU/memory sampling; present for Pod details. */
   metrics?: PodMetricsState;
+  /** Live CPU/memory sampling; present for Node details. */
+  nodeMetrics?: NodeMetricsState;
   onOpenEvents(): void;
   onOpenRelated(): void;
   onOpenPods?(): void;
@@ -53,6 +57,7 @@ export function OverviewTab({
   related,
   pods,
   metrics,
+  nodeMetrics,
   onOpenEvents,
   onOpenRelated,
   onOpenPods,
@@ -91,6 +96,10 @@ export function OverviewTab({
         <div className="resource-overview-main">
           {metrics && (
             <PodUsageChart metrics={metrics} />
+          )}
+
+          {nodeMetrics && (
+            <NodeUsageChart metrics={nodeMetrics} />
           )}
 
           {details && details.conditions.length > 0 && (

@@ -3,7 +3,7 @@ import { AlertCircle, Boxes, Check, LoaderCircle, Minus, type LucideProps } from
 import { Checkbox } from "@base-ui/react/checkbox";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ResourceRow } from "../../shared/types";
-import { formatAge, formatCpuUsage, formatMemoryUsage, formatReady } from "../lib/format";
+import { cpuToMillicores, formatAge, formatCpuUsage, formatMemoryUsage, formatReady, memoryToBytes, usagePercent } from "../lib/format";
 
 type Icon = ComponentType<LucideProps>;
 
@@ -22,7 +22,7 @@ export function podUsageKey(namespace: string, name: string): string {
   return `${namespace}/${name}`;
 }
 
-export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics }: {
+export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics, nodeMetrics }: {
   rows: ResourceRow[];
   selected?: ResourceRow;
   checkedRows: ReadonlySet<string>;
@@ -36,6 +36,8 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   onSelect(row: ResourceRow): void;
   /** Live CPU/memory totals keyed by namespace/name; present only for the Pod kind. */
   podMetrics?: ReadonlyMap<string, { cpu?: string; memory?: string }>;
+  /** Live CPU/memory keyed by node name; present only for the Node kind. */
+  nodeMetrics?: ReadonlyMap<string, { cpu?: string; memory?: string }>;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   // A trailing "load more" row keeps server pagination reachable without a
@@ -59,6 +61,10 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   if (loading) return <TableState icon={LoaderCircle} title="Loading resources" detail="Querying the active Kubernetes API server." spinning />;
   if (error) return <TableState icon={AlertCircle} title="Could not load resources" detail={error} tone="error" />;
   if (!rows.length) return <TableState icon={Boxes} title="No resources found" detail="Try another namespace, resource type, or search." />;
+
+  // Pods and nodes add the same two live usage columns ahead of Ready; the
+  // shared column template lives on the pod-metrics-grid class.
+  const usageColumns = Boolean(podMetrics || nodeMetrics);
 
   const moveFocus = (index: number) => {
     const next = Math.max(0, Math.min(rows.length - 1, index));
@@ -107,7 +113,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
       aria-rowcount={rows.length + 1}
       onKeyDown={onGridKeyDown}
     >
-      <div className={`table-header resource-grid ${podMetrics ? "pod-metrics-grid" : ""}`} role="row" aria-rowindex={1}>
+      <div className={`table-header resource-grid ${usageColumns ? "pod-metrics-grid" : ""}`} role="row" aria-rowindex={1}>
         <span role="columnheader" className="checkbox-cell">
           <Checkbox.Root
             aria-label="Select all loaded resources"
@@ -125,7 +131,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
         <span role="columnheader">Name</span>
         <span role="columnheader">Namespace</span>
         <span role="columnheader">Status</span>
-        {podMetrics && (
+        {usageColumns && (
           <>
             <span role="columnheader">CPU</span>
             <span role="columnheader">Memory</span>
@@ -157,6 +163,15 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
             const active = selected?.uid === row.uid;
             const checked = checkedRows.has(rowKey(row));
             const usage = podMetrics?.get(podUsageKey(row.namespace, row.name));
+            // Node usage reads capacity off the row itself, so the cell shows
+            // pressure relative to allocatable, not just the absolute number.
+            const nodeUsage = nodeMetrics?.get(row.name);
+            const nodeCpu = nodeUsage?.cpu
+              ? nodeUsageCell(nodeUsage.cpu, row.allocatableCpu, formatCpuUsage, cpuToMillicores)
+              : undefined;
+            const nodeMemory = nodeUsage?.memory
+              ? nodeUsageCell(nodeUsage.memory, row.allocatableMemory, formatMemoryUsage, memoryToBytes)
+              : undefined;
             return (
               <div
                 role="row"
@@ -164,7 +179,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                 aria-selected={active}
                 data-row-index={virtualRow.index}
                 tabIndex={virtualRow.index === clampedFocus ? 0 : -1}
-                className={`table-row resource-grid ${podMetrics ? "pod-metrics-grid" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
+                className={`table-row resource-grid ${usageColumns ? "pod-metrics-grid" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
                 key={rowKey(row)}
                 onClick={() => {
                   setFocusIndex(virtualRow.index);
@@ -200,6 +215,16 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                     </span>
                   </>
                 )}
+                {nodeMetrics && (
+                  <>
+                    <span role="gridcell" className="tabular pod-usage-cell" title={nodeCpu?.title}>
+                      {nodeCpu?.text ?? "—"}
+                    </span>
+                    <span role="gridcell" className="tabular pod-usage-cell" title={nodeMemory?.title}>
+                      {nodeMemory?.text ?? "—"}
+                    </span>
+                  </>
+                )}
                 <span role="gridcell" className="tabular">{formatReady(row)}</span>
                 <span role="gridcell" className="tabular">{formatAge(row.createdAt)}</span>
               </div>
@@ -213,6 +238,27 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
 
 export function TableState({ icon: StateIcon, title, detail, tone, spinning }: { icon: Icon; title: string; detail: string; tone?: "error"; spinning?: boolean }) {
   return <div className={`table-state ${tone || ""}`}><StateIcon className={spinning ? "spin" : ""} size={22} /><strong>{title}</strong><p>{detail}</p></div>;
+}
+
+/** Formats one node usage cell: the humanized value plus its share of the
+ * node's allocatable capacity ("620m · 16%"), falling back to the bare value
+ * when capacity is missing or unparsable. */
+function nodeUsageCell(
+  used: string,
+  allocatable: string | undefined,
+  format: (value: string) => string,
+  toNumber: (value: string) => number | undefined,
+): { text: string; title: string } {
+  const formatted = format(used);
+  const percent = usagePercent(toNumber(used), allocatable === undefined ? undefined : toNumber(allocatable));
+  if (percent === undefined) {
+    return { text: formatted, title: formatted };
+  }
+  const share = Math.round(percent);
+  return {
+    text: `${formatted} · ${share}%`,
+    title: `${share}% of ${format(allocatable!)} allocatable`,
+  };
 }
 
 export function StatusDot({ status }: { status?: string }) {

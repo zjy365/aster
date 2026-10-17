@@ -13,6 +13,7 @@ import (
 	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
 	"github.com/zjy365/aster/core/internal/session"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -192,6 +193,86 @@ func TestServerServesOverviewAndValidatesContext(t *testing.T) {
 	}
 	if value.Events == nil {
 		t.Fatal("events must decode as an empty array")
+	}
+}
+
+func TestServerServesNodeMetrics(t *testing.T) {
+	nodeMetric := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1",
+		"kind":       "NodeMetrics",
+		"metadata":   map[string]any{"name": "worker-1"},
+		"timestamp":  "2026-10-17T00:00:00Z",
+		"window":     "30s",
+		"usage":      map[string]any{"cpu": "62110470n", "memory": "8388608Ki"},
+	}}
+	gvr := schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: "NodeMetricsList"})
+	client.PrependReactor("list", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
+		list := &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "metrics.k8s.io/v1beta1", "kind": "NodeMetricsList"}}
+		list.Items = []unstructured.Unstructured{*nodeMetric}
+		return true, list, nil
+	})
+	service := resources.NewService(rpcClientProvider{client: client})
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missing := performRequest(t, server, http.MethodGet, "/v1/metrics/nodes")
+	if missing.Code != http.StatusBadRequest || !contains(missing.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	response := performRequest(t, server, http.MethodGet, "/v1/metrics/nodes?contextId=dev")
+	if response.Code != http.StatusOK || !contains(response.Body.String(), `"name":"worker-1"`) || !contains(response.Body.String(), `"cpu":"62110470n"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var value struct {
+		Nodes []struct {
+			Name   string `json:"name"`
+			CPU    string `json:"cpu"`
+			Memory string `json:"memory"`
+			Window string `json:"window"`
+		} `json:"nodes"`
+	}
+	if err := json.NewDecoder(bytes.NewBuffer(response.Body.Bytes())).Decode(&value); err != nil {
+		t.Fatal(err)
+	}
+	if len(value.Nodes) != 1 || value.Nodes[0].Window != "30s" || value.Nodes[0].Memory != "8388608Ki" {
+		t.Fatalf("nodes = %#v", value.Nodes)
+	}
+}
+
+// A cluster without a Metrics Server must degrade to the same stable error
+// envelope the pod metrics surface shows, not a bare 500.
+func TestServerNodeMetricsReportsMissingMetricsServer(t *testing.T) {
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}: "NodeMetricsList",
+	})
+	client.PrependReactor("list", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "metrics.k8s.io", Resource: "nodes"}, "")
+	})
+	service := resources.NewService(rpcClientProvider{client: client})
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := performRequest(t, server, http.MethodGet, "/v1/metrics/nodes?contextId=dev")
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(bytes.NewBuffer(response.Body.Bytes())).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "not_found" || envelope.Error.Message == "" {
+		t.Fatalf("envelope = %#v", envelope)
 	}
 }
 
