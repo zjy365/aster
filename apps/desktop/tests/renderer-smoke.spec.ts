@@ -329,8 +329,13 @@ const MOCK_DESKTOP_API = `
     },
     resources: {
       list: async (request) => {
-        // Recorded so the multi-namespace fan-out tests can count requests.
-        (window.__resourceRequests = window.__resourceRequests || []).push({ kind: "list", namespace: request.namespace || "" });
+        // Recorded so the multi-namespace and multi-cluster fan-out tests can
+        // count requests and tell the clusters apart.
+        (window.__resourceRequests = window.__resourceRequests || []).push({ kind: "list", namespace: request.namespace || "", contextId: request.contextId });
+        // The aggregate degradation test marks whole contexts as down.
+        if ((window.__asterFailingContexts || []).includes(request.contextId)) {
+          throw new Error("simulated cluster outage: connection refused");
+        }
         return pageOf(request);
       },
       get: async (request) => {
@@ -2702,6 +2707,101 @@ test("multi-selection caps at 32 namespaces with a footer message", async ({ pag
   expect(new Set(namespaces).size).toBe(32);
   expect(namespaces).not.toContain("cap-32");
   await screenshot(page, "namespace-cap-32");
+  expect(failures).toEqual([]);
+});
+
+test("aggregate view compares clusters side by side with per-cluster degradation", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  // Multi-select mode: the subtitle switches to the aggregate explanation
+  // and cards join a selection instead of replacing the radio highlight.
+  await page.getByTestId("context-picker-multi").click();
+  await expect(page.getByTestId("context-picker-subtitle")).toContainText("two or more clusters");
+  await page.getByTestId("context-option-dev").click();
+  await expect(page.getByTestId("context-picker-connect")).toContainText("Connect");
+  await page.getByTestId("context-option-prod").click();
+  await expect(page.locator(".context-picker-selection")).toContainText("2 clusters selected · aggregate view");
+  const connect = page.getByTestId("context-picker-connect");
+  await expect(connect).toHaveAttribute("data-aggregate", "true");
+  await expect(connect).toContainText("Compare 2 clusters");
+  await screenshot(page, "picker-multi-select");
+  await connect.click();
+
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const requests = () => page.evaluate(() => (window as unknown as { __resourceRequests?: Array<{ kind: string; namespace: string; contextId: string }> }).__resourceRequests ?? []);
+  const listBy = async (contextId: string) => (await requests()).filter((request) => request.kind === "list" && request.contextId === contextId);
+
+  // One snapshot page per cluster for the shared default namespace — never a
+  // watch stream: the aggregate view is snapshot-only by design.
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+  expect((await listBy("dev")).map((request) => request.namespace)).toEqual(["default"]);
+  expect((await listBy("prod")).map((request) => request.namespace)).toEqual(["default"]);
+  expect((await requests()).filter((request) => request.kind === "watch")).toEqual([]);
+
+  // The heading and the per-cluster strip both say what kind of view this is.
+  await expect(page.locator(".pane-heading")).toContainText("2 clusters (aggregate · snapshot, refresh to update)");
+  const strip = page.getByTestId("aggregate-cluster-strip");
+  await expect(strip).toBeVisible();
+  await expect(strip.locator(".aggregate-cluster-chip", { hasText: "dev" })).toHaveAttribute("data-state", "ok");
+  await expect(strip.locator(".aggregate-cluster-chip", { hasText: "prod" })).toHaveAttribute("data-state", "ok");
+
+  // The Cluster column identifies each row's source; the merge keeps cluster
+  // order, so prod's rows follow the dev block below the fold.
+  await expect(grid.getByRole("columnheader", { name: "Cluster" })).toBeVisible();
+  await expect(grid.getByRole("row").nth(1).locator(".cluster-cell")).toHaveText("dev");
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 150 * 36; });
+  await expect(grid.getByRole("row").nth(1).locator(".cluster-cell")).toHaveText("prod");
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 0; });
+
+  // "Load more" continues every cluster's next page, not just the first's.
+  // The footer row is virtualized like any other, so scroll it into view.
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await grid.getByTestId("load-more").click();
+  await expect.poll(async () => (await listBy("dev")).length).toBe(2);
+  await expect.poll(async () => (await listBy("prod")).length).toBe(2);
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 0; });
+
+  // The namespace inventory unions the selected clusters: kube-system exists
+  // only in dev, but the aggregate picker still offers it.
+  await page.getByTestId("namespace-select").click();
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // A row drills into the ordinary single-cluster detail view; Escape returns
+  // to the aggregate table, exactly like the single-cluster flow.
+  await grid.getByRole("row").nth(1).click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+  await expect(detail).toContainText("deployments-0");
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+
+  // Degradation is per cluster: prod goes down, its chip offers a retry,
+  // and dev's rows stay on screen instead of the whole table erroring.
+  await page.evaluate(() => {
+    (window as unknown as { __asterFailingContexts?: string[] }).__asterFailingContexts = ["prod"];
+  });
+  await page.keyboard.press("F5");
+  const prodChip = strip.locator(".aggregate-cluster-chip", { hasText: "prod" });
+  await expect(prodChip).toHaveAttribute("data-state", "error");
+  await expect(prodChip).toContainText("simulated cluster outage");
+  await expect(strip.locator(".aggregate-cluster-chip", { hasText: "dev" })).toHaveAttribute("data-state", "ok");
+  await expect(grid.getByRole("row").nth(1).locator(".cluster-cell")).toHaveText("dev");
+
+  // The retry re-fetches only the failed cluster and recovers it in place.
+  await page.evaluate(() => {
+    (window as unknown as { __asterFailingContexts?: string[] }).__asterFailingContexts = [];
+  });
+  const before = (await listBy("prod")).length;
+  await prodChip.getByTestId("aggregate-retry-prod").click();
+  await expect(prodChip).toHaveAttribute("data-state", "ok");
+  expect((await listBy("prod")).length).toBeGreaterThan(before);
+
+  await expectNoOverflow(page, "aggregate view 1280x800");
+  await screenshot(page, "aggregate-two-clusters");
   expect(failures).toEqual([]);
 });
 

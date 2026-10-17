@@ -152,6 +152,14 @@ export interface ResourceRow {
   namespace: string;
   resourceVersion: string;
   createdAt: string;
+  /**
+   * Renderer-only decoration set on rows of a multi-cluster aggregate view:
+   * the kubeconfig context the row was listed from. Absent on every row the
+   * core returns; it never crosses back over the wire (mutations strip it by
+   * building a fresh request). Detail, diagnostics and mutation surfaces use
+   * it to route back to the row's own cluster.
+   */
+  sourceContextId?: string;
   deleting?: boolean;
   labels?: Record<string, string>;
   status?: string;

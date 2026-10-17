@@ -8,6 +8,7 @@ import {
   ClipboardPaste,
   Copy,
   ExternalLink,
+  Layers,
   LayoutGrid,
   List as ListIcon,
   LoaderCircle,
@@ -50,6 +51,7 @@ import {
   type ContextAliases,
   type ContextLayout,
 } from "../lib/context-picker";
+import { MAX_CLUSTER_SELECTION } from "../lib/multi-cluster";
 import { QUICKSTART_URL } from "../lib/links";
 import { PasteKubeconfigDialog } from "./PasteKubeconfigDialog";
 
@@ -60,6 +62,10 @@ interface ContextPickerProps {
   selectedId: string;
   query: string;
   layout: ContextLayout;
+  /** Multi-select ("compare clusters") mode: checkboxes replace the radio highlight. */
+  multi: boolean;
+  /** The multi-selection draft, in click order; empty when multi is off. */
+  selectedIds: string[];
   loading: boolean;
   error: string;
   /** Per-context reachability; a missing entry means unknown or still probing. */
@@ -71,9 +77,14 @@ interface ContextPickerProps {
   onSetAlias(contextId: string, alias: string | null): Promise<void>;
   onQueryChange(value: string): void;
   onLayoutChange(value: ContextLayout): void;
+  onMultiChange(value: boolean): void;
   onSelect(value: string): void;
+  /** Toggles one context in the multi-selection draft (multi mode only). */
+  onToggleSelect(contextId: string): void;
   onRefresh(): void;
   onConnect(contextId?: string): void;
+  /** Connects an aggregate view across the selected contexts (2 or more). */
+  onConnectContexts(contextIds: string[]): void;
   onOpenSettings(): void;
   /**
    * Imports pasted kubeconfig content and applies it immediately (the empty
@@ -93,6 +104,8 @@ function ContextPicker({
   selectedId,
   query,
   layout,
+  multi,
+  selectedIds,
   loading,
   error,
   health,
@@ -101,9 +114,12 @@ function ContextPicker({
   onSetAlias,
   onQueryChange,
   onLayoutChange,
+  onMultiChange,
   onSelect,
+  onToggleSelect,
   onRefresh,
   onConnect,
+  onConnectContexts,
   onOpenSettings,
   onPasteKubeconfig,
   onRenameConflict,
@@ -127,8 +143,17 @@ function ContextPicker({
   const orderedContexts = useMemo(() => sortContexts(contexts, aliases), [contexts, aliases]);
   const selected = contexts.find((context) => context.id === selectedId);
   const firstSelectableId = contexts.find((context) => !context.error)?.id;
+  // The multi draft only counts dialable contexts; errored cards cannot join
+  // an aggregate view (they are disabled in the list below).
+  const multiSelection = multi
+    ? selectedIds.filter((id) => contexts.some((context) => context.id === id && !context.error))
+    : [];
   const canConnect =
     core.state === "ready" && !loading && Boolean(selected) && !selected?.error;
+  const canConnectMulti = core.state === "ready" && !loading && multiSelection.length > 0;
+  // Roving tab stop: the radio highlight in single mode, the last toggled
+  // checkbox in multi mode (so arrowing starts where the user left off).
+  const focusId = multi ? multiSelection[multiSelection.length - 1] ?? "" : selectedId;
   const coreLabel = {
     ready: "Core ready",
     starting: "Starting",
@@ -140,6 +165,15 @@ function ContextPicker({
     if (core.state !== "ready" || loading || context.error) return;
     if (context.id !== selectedId) onSelect(context.id);
     onConnect(context.id);
+  }
+
+  /** Connect honors the mode: the multi draft as one aggregate view, else single. */
+  function connectSelection() {
+    if (multi) {
+      if (canConnectMulti) onConnectContexts(multiSelection);
+      return;
+    }
+    if (selected) connect(selected);
   }
 
   function openConflictDialog(context: ContextInfo) {
@@ -192,7 +226,7 @@ function ContextPicker({
     if (!options.length) return;
 
     const currentIndex = options.findIndex(
-      (option) => option.dataset.contextId === selectedId,
+      (option) => option.dataset.contextId === focusId,
     );
     const nextIndex =
       edgeOrOffset === "first"
@@ -207,9 +241,11 @@ function ContextPicker({
               ),
             );
     const next = options[nextIndex];
-    const nextId = next.dataset.contextId;
     next.focus();
-    if (nextId) onSelect(nextId);
+    // Arrow keys only move focus in multi mode — moving them would otherwise
+    // toggle membership on every step. Enter or Space does the toggling.
+    const nextId = next.dataset.contextId;
+    if (nextId && !multi) onSelect(nextId);
   }
 
   function handleOptionKeyDown(
@@ -219,9 +255,15 @@ function ContextPicker({
     if (event.nativeEvent.isComposing) return;
 
     switch (event.key) {
+      case " ":
+        if (!multi) break; // single mode: the native click (highlight) fires
+        event.preventDefault();
+        onToggleSelect(context.id);
+        break;
       case "Enter":
         event.preventDefault();
-        connect(context);
+        if (multi) onToggleSelect(context.id);
+        else connect(context);
         break;
       case "ArrowDown":
       case "ArrowRight":
@@ -249,9 +291,9 @@ function ContextPicker({
     if (event.key === "ArrowDown") {
       event.preventDefault();
       focusOption("first");
-    } else if (event.key === "Enter" && selected) {
+    } else if (event.key === "Enter") {
       event.preventDefault();
-      connect(selected);
+      connectSelection();
     }
   }
 
@@ -310,7 +352,11 @@ function ContextPicker({
               <strong>Aster</strong>
             </div>
             <h1 id="context-picker-heading">Choose a cluster</h1>
-            <p>Select a Kubernetes context to open its resource workbench.</p>
+            <p data-testid="context-picker-subtitle">
+              {multi
+                ? "Select two or more clusters to compare them side by side in one aggregate view."
+                : "Select a Kubernetes context to open its resource workbench."}
+            </p>
           </div>
 
           <div
@@ -331,6 +377,26 @@ function ContextPicker({
                 data-testid="context-picker-search"
               />
             </label>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    className="context-layout-button"
+                    variant={multi ? "secondary" : "ghost"}
+                    size="icon"
+                    aria-label="Compare clusters"
+                    aria-pressed={multi}
+                    onClick={() => onMultiChange(!multi)}
+                    data-testid="context-picker-multi"
+                  />
+                }
+              >
+                <Layers aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent>Compare clusters</TooltipContent>
+            </Tooltip>
 
             <div
               className="context-layout-toggle"
@@ -448,8 +514,10 @@ function ContextPicker({
               />
             ) : contexts.length ? (
               orderedContexts.map((context) => {
-                const isSelected = context.id === selectedId;
-                const isTabStop = isSelected || (!selected && context.id === firstSelectableId);
+                const isSelected = multi
+                  ? multiSelection.includes(context.id)
+                  : context.id === selectedId;
+                const isTabStop = isSelected || (!focusId && context.id === firstSelectableId);
                 const hasConflicts = Boolean(context.conflicts?.length);
                 const alias = contextAlias(context.id, aliases);
                 const healthEntry = health[context.id];
@@ -529,10 +597,9 @@ function ContextPicker({
                     data-context-option
                     data-context-id={context.id}
                     data-selected={isSelected || undefined}
-                    data-current={isSelected || undefined}
                     data-testid={`context-option-${context.id}`}
-                    onClick={() => onSelect(context.id)}
-                    onDoubleClick={() => connect(context)}
+                    onClick={() => (multi ? onToggleSelect(context.id) : onSelect(context.id))}
+                    onDoubleClick={() => (multi ? onToggleSelect(context.id) : connect(context))}
                     onKeyDown={(event) => handleOptionKeyDown(event, context)}
                   >
                     <span className="context-card-icon">
@@ -605,7 +672,7 @@ function ContextPicker({
                       </span>
                       {context.error && <small>{context.error}</small>}
                     </span>
-                    {isSelected && (
+                    {isSelected && !multi && (
                       <span className="current-context-badge">Current</span>
                     )}
                     {/* Cosmetic rename: stored in app settings, the kubeconfig
@@ -635,9 +702,17 @@ function ContextPicker({
                     >
                       <Pencil aria-hidden="true" />
                     </span>
-                    <span className="context-selected-indicator" aria-hidden="true">
-                      <CheckCircle2 />
-                    </span>
+                    {multi ? (
+                      // The aggregate-mode membership checkbox, always visible
+                      // so a joinable card reads as joinable at a glance.
+                      <span className="context-multi-check" data-checked={isSelected || undefined} aria-hidden="true">
+                        <Check />
+                      </span>
+                    ) : (
+                      <span className="context-selected-indicator" aria-hidden="true">
+                        <CheckCircle2 />
+                      </span>
+                    )}
                   </Button>
                 );
               })
@@ -685,7 +760,13 @@ function ContextPicker({
 
           <footer className="context-picker-footer">
             <span className="context-picker-selection" role="status" aria-live="polite">
-              {selected ? (
+              {multi ? (
+                <>
+                  <strong>{multiSelection.length}</strong>{" "}
+                  {multiSelection.length === 1 ? "cluster" : "clusters"} selected
+                  {multiSelection.length >= 2 ? " · aggregate view" : ` · pick 2–${MAX_CLUSTER_SELECTION} to compare`}
+                </>
+              ) : selected ? (
                 <>
                   <strong>{contextDisplayName(selected, aliases)}</strong> selected
                 </>
@@ -702,11 +783,12 @@ function ContextPicker({
               type="button"
               className="connect-context"
               size="lg"
-              disabled={!canConnect}
-              onClick={() => selected && connect(selected)}
+              disabled={multi ? !canConnectMulti : !canConnect}
+              onClick={connectSelection}
               data-testid="context-picker-connect"
+              data-aggregate={multi && multiSelection.length >= 2 || undefined}
             >
-              Connect
+              {multi && multiSelection.length >= 2 ? `Compare ${multiSelection.length} clusters` : "Connect"}
               <ArrowRight data-icon="inline-end" aria-hidden="true" />
             </Button>
           </footer>

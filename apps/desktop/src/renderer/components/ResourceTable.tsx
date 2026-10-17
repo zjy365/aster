@@ -22,7 +22,7 @@ export function podUsageKey(namespace: string, name: string): string {
   return `${namespace}/${name}`;
 }
 
-export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics }: {
+export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics, clusterLabel }: {
   rows: ResourceRow[];
   selected?: ResourceRow;
   checkedRows: ReadonlySet<string>;
@@ -36,6 +36,11 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   onSelect(row: ResourceRow): void;
   /** Live CPU/memory totals keyed by namespace/name; present only for the Pod kind. */
   podMetrics?: ReadonlyMap<string, { cpu?: string; memory?: string }>;
+  /**
+   * Present only in the multi-cluster aggregate view: maps a row to its
+   * source cluster's display name, rendering the Cluster column.
+   */
+  clusterLabel?: (row: ResourceRow) => string;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   // A trailing "load more" row keeps server pagination reachable without a
@@ -107,7 +112,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
       aria-rowcount={rows.length + 1}
       onKeyDown={onGridKeyDown}
     >
-      <div className={`table-header resource-grid ${podMetrics ? "pod-metrics-grid" : ""}`} role="row" aria-rowindex={1}>
+      <div className={`table-header resource-grid ${podMetrics ? "pod-metrics-grid" : ""} ${clusterLabel ? "cluster-grid" : ""}`} role="row" aria-rowindex={1}>
         <span role="columnheader" className="checkbox-cell">
           <Checkbox.Root
             aria-label="Select all loaded resources"
@@ -123,6 +128,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
           </Checkbox.Root>
         </span>
         <span role="columnheader">Name</span>
+        {clusterLabel && <span role="columnheader">Cluster</span>}
         <span role="columnheader">Namespace</span>
         <span role="columnheader">Status</span>
         {podMetrics && (
@@ -164,7 +170,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                 aria-selected={active}
                 data-row-index={virtualRow.index}
                 tabIndex={virtualRow.index === clampedFocus ? 0 : -1}
-                className={`table-row resource-grid ${podMetrics ? "pod-metrics-grid" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
+                className={`table-row resource-grid ${podMetrics ? "pod-metrics-grid" : ""} ${clusterLabel ? "cluster-grid" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
                 key={rowKey(row)}
                 onClick={() => {
                   setFocusIndex(virtualRow.index);
@@ -188,6 +194,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                   </Checkbox.Root>
                 </span>
                 <span role="gridcell" className="primary-cell"><StatusDot status={row.status} />{row.name}</span>
+                {clusterLabel && <span role="gridcell" className="cluster-cell">{clusterLabel(row)}</span>}
                 <span role="gridcell">{row.namespace || "Cluster-scoped"}</span>
                 <span role="gridcell">{row.status || "Unknown"}</span>
                 {podMetrics && (

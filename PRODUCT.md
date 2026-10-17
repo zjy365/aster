@@ -37,8 +37,9 @@ Aster combines a native desktop workbench with a narrow, loopback-only Go sideca
 - Safe Deployment, StatefulSet, DaemonSet, and ConfigMap mutations use server-side dry-run, semantic Diff, resource-version checks, and explicit Apply.
 - Bounded Pod Logs and one-shot Pod Terminal only; no persistent shell.
 - Local port forwarding for Pods, Services, and workloads: random loopback ports, backing-pod resolution, TCP only. Forwards end with the stop button or the context and nothing persists across restarts.
+- Multi-cluster comparison: the picker selects two or more contexts and the renderer fans out ordinary single-context list requests, merging pages client-side into one table with a Cluster column. Snapshot-only (no watch), per-cluster degradation with retry, and detail/diagnostics/mutations route back to each row's own context.
 - Never create ServiceAccounts, Roles, ClusterRoles, RoleBindings, or ClusterRoleBindings as a convenience feature.
-- This UI redesign does not add cluster aggregation, Metrics APIs, global informer caches, telemetry, user accounts, or remote services.
+- There is no server-side cluster aggregation layer — comparison is renderer-side fan-out only — and no Metrics APIs, global informer caches, telemetry, user accounts, or remote services.
 
 ## Brand Commitments
 

@@ -745,6 +745,35 @@ h2 {
   opacity: 1;
 }
 
+/* The aggregate-mode membership checkbox (multi-select picker): always
+   visible so a joinable card reads as joinable; checked fills the box. */
+.context-multi-check {
+  grid-column: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  justify-self: end;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: transparent;
+  background: var(--surface);
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.context-multi-check > svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+.context-card[data-selected="true"] .context-multi-check {
+  border-color: var(--focus);
+  color: var(--surface);
+  background: var(--focus);
+}
+
 /* The cosmetic-rename pencil. Always mounted for keyboard reachability,
    revealed on row hover/focus; clicking it swaps the row for an input. */
 .context-alias-edit {
@@ -1599,6 +1628,45 @@ h2 {
   font-size: 11px;
 }
 
+/* Aggregate view: one status chip per selected cluster between the heading
+   and the table, so a degraded cluster offers its own retry without
+   blocking the rows the healthy clusters already delivered. */
+.aggregate-cluster-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.aggregate-cluster-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 340px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.aggregate-cluster-chip[data-state="error"] {
+  border-color: color-mix(in srgb, var(--failed) 40%, transparent);
+  color: var(--failed);
+}
+
+.aggregate-cluster-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.aggregate-cluster-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .resource-summary {
   display: flex;
   align-items: center;
@@ -1623,6 +1691,19 @@ h2 {
   display: grid;
   grid-template-columns: 32px minmax(180px, 2fr) minmax(110px, 1.15fr) minmax(100px, 1fr) 70px 60px;
   align-items: center;
+}
+
+/* Aggregate view: a Cluster column after Name identifies each row's source. */
+.cluster-grid {
+  grid-template-columns: 32px minmax(170px, 2fr) minmax(96px, 0.9fr) minmax(100px, 1fr) minmax(90px, 1fr) 64px 56px;
+}
+
+.cluster-cell {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .table-header {
@@ -3857,6 +3938,10 @@ h2 {
 
   .resource-grid {
     grid-template-columns: 32px minmax(220px, 2fr) minmax(100px, 1fr) minmax(90px, 1fr) 62px 52px;
+  }
+
+  .cluster-grid {
+    grid-template-columns: 32px minmax(200px, 2fr) minmax(84px, 0.9fr) minmax(90px, 1fr) minmax(80px, 1fr) 56px 48px;
   }
 }
 

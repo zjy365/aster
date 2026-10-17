@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ResourceGetResponse, ResourceKind, ResourceRow, ResourceWatchBatch } from "../../shared/types";
 import { messageOf } from "../lib/format";
+import { decorateClusterRow } from "../lib/multi-cluster";
 import { desktop } from "../lib/desktop";
 
 export interface ResourceDetailOptions {
@@ -107,12 +108,16 @@ export function useResourceDetail({ contextId, kind, scopeKey, generation, items
 
   // Fetches the object and adopts the returned row. Shared by the follow effect
   // (on selection change) and refetch (on explicit refresh / applied write).
+  // Rows of an aggregate view carry their source cluster; the get routes back
+  // to that cluster, and a re-adopted row keeps its decoration so uid matching
+  // against the aggregate list still finds it.
   const fetchDetail = useCallback(async (row: ResourceRow) => {
-    if (!contextId) return undefined;
+    const rowContextId = row.sourceContextId || contextId;
+    if (!rowContextId) return undefined;
     const request = ++detailRequest.current;
     try {
       const response = await desktop.resources.get({
-        contextId,
+        contextId: rowContextId,
         resourceKind: kind,
         namespace: row.namespace,
         name: row.name,
@@ -138,11 +143,13 @@ export function useResourceDetail({ contextId, kind, scopeKey, generation, items
 
   // The live channel keys on the object's identity, never on the selected row
   // itself: a resourceVersion bump adopts the row without tearing the watch
-  // subscription down and restarting it.
+  // subscription down and restarting it. It dials the row's own cluster
+  // (sourceContextId on aggregate rows), which never changes for one object.
   const selectedIdentity = selected ? objectIdentity(selected) : "";
   useEffect(() => {
     const target = selectedRef.current;
-    if (!target || !contextId || !coreReady || !live) return;
+    const watchContextId = target?.sourceContextId || contextId;
+    if (!target || !watchContextId || !coreReady || !live) return;
     let active = true;
     const adopt = (rows: ResourceRow[]) => {
       const current = selectedRef.current;
@@ -156,7 +163,7 @@ export function useResourceDetail({ contextId, kind, scopeKey, generation, items
       void fetchDetail(next);
     };
     const stop = desktop.resources.watch({
-      contextId,
+      contextId: watchContextId,
       resourceKind: kind,
       namespace: target.namespace,
       fieldSelector: `metadata.name=${target.name}`,
@@ -203,7 +210,12 @@ export function useResourceDetail({ contextId, kind, scopeKey, generation, items
     // Fetch straight through: the follow effect's tag guard would skip the get
     // when the snapshot already matches, but an explicit refresh must re-read.
     const response = await fetchDetail(current);
-    if (response) setSelected(response.row);
+    // The core returns an undecorated row; an aggregate selection must keep
+    // its source cluster (and prefixed uid) or the list-follow effect would
+    // treat the fresh row as vanished and close the detail.
+    if (response) {
+      setSelected(current.sourceContextId ? decorateClusterRow(response.row, current.sourceContextId) : response.row);
+    }
     setRefreshing(false);
   }, [contextId, fetchDetail]);
 

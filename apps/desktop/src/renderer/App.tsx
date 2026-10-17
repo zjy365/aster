@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle, Ship } from "lucide-react";
-import type { AsterSettings, RelatedResource, ResourceKind, ResourceRow, SourcesReport } from "../shared/types";
+import { AlertCircle, LoaderCircle, Ship } from "lucide-react";
+import type { AsterSettings, ContextInfo, RelatedResource, ResourceKind, ResourceRow, SourcesReport } from "../shared/types";
 import { CommandPalette } from "./components/CommandPalette";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { WelcomeCard } from "./components/WelcomeCard";
@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useAggregateResourceList } from "./hooks/useAggregateResourceList";
 import { useContexts } from "./hooks/useContexts";
 import { useCoreStatus } from "./hooks/useCoreStatus";
 import { useDiagnostics } from "./hooks/useDiagnostics";
@@ -33,6 +34,7 @@ import { buildCommandItems, objectCommandItems, searchResultItems, type CommandA
 import { messageOf, pluralize } from "./lib/format";
 import { namespaceScopeKey, namespaceScopeSummary } from "./lib/namespace-scope";
 import { contextAlias, contextDisplayName } from "./lib/context-picker";
+import { clusterSelectionKey, toggleCluster } from "./lib/multi-cluster";
 import { SLOW_POLL_MS } from "./lib/poll-cadence";
 import { isRolloutWorkloadKind } from "./detail/workload-detail";
 import { customResourceGroups, DEFAULT_KIND, findKindInGroups, flattenResourceGroups, SIDEBAR_RESOURCE_GROUPS } from "./lib/resource-catalog";
@@ -79,7 +81,12 @@ export default function App() {
     void desktop.settings.markWelcomed().then(setSettings).catch(() => undefined);
   }, []);
   const contexts = useContexts(core, settings.contextAliases);
-  const { contextId } = contexts;
+  // The connected selection: one id is the unchanged single-cluster path
+  // (contextId === contextIds[0]); two or more is the aggregate view.
+  const { contextId, contextIds, aggregate } = contexts;
+  // Order-insensitive identity of the cluster selection, mirroring scopeKey:
+  // resets keyed on it treat [a, b] and [b, a] as the same view.
+  const clusterKey = useMemo(() => clusterSelectionKey(contextIds), [contextIds]);
   const [error, setError] = useState("");
   const pendingForwardStops = usePendingForwardStops();
   useEffect(() => {
@@ -87,7 +94,9 @@ export default function App() {
     else discardPortForwards();
   }, [contextId, core.state]);
   const [kind, setKind] = useState<ResourceKind>(DEFAULT_KIND);
-  const namespaces = useNamespaces(contextId, contexts.contexts, setError);
+  // The aggregate view fans its namespace inventory out across the selected
+  // clusters (union); the single path keeps its per-cluster cache untouched.
+  const namespaces = useNamespaces(contextId, contexts.contexts, setError, aggregate ? contextIds : undefined);
   const { namespaceScope } = namespaces;
   // Order-insensitive identity of the scope; reset effects and cache keys
   // compare this so [a, b] and [b, a] count as the same scope.
@@ -102,13 +111,26 @@ export default function App() {
   const createNamespace = primaryNamespace
     || contexts.contexts.find((item) => item.id === contextId)?.namespace
     || "";
-  const resources = useResourceList({
+  // Both list hooks stay mounted; exactly one is active. In single mode the
+  // aggregate hook stays idle (enabled: false) and the single-cluster path is
+  // byte-for-byte the previous behavior; in aggregate mode the single hook
+  // goes idle so it opens no requests and no watch stream of its own.
+  const singleResources = useResourceList({
     contextId,
     kind,
     namespaceScope,
     coreReady: core.state === "ready",
     setError,
+    enabled: !aggregate,
   });
+  const aggregateResources = useAggregateResourceList({
+    contextIds,
+    kind,
+    namespaceScope,
+    coreReady: core.state === "ready",
+    enabled: aggregate,
+  });
+  const resources = aggregate ? aggregateResources : singleResources;
   const detail = useResourceDetail({
     contextId,
     kind,
@@ -118,15 +140,21 @@ export default function App() {
     coreReady: core.state === "ready",
     // The single-object live channel is a rollout-workload feature (#39);
     // every other kind keeps the pre-existing selection-follows-list flow.
-    live: isRolloutWorkloadKind(kind.kind),
+    // Aggregate views are snapshot-only by design, so their detail reads are
+    // one-shot with manual refresh (the fetch still routes to the row's own
+    // cluster via sourceContextId inside the hook).
+    live: !aggregate && isRolloutWorkloadKind(kind.kind),
   });
+  // Every row-scoped surface below dials the selected row's own cluster in
+  // an aggregate view, and the plain context otherwise.
+  const selectedContextId = detail.selected?.sourceContextId || contextId;
   const diagnostics = useDiagnostics({
-    contextId,
+    contextId: selectedContextId,
     kind,
     selected: detail.selected,
   });
   const mutation = useMutation({
-    contextId,
+    contextId: selectedContextId,
     kind,
     namespace: primaryNamespace,
     selected: detail.selected,
@@ -148,10 +176,12 @@ export default function App() {
   // kind is the active pane and the list is namespace-scoped, so a browse
   // through other kinds never touches metrics.k8s.io. A multi-namespace scope
   // issues one ordinary per-namespace call on the same 15s cadence; a failed
-  // namespace degrades to "no usage for its rows".
+  // namespace degrades to "no usage for its rows". Aggregate views skip
+  // metrics entirely: usage keys are namespace/name and would trade rows
+  // across clusters.
   const [podUsage, setPodUsage] = useState<ReadonlyMap<string, { cpu?: string; memory?: string }>>(new Map());
   const [podUsageError, setPodUsageError] = useState("");
-  const podPaneActive = kind.id === "pods" && !overviewActive && !helmActive && namespaceScope.length > 0;
+  const podPaneActive = kind.id === "pods" && !aggregate && !overviewActive && !helmActive && namespaceScope.length > 0;
   useEffect(() => {
     if (!podPaneActive || !contextId) {
       setPodUsage(new Map());
@@ -243,7 +273,7 @@ export default function App() {
   const [checkedKeys, setCheckedKeys] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     setCheckedKeys(new Set());
-  }, [contextId, kind.id, scopeKey]);
+  }, [contextId, clusterKey, kind.id, scopeKey]);
   const checkedRows = useMemo(
     () => resources.visibleRows.filter((row) => checkedKeys.has(rowKey(row))),
     [resources.visibleRows, checkedKeys],
@@ -273,8 +303,9 @@ export default function App() {
       for (const row of checkedRows) {
         // No resourceVersion here: the list snapshot is stale by construction,
         // and the confirm dialog — not an RV precondition — is the gate.
+        // Aggregate rows delete on their own cluster.
         await desktop.resources.mutate({
-          contextId,
+          contextId: row.sourceContextId || contextId,
           resourceKind: kind,
           namespace: row.namespace || undefined,
           name: row.name,
@@ -379,20 +410,40 @@ export default function App() {
     if (!paletteOpen) setSearchResults([]);
   }, [paletteOpen]);
 
-  const connectContext = useCallback((targetId?: string) => {
-    const target = targetId ? contexts.contexts.find((item) => item.id === targetId) : contexts.chosenContext;
-    if (!target || target.error || core.state !== "ready") return;
+  // Entering the workbench with a selection of dialable contexts: one is the
+  // ordinary single-cluster connect, two or more the aggregate view. The
+  // first selected context is the primary — port forwards, discovery, the
+  // overview and the Helm pane keep dialing it while the resource table fans
+  // out across the whole selection.
+  const connectContexts = useCallback((ids: string[]) => {
+    const targets = ids
+      .map((id) => contexts.contexts.find((item) => item.id === id))
+      .filter((item): item is ContextInfo => Boolean(item && !item.error));
+    if (!targets.length || core.state !== "ready") return;
+    const primary = targets[0];
     setError("");
-    namespaces.setNamespaceScope(target.namespace ? [target.namespace] : []);
-    contexts.setContextChoice(target.id);
-    void setPortForwardContext(target.id).catch((cause) => setError(messageOf(cause)));
-    contexts.setContextId(target.id);
+    namespaces.setNamespaceScope(primary.namespace ? [primary.namespace] : []);
+    contexts.setContextChoice(primary.id);
+    void setPortForwardContext(primary.id).catch((cause) => setError(messageOf(cause)));
+    contexts.setContextIds(targets.map((item) => item.id));
     contexts.setView("workbench");
-    localStorage.setItem("aster.lastContext", target.id);
+    localStorage.setItem("aster.lastContext", primary.id);
     // A successful entry into a cluster is the moment the welcome card is
     // worth showing: the palette and list keys it teaches only exist here.
     if (settingsLoaded && !settings.welcomedAt) setWelcomeVisible(true);
   }, [contexts, core.state, namespaces, settingsLoaded, settings.welcomedAt]);
+
+  const connectContext = useCallback((targetId?: string) => {
+    const target = targetId ? contexts.contexts.find((item) => item.id === targetId) : contexts.chosenContext;
+    if (!target || target.error || core.state !== "ready") return;
+    connectContexts([target.id]);
+  }, [contexts, core.state, connectContexts]);
+
+  // The picker's multi-select draft: toggling membership in click order,
+  // capped like the namespace selection so the fan-out stays bounded.
+  const toggleContextChoice = useCallback((contextId: string) => {
+    contexts.setContextChoices((current) => toggleCluster(current, contextId).selection);
+  }, [contexts]);
 
   const showContextPicker = useCallback(() => {
     contexts.setContextChoice(contextId);
@@ -608,15 +659,20 @@ export default function App() {
         selectedId={contexts.contextChoice}
         query={contexts.contextQuery}
         layout={contexts.contextLayout}
+        multi={contexts.contextMulti}
+        selectedIds={contexts.contextChoices}
         loading={contexts.contextsLoading}
         error={contexts.contextsError}
         health={contexts.contextHealth}
         healthProbing={contexts.healthProbing}
         onQueryChange={contexts.setContextQuery}
         onLayoutChange={contexts.setContextLayout}
+        onMultiChange={contexts.setContextMulti}
         onSelect={contexts.setContextChoice}
+        onToggleSelect={toggleContextChoice}
         onRefresh={() => void contexts.loadContexts()}
         onConnect={connectContext}
+        onConnectContexts={connectContexts}
         onOpenSettings={() => {
           contexts.setSettingsFrom(contexts.view);
           contexts.setView("settings");
@@ -737,10 +793,12 @@ export default function App() {
             <div className="pane-heading">
               <div>
                 <h1>{pluralize(kind.kind)}</h1>
-                <p>{kind.category} · {contexts.activeContext?.name || "Kubernetes"}
-                  {resources.snapshotOnly ? (namespaceScope.length > 1
-                    ? ` · ${namespaceScope.length} namespaces (snapshot, refresh to update)`
-                    : " · All namespaces (snapshot, refresh to update)") : ""}
+                <p>
+                  {kind.category} · {aggregate
+                    ? `${contextIds.length} clusters (aggregate · snapshot, refresh to update)${namespaceScope.length > 1 ? ` · ${namespaceScope.length} namespaces` : ""}`
+                    : `${contexts.activeContext?.name || "Kubernetes"}${resources.snapshotOnly ? (namespaceScope.length > 1
+                      ? ` · ${namespaceScope.length} namespaces (snapshot, refresh to update)`
+                      : " · All namespaces (snapshot, refresh to update)") : ""}`}
                   {resources.revalidating ? " · Refreshing…" : ""}
                 </p>
               </div>
@@ -760,7 +818,7 @@ export default function App() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Delete {checkedRows.length} {pluralize(kind.kind)}?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              This permanently deletes the selected resources from {contexts.activeContext?.name || "the cluster"}. This action cannot be undone.
+                              This permanently deletes the selected resources from {aggregate ? `${contextIds.length} selected clusters` : contexts.activeContext?.name || "the cluster"}. This action cannot be undone.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
@@ -783,18 +841,52 @@ export default function App() {
                   </>
                 )}
                 <span>{resources.visibleRows.length} loaded</span>
-                {contexts.activeContext && <span className="cluster-name">{contexts.activeContext.cluster}</span>}
+                {aggregate
+                  ? <span className="cluster-name" data-testid="aggregate-cluster-count">{contextIds.length} clusters</span>
+                  : contexts.activeContext && <span className="cluster-name">{contexts.activeContext.cluster}</span>}
                 <Button
                   variant="default"
                   size="default"
                   data-testid="new-resource"
-                  disabled={!mutation.canCreate}
+                  disabled={!mutation.canCreate || aggregate}
+                  title={aggregate ? "Open one cluster to create resources" : undefined}
                   onClick={() => setCreateOpen(true)}
                 >
                   New
                 </Button>
               </div>
             </div>
+
+            {/* Aggregate per-cluster status strip: one chip per selected
+                cluster, so a failed or slow cluster degrades on its own — an
+                error badge with a retry — while the others' rows render. */}
+            {aggregate && aggregateResources.clusters.length > 0 && (
+              <div className="aggregate-cluster-strip" data-testid="aggregate-cluster-strip" role="status" aria-label="Cluster status">
+                {aggregateResources.clusters.map((cluster) => {
+                  const info = contexts.activeContexts.find((item) => item.id === cluster.contextId);
+                  const label = info ? contextDisplayName(info, settings.contextAliases) : cluster.contextId;
+                  return (
+                    <span key={cluster.contextId} className="aggregate-cluster-chip" data-state={cluster.status}>
+                      <span className="aggregate-cluster-name">{label}</span>
+                      {cluster.status === "loading" && <LoaderCircle className="spin" aria-hidden="true" size={12} />}
+                      {cluster.status === "error" && (
+                        <>
+                          <AlertCircle aria-hidden="true" size={12} />
+                          <span className="aggregate-cluster-message" title={cluster.message}>{cluster.message || "List failed"}</span>
+                          <button
+                            className="load-more"
+                            data-testid={`aggregate-retry-${cluster.contextId}`}
+                            onClick={() => aggregateResources.retryCluster(cluster.contextId)}
+                          >
+                            Retry
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
 
             <ResourceTable
               rows={resources.visibleRows}
@@ -808,15 +900,21 @@ export default function App() {
               loading={resources.loading}
               error={error || (kind.id === "pods" && podUsageError ? `Metrics unavailable: ${podUsageError}` : "")}
               onSelect={detail.select}
-              podMetrics={kind.id === "pods" ? podUsage : undefined}
+              podMetrics={kind.id === "pods" && !aggregate ? podUsage : undefined}
+              clusterLabel={aggregate
+                ? (row) => {
+                  const info = contexts.activeContexts.find((item) => item.id === row.sourceContextId);
+                  return info ? contextDisplayName(info, settings.contextAliases) : row.sourceContextId || "";
+                }
+                : undefined}
             />
           </section>
 
           {detail.selected && !overviewActive && !helmActive && (
             <Suspense fallback={<TableState icon={LoaderCircle} title="Opening resource" detail="Loading the resource workspace." spinning />}>
               <ResourceDetailView
-              contextId={contextId}
-              coreReady={core.state === "ready"}
+                contextId={selectedContextId}
+                coreReady={core.state === "ready"}
               row={detail.selected}
               detail={detail.detail}
               detailError={detail.detailError}
