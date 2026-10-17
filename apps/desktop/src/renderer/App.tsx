@@ -847,6 +847,8 @@ export default function App() {
               }}
               onCancelMutation={mutation.cancelMutation}
               onNavigateRelated={openResource}
+              onRecordJournal={mutation.recordJournal}
+              onNodeChanged={() => void detail.refetch()}
               onBack={detail.clear}
               />
             </Suspense>

@@ -16,6 +16,10 @@ import type {
   HelmUpgradeResponse,
   LogStreamBatch,
   NamespaceInfo,
+  NodeCordonRequest,
+  NodeCordonResponse,
+  NodeDrainEvent,
+  NodeDrainRequest,
   Overview,
   PodLogsRequest,
   ResourceGetRequest,
@@ -261,6 +265,14 @@ export function createTauriDesktopApi(): DesktopApi {
       exec: (request) => invoke("pods_exec", { request }),
       portForwardStart: (request) => invoke("pods_portforward_start", { request }),
       portForwardStop: (id) => invoke<void>("pods_portforward_stop", { request: { id } }),
+      nodeCordon: (request) => invoke("nodes_cordon", { request }),
+      drainNode: (request, listener) => {
+        const id = `node-drain-${++subscriptionSequence}`;
+        const channel = new Channel<NodeDrainEvent>();
+        channel.onmessage = listener;
+        void invoke("nodes_drain_start", { id, request, channel });
+        return () => void invoke("nodes_drain_stop", { id });
+      },
       mutate: (request) => invoke("resources_mutate", {
         request: {
           contextId: request.contextId,

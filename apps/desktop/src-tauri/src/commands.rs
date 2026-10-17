@@ -217,6 +217,21 @@ pub async fn pods_portforward_stop(state: State<'_, AppState>, request: Value) -
 }
 
 #[tauri::command]
+pub async fn nodes_cordon(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/nodes/cordon", request).await
+}
+
+#[tauri::command]
+pub fn nodes_drain_start(state: State<'_, AppState>, id: String, request: Value, channel: Channel<Value>) {
+    state.streams.start_drain(id, request, channel);
+}
+
+#[tauri::command]
+pub fn nodes_drain_stop(state: State<'_, AppState>, id: String) {
+    state.streams.stop_drain(&id);
+}
+
+#[tauri::command]
 pub fn settings_get(state: State<'_, AppState>) -> AsterSettings {
     state.settings.read()
 }

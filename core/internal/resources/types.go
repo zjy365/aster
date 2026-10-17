@@ -201,6 +201,75 @@ type PortForwardStopRequest struct {
 	ID string `json:"id"`
 }
 
+// NodeCordonRequest flips spec.unschedulable: true cordons (stops accepting
+// new pods), false uncordons.
+type NodeCordonRequest struct {
+	ContextID     string `json:"contextId"`
+	NodeName      string `json:"nodeName"`
+	Unschedulable bool   `json:"unschedulable"`
+}
+
+type NodeCordonResponse struct {
+	NodeName      string `json:"nodeName"`
+	Unschedulable bool   `json:"unschedulable"`
+	// Changed is false when the node already carried the requested state.
+	Changed bool `json:"changed"`
+}
+
+// NodeDrainOptions mirrors the kubectl drain flags that change which pods a
+// drain touches and how they are removed.
+type NodeDrainOptions struct {
+	// IgnoreDaemonsets skips DaemonSet-managed pods instead of aborting.
+	IgnoreDaemonsets bool `json:"ignoreDaemonsets,omitempty"`
+	// Force evicts pods that no controller (Deployment, ReplicaSet, StatefulSet,
+	// Job, DaemonSet) manages.
+	Force bool `json:"force,omitempty"`
+	// DeleteEmptyDirData proceeds past pods with emptyDir volumes instead of
+	// skipping them; their local data is lost with the pod.
+	DeleteEmptyDirData bool `json:"deleteEmptyDirData,omitempty"`
+	// DisableEviction uses pod DELETE requests instead of the eviction API,
+	// bypassing PodDisruptionBudgets server-side.
+	DisableEviction bool `json:"disableEviction,omitempty"`
+}
+
+type NodeDrainRequest struct {
+	ContextID string           `json:"contextId"`
+	NodeName  string           `json:"nodeName"`
+	Options   NodeDrainOptions `json:"options,omitempty"`
+}
+
+// NodeDrainEvent is one ndjson line of a drain stream: the leading cordon,
+// one event per pod step, and the trailing summary.
+type NodeDrainEvent struct {
+	// Type discriminates: "cordon" | "pod" | "summary".
+	Type string `json:"type"`
+	Node string `json:"node,omitempty"`
+	// Cordon events: the drain's automatic cordon (kubectl parity).
+	Unschedulable bool `json:"unschedulable,omitempty"`
+	// Changed reports whether the cordon patched the node.
+	Changed bool `json:"changed,omitempty"`
+	// Pod events.
+	Namespace string `json:"namespace,omitempty"`
+	Pod       string `json:"pod,omitempty"`
+	// Status is the pod step: evicting | evicted | deleting | deleted |
+	// failed | skipped.
+	Status string `json:"status,omitempty"`
+	// Reason explains a skip (mirror pod, DaemonSet-managed, emptyDir).
+	Reason string `json:"reason,omitempty"`
+	// Message carries the error detail for failed pods.
+	Message string `json:"message,omitempty"`
+	// Summary counts.
+	Total   int `json:"total,omitempty"`
+	Evicted int `json:"evicted,omitempty"`
+	Skipped int `json:"skipped,omitempty"`
+	Failed  int `json:"failed,omitempty"`
+	// Complete is true when the drain ran through every pod; false when a
+	// blocking pre-check or error stopped it early.
+	Complete bool `json:"complete,omitempty"`
+	// Error carries the summary-level failure reason on incomplete drains.
+	Error string `json:"error,omitempty"`
+}
+
 type DiscoveryResponse struct {
 	Resources []DiscoveredResource `json:"resources"`
 }

@@ -30,6 +30,8 @@ export interface MutationState {
   /** Applies the staged mutation; resolves true only when the write succeeded. */
   applyPendingMutation(): Promise<boolean>;
   cancelMutation(): void;
+  /** Appends an entry for writes that bypass the dry-run pipeline (node ops). */
+  recordJournal(entry: string): void;
 }
 
 /**
@@ -89,6 +91,13 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
     }
   }, [contextId, kind, namespace, selected]);
 
+  const appendJournal = useCallback((entry: string, context: string) => {
+    setJournalByContext((all) => ({
+      ...all,
+      [context]: [`${new Date().toLocaleTimeString()} ${entry}`.trim(), ...(all[context] || [])].slice(0, 20),
+    }));
+  }, []);
+
   const applyPendingMutation = useCallback(async () => {
     if (!pendingMutation) return false;
     setMutationBusy(true);
@@ -96,7 +105,7 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
     try {
       const applied = await desktop.resources.mutate({ ...pendingMutation, dryRun: false });
       const targetName = applied.name || pendingMutation.name;
-      setJournalByContext((all) => ({ ...all, [pendingMutation.contextId]: [`${new Date().toLocaleTimeString()} ${pendingMutation.operation} ${targetName}`.trim(), ...(all[pendingMutation.contextId] || [])].slice(0, 20) }));
+      appendJournal(`${pendingMutation.operation} ${targetName}`.trim(), pendingMutation.contextId);
       setMutationMessage(applied.changed ? "Applied" : "No change needed");
       setPendingMutation(undefined);
       setMutationPreview("");
@@ -107,13 +116,15 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
     } finally {
       setMutationBusy(false);
     }
-  }, [pendingMutation]);
+  }, [pendingMutation, appendJournal]);
 
   const cancelMutation = useCallback(() => {
     setPendingMutation(undefined);
     setMutationPreview("");
     setMutationMessage("Dry-run discarded");
   }, []);
+
+  const recordJournal = useCallback((entry: string) => appendJournal(entry, contextId), [appendJournal, contextId]);
 
   return {
     canMutate,
@@ -126,5 +137,6 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
     mutate,
     applyPendingMutation,
     cancelMutation,
+    recordJournal,
   };
 }

@@ -34,10 +34,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { usePodMetrics } from "../hooks/usePodMetrics";
 import { useResourceList } from "../hooks/useResourceList";
 import { findEnabledResourceKind } from "../lib/resource-catalog";
+import { desktop } from "../lib/desktop";
+import { messageOf } from "../lib/format";
 import { newestEventsFirst } from "../lib/resource-events";
 import { DetailHeader } from "./DetailHeader";
 import { LogViewer } from "./LogViewer";
 import { MutationDiffView } from "./MutationDiffView";
+import { NodeDrainDialog } from "./NodeDrainDialog";
+import { parseNodeUnschedulable } from "./node-detail";
 import { OverviewTab, type PodsPreview } from "./OverviewTab";
 import { PortForwardSection } from "./PortForwardSection";
 import { extractForwardPorts } from "./port-forward-ports";
@@ -55,6 +59,7 @@ type MutationDraft = Omit<
 
 type DetailTab = "overview" | "ports" | "pods" | "yaml" | "events" | "related" | "logs";
 type OperationDialog = "image" | null;
+type NodeOperation = "cordon" | "uncordon" | "drain" | null;
 
 /** Static catalog entry; module-level so the pods hook sees a stable reference. */
 const POD_KIND: ResourceKind = findEnabledResourceKind("pods") ?? {
@@ -86,6 +91,10 @@ export interface ResourceDetailViewProps {
   onApplyMutation(): Promise<void>;
   onCancelMutation(): void;
   onNavigateRelated(item: RelatedResource): void;
+  /** Records node operations in the context journal, like scale/delete. */
+  onRecordJournal(entry: string): void;
+  /** Node cordon/uncordon/drain changed cluster state; refetch the object. */
+  onNodeChanged(): void;
   onBack(): void;
 }
 
@@ -107,12 +116,18 @@ export function ResourceDetailView({
   onApplyMutation,
   onCancelMutation,
   onNavigateRelated,
+  onRecordJournal,
+  onNodeChanged,
   onBack,
 }: ResourceDetailViewProps) {
   const [tab, setTab] = useState<DetailTab>("overview");
   const [operationDialog, setOperationDialog] = useState<OperationDialog>(null);
   const [operationValue, setOperationValue] = useState("");
   const [podsError, setPodsError] = useState("");
+  // Node operations: which confirm/dialog is open plus its live feedback.
+  const [nodeOperation, setNodeOperation] = useState<NodeOperation>(null);
+  const [nodeOpBusy, setNodeOpBusy] = useState(false);
+  const [nodeOpMessage, setNodeOpMessage] = useState("");
   // Lifted from the YAML tab so the header Edit action can drive it.
   const [yamlEditing, setYamlEditing] = useState(false);
 
@@ -120,6 +135,8 @@ export function ResourceDetailView({
     setTab("overview");
     setOperationDialog(null);
     setYamlEditing(false);
+    setNodeOperation(null);
+    setNodeOpMessage("");
   }, [row?.uid]);
 
   // Object-scoped keyboard shortcuts (Linear-style single letters). They run
@@ -224,8 +241,11 @@ export function ResourceDetailView({
   }
 
   const currentRow = row;
+  // Node scheduling state from the live YAML picks the Cordon/Uncordon label.
+  const isNode = currentRow.kind === "Node";
+  const nodeUnschedulable = isNode ? parseNodeUnschedulable(detail?.yaml) : false;
   // Called after the early return above, so it must stay a plain call — not a hook.
-  const actions = resourceActionsFor(currentRow.kind);
+  const actions = resourceActionsFor(currentRow.kind, isNode ? { nodeUnschedulable } : undefined);
   const actionIds = new Set(actions.map((action) => action.id));
   const showLogs = currentRow.kind === "Pod" || isWorkloadLogKind(currentRow.kind);
   // At-a-glance rollout state (in progress / complete / stuck) from the live
@@ -277,7 +297,35 @@ export function ResourceDetailView({
       openYamlEditor();
       return;
     }
+    if (id === "cordon" || id === "uncordon" || id === "drain") {
+      setNodeOpMessage("");
+      setNodeOperation(id);
+      return;
+    }
     void onMutate({ operation: id });
+  }
+
+  async function applyCordon(unschedulable: boolean) {
+    if (!contextId) return;
+    setNodeOpBusy(true);
+    setNodeOpMessage(unschedulable ? "Cordoning…" : "Uncordoning…");
+    try {
+      const result = await desktop.resources.nodeCordon({
+        contextId,
+        nodeName: currentRow.name,
+        unschedulable,
+      });
+      setNodeOpMessage(result.changed
+        ? unschedulable ? "Node cordoned — new pods will not schedule here" : "Node uncordoned"
+        : unschedulable ? "Node was already cordoned" : "Node was already schedulable");
+      onRecordJournal(`${unschedulable ? "cordon" : "uncordon"} ${currentRow.name}`);
+      setNodeOperation(null);
+      onNodeChanged();
+    } catch (cause) {
+      setNodeOpMessage(messageOf(cause));
+    } finally {
+      setNodeOpBusy(false);
+    }
   }
 
   async function prepareOperation(event: FormEvent<HTMLFormElement>) {
@@ -297,8 +345,8 @@ export function ResourceDetailView({
         rollout={rollout}
         actions={actions}
         canMutate={canMutate}
-        mutationBusy={mutationBusy}
-        statusMessage={mutationMessage}
+        mutationBusy={mutationBusy || nodeOpBusy}
+        statusMessage={mutationMessage || nodeOpMessage}
         onAction={runAction}
       />
 
@@ -426,6 +474,51 @@ export function ResourceDetailView({
           if (!open) setOperationDialog(null);
         }}
       />
+
+      <AlertDialog
+        open={nodeOperation === "cordon" || nodeOperation === "uncordon"}
+        onOpenChange={(open) => {
+          if (!open && !nodeOpBusy) setNodeOperation(null);
+        }}
+      >
+        <AlertDialogContent data-testid="node-cordon-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {nodeUnschedulable ? `Uncordon ${currentRow.name}?` : `Cordon ${currentRow.name}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {nodeUnschedulable
+                ? "The node will accept newly scheduled pods again."
+                : "The node stops accepting new pods. Existing pods keep running until the node is drained or restarted."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={nodeOpBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={nodeOpBusy || !canMutate}
+              data-testid="node-cordon-confirm"
+              onClick={() => void applyCordon(!nodeUnschedulable)}
+            >
+              {nodeOpBusy && <LoaderCircle className="spin" data-icon="inline-start" />}
+              {nodeUnschedulable ? "Uncordon" : "Cordon"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {isNode && (
+        <NodeDrainDialog
+          contextId={contextId}
+          nodeName={currentRow.name}
+          open={nodeOperation === "drain"}
+          busy={nodeOpBusy}
+          onOpenChange={(open) => {
+            if (!open) setNodeOperation(null);
+          }}
+          onRecordJournal={onRecordJournal}
+          onDrainFinished={onNodeChanged}
+        />
+      )}
 
       <AlertDialog
         open={reviewOpen}
