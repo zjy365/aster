@@ -166,6 +166,20 @@ export interface ResourceRow {
   /** For Event rows: the name of the object the event is about. */
   involvedObject?: string;
   related?: string[];
+  /**
+   * Kind-specific summary fields the core projects but the fixed table does
+   * not show (Service/Ingress addresses, Node versions, RBAC summaries…).
+   * Read by the configurable table columns; absence is normal per kind.
+   */
+  type?: string;
+  reason?: string;
+  message?: string;
+  addresses?: string[];
+  ports?: string[];
+  rules?: string[];
+  roleRef?: string;
+  subjects?: string[];
+  version?: string;
 }
 
 export interface ResourceListRequest {

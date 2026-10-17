@@ -1,13 +1,66 @@
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ComponentType, type KeyboardEvent } from "react";
 import { AlertCircle, Boxes, Check, LoaderCircle, Minus, type LucideProps } from "lucide-react";
 import { Checkbox } from "@base-ui/react/checkbox";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ResourceRow } from "../../shared/types";
 import { formatAge, formatCpuUsage, formatMemoryUsage, formatReady } from "../lib/format";
+import type { TableColumn } from "../lib/table-columns";
 
 type Icon = ComponentType<LucideProps>;
 
 const ROW_HEIGHT = 36;
+
+/**
+ * Grid tracks of the pinned usage columns the Pod table gains while live
+ * metrics are loaded (mirrors the pod-metrics-grid template segments).
+ */
+const METRICS_WIDTHS = ["minmax(64px, 0.7fr)", "minmax(80px, 0.9fr)"];
+
+/** Where the pinned CPU/Memory columns slot into a custom column order. */
+function metricsInsertIndex(columns: readonly TableColumn[]): number {
+  // Today's fixed order is Name, Namespace, Status, CPU, Memory, Ready,
+  // Age — usage columns follow Status when it is visible, else sit where
+  // the namespace column would end.
+  const status = columns.findIndex((column) => column.id === "status");
+  if (status >= 0) return status + 1;
+  return Math.min(2, columns.length);
+}
+
+/** The minimum width (px) a track's floor contributes, for scroll sizing. */
+function trackMinWidth(track: string): number {
+  const min = /minmax\((\d+(?:\.\d+)?)px/.exec(track) ?? /^(\d+(?:\.\d+)?)px$/.exec(track);
+  return min ? Number(min[1]) : 0;
+}
+
+/**
+ * The dynamic grid of a customized table: checkbox track plus one track per
+ * visible column, with the pinned metrics tracks spliced in for the Pod
+ * kind. Also yields the summed track floors: header and rows take it as a
+ * min-width so the virtualized rows' boxes (not just their overflowing
+ * cells) extend the viewport's scrollable width — that is what makes many
+ * columns horizontally scrollable with the header in lockstep.
+ */
+function customGrid(columns: readonly TableColumn[], withMetrics: boolean): { template: string; minWidthPx: number } {
+  const tracks: string[] = [];
+  const insertAt = withMetrics ? metricsInsertIndex(columns) : columns.length;
+  columns.forEach((column, index) => {
+    if (index === insertAt) tracks.push(...METRICS_WIDTHS);
+    tracks.push(column.width);
+  });
+  if (withMetrics && insertAt >= columns.length) tracks.push(...METRICS_WIDTHS);
+  const all = ["32px", ...tracks];
+  return {
+    template: all.join(" "),
+    minWidthPx: all.reduce((total, track) => total + trackMinWidth(track), 0),
+  };
+}
+
+/** Cell class per column: the name keeps its status dot, counts align. */
+function customCellClass(column: TableColumn): string {
+  if (column.id === "name") return "primary-cell";
+  if (column.id === "ready" || column.id === "age") return "tabular cell-clip";
+  return "cell-clip";
+}
 
 export function rowKey(row: ResourceRow): string {
   return row.uid || `${row.namespace}/${row.name}`;
@@ -22,7 +75,7 @@ export function podUsageKey(namespace: string, name: string): string {
   return `${namespace}/${name}`;
 }
 
-export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics }: {
+export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics, columns }: {
   rows: ResourceRow[];
   selected?: ResourceRow;
   checkedRows: ReadonlySet<string>;
@@ -36,6 +89,12 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   onSelect(row: ResourceRow): void;
   /** Live CPU/memory totals keyed by namespace/name; present only for the Pod kind. */
   podMetrics?: ReadonlyMap<string, { cpu?: string; memory?: string }>;
+  /**
+   * Customized column set (visibility + order) from useResourceColumns.
+   * Absent — or empty — the fixed default columns render exactly as before;
+   * this prop is additive so the table stays usable unchanged.
+   */
+  columns?: readonly TableColumn[];
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   // A trailing "load more" row keeps server pagination reachable without a
@@ -44,6 +103,21 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   // Roving tabindex: one row owns tab stop; arrows move it, Enter opens.
   const [focusIndex, setFocusIndex] = useState(0);
   const pendingFocus = useRef<number | null>(null);
+  // Custom mode: one template drives header and every row (CSS variable on
+  // the frame), and the header tracks the viewport's horizontal scroll so
+  // many columns keep header and cells aligned.
+  const customColumns = columns && columns.length > 0 ? columns : null;
+  const header = useRef<HTMLDivElement>(null);
+  const grid = customColumns ? customGrid(customColumns, Boolean(podMetrics)) : null;
+  const gridTemplate = grid?.template ?? "";
+  const syncHeaderScroll = () => {
+    if (header.current && viewport.current) {
+      header.current.style.transform = `translateX(${-viewport.current.scrollLeft}px)`;
+    }
+  };
+  useEffect(() => {
+    if (header.current) header.current.style.transform = "translateX(0px)";
+  }, [gridTemplate]);
 
   const clampedFocus = rows.length ? Math.min(focusIndex, rows.length - 1) : 0;
   const allChecked = rows.length > 0 && rows.every((row) => checkedRows.has(rowKey(row)));
@@ -106,8 +180,14 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
       aria-label="Resources"
       aria-rowcount={rows.length + 1}
       onKeyDown={onGridKeyDown}
+      style={grid ? ({ "--table-columns": grid.template, "--table-min-width": `${grid.minWidthPx}px` } as CSSProperties) : undefined}
     >
-      <div className={`table-header resource-grid ${podMetrics ? "pod-metrics-grid" : ""}`} role="row" aria-rowindex={1}>
+      <div
+        ref={header}
+        className={`table-header resource-grid ${podMetrics && !customColumns ? "pod-metrics-grid" : ""} ${customColumns ? "table-grid-custom" : ""}`}
+        role="row"
+        aria-rowindex={1}
+      >
         <span role="columnheader" className="checkbox-cell">
           <Checkbox.Root
             aria-label="Select all loaded resources"
@@ -122,19 +202,43 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
             </Checkbox.Indicator>
           </Checkbox.Root>
         </span>
-        <span role="columnheader">Name</span>
-        <span role="columnheader">Namespace</span>
-        <span role="columnheader">Status</span>
-        {podMetrics && (
+        {customColumns ? (
           <>
-            <span role="columnheader">CPU</span>
-            <span role="columnheader">Memory</span>
+            {customColumns.map((column, index) => (
+              <Fragment key={column.id}>
+                {podMetrics && index === metricsInsertIndex(customColumns) ? (
+                  <>
+                    <span role="columnheader">CPU</span>
+                    <span role="columnheader">Memory</span>
+                  </>
+                ) : null}
+                <span role="columnheader" className="cell-clip">{column.label}</span>
+              </Fragment>
+            ))}
+            {podMetrics && metricsInsertIndex(customColumns) >= customColumns.length ? (
+              <>
+                <span role="columnheader">CPU</span>
+                <span role="columnheader">Memory</span>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <span role="columnheader">Name</span>
+            <span role="columnheader">Namespace</span>
+            <span role="columnheader">Status</span>
+            {podMetrics && (
+              <>
+                <span role="columnheader">CPU</span>
+                <span role="columnheader">Memory</span>
+              </>
+            )}
+            <span role="columnheader">Ready</span>
+            <span role="columnheader">Age</span>
           </>
         )}
-        <span role="columnheader">Ready</span>
-        <span role="columnheader">Age</span>
       </div>
-      <div ref={viewport} className="table-viewport">
+      <div ref={viewport} className="table-viewport" onScroll={customColumns ? syncHeaderScroll : undefined}>
         <div className="virtual-space" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             if (virtualRow.index >= rows.length) {
@@ -164,7 +268,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                 aria-selected={active}
                 data-row-index={virtualRow.index}
                 tabIndex={virtualRow.index === clampedFocus ? 0 : -1}
-                className={`table-row resource-grid ${podMetrics ? "pod-metrics-grid" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
+                className={`table-row resource-grid ${podMetrics && !customColumns ? "pod-metrics-grid" : ""} ${customColumns ? "table-grid-custom" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
                 key={rowKey(row)}
                 onClick={() => {
                   setFocusIndex(virtualRow.index);
@@ -187,21 +291,57 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                     </Checkbox.Indicator>
                   </Checkbox.Root>
                 </span>
-                <span role="gridcell" className="primary-cell"><StatusDot status={row.status} />{row.name}</span>
-                <span role="gridcell">{row.namespace || "Cluster-scoped"}</span>
-                <span role="gridcell">{row.status || "Unknown"}</span>
-                {podMetrics && (
+                {customColumns ? (
                   <>
-                    <span role="gridcell" className="tabular pod-usage-cell">
-                      {usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
-                    </span>
-                    <span role="gridcell" className="tabular pod-usage-cell">
-                      {usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
-                    </span>
+                    {customColumns.map((column, index) => (
+                      <Fragment key={column.id}>
+                        {podMetrics && index === metricsInsertIndex(customColumns) ? (
+                          <>
+                            <span role="gridcell" className="tabular pod-usage-cell">
+                              {usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
+                            </span>
+                            <span role="gridcell" className="tabular pod-usage-cell">
+                              {usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
+                            </span>
+                          </>
+                        ) : null}
+                        {column.id === "name" ? (
+                          <span role="gridcell" className="primary-cell"><StatusDot status={row.status} />{column.value(row)}</span>
+                        ) : (
+                          <span role="gridcell" className={customCellClass(column)}>{column.value(row)}</span>
+                        )}
+                      </Fragment>
+                    ))}
+                    {podMetrics && metricsInsertIndex(customColumns) >= customColumns.length ? (
+                      <>
+                        <span role="gridcell" className="tabular pod-usage-cell">
+                          {usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
+                        </span>
+                        <span role="gridcell" className="tabular pod-usage-cell">
+                          {usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
+                        </span>
+                      </>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <span role="gridcell" className="primary-cell"><StatusDot status={row.status} />{row.name}</span>
+                    <span role="gridcell">{row.namespace || "Cluster-scoped"}</span>
+                    <span role="gridcell">{row.status || "Unknown"}</span>
+                    {podMetrics && (
+                      <>
+                        <span role="gridcell" className="tabular pod-usage-cell">
+                          {usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
+                        </span>
+                        <span role="gridcell" className="tabular pod-usage-cell">
+                          {usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
+                        </span>
+                      </>
+                    )}
+                    <span role="gridcell" className="tabular">{formatReady(row)}</span>
+                    <span role="gridcell" className="tabular">{formatAge(row.createdAt)}</span>
                   </>
                 )}
-                <span role="gridcell" className="tabular">{formatReady(row)}</span>
-                <span role="gridcell" className="tabular">{formatAge(row.createdAt)}</span>
               </div>
             );
           })}

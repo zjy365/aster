@@ -5,6 +5,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { WelcomeCard } from "./components/WelcomeCard";
 import { ResourceTable, podUsageKey, rowKey, TableState } from "./components/ResourceTable";
+import { ColumnPicker } from "./components/ColumnPicker";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -26,6 +27,7 @@ import { discardPortForwards, retryPendingForwardStops, setPortForwardContext, u
 import { useNamespaces } from "./hooks/useNamespaces";
 import { useOverview } from "./hooks/useOverview";
 import { useResourceDetail } from "./hooks/useResourceDetail";
+import { useResourceColumns } from "./hooks/useResourceColumns";
 import { useResourceList } from "./hooks/useResourceList";
 import { useTheme } from "./hooks/useTheme";
 import { useUpdater } from "./hooks/useUpdater";
@@ -109,6 +111,10 @@ export default function App() {
     coreReady: core.state === "ready",
     setError,
   });
+  // Configurable table columns: derived from the loaded rows themselves,
+  // persisted per kind in localStorage — a renderer-side UI preference like
+  // the sidebar folds, never cluster data.
+  const tableColumns = useResourceColumns(kind, resources.visibleRows);
   const detail = useResourceDetail({
     contextId,
     kind,
@@ -784,6 +790,15 @@ export default function App() {
                 )}
                 <span>{resources.visibleRows.length} loaded</span>
                 {contexts.activeContext && <span className="cluster-name">{contexts.activeContext.cluster}</span>}
+                <ColumnPicker
+                  kindLabel={kind.kind}
+                  visible={tableColumns.visible}
+                  hidden={tableColumns.hidden}
+                  customized={tableColumns.customized}
+                  onToggle={tableColumns.toggleColumn}
+                  onMove={tableColumns.moveColumn}
+                  onReset={tableColumns.resetColumns}
+                />
                 <Button
                   variant="default"
                   size="default"
@@ -809,6 +824,7 @@ export default function App() {
               error={error || (kind.id === "pods" && podUsageError ? `Metrics unavailable: ${podUsageError}` : "")}
               onSelect={detail.select}
               podMetrics={kind.id === "pods" ? podUsage : undefined}
+              columns={tableColumns.visible}
             />
           </section>
 

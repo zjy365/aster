@@ -5026,6 +5026,166 @@ button.overview-card:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+/* Customizable columns: one dynamic template (set as --table-columns on the
+   frame) drives header and rows together. The summed track floors become a
+   min-width so the rows' boxes — not just their overflowing cells — extend
+   the viewport's scrollable width; the header mirrors it and is translated
+   by the viewport's scrollLeft. That keeps many columns horizontally
+   scrollable with header and cells in lockstep. */
+.table-grid-custom {
+  grid-template-columns: 32px var(--table-columns);
+}
+
+.table-header.table-grid-custom,
+.table-row.table-grid-custom {
+  min-width: var(--table-min-width);
+}
+
+.cell-clip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Column picker: per-kind popover from the resource pane heading. */
+.column-picker {
+  position: relative;
+}
+
+.column-picker-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  width: 280px;
+  max-height: 360px;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+.column-picker-heading {
+  margin: 6px 6px 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Discovered ids are raw field paths — sentence-case them, not shout. */
+.column-picker-heading.column-picker-discovered {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.column-picker-list {
+  margin: 0;
+  padding: 0 0 2px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.column-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.column-picker-toggle {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.column-picker-toggle:hover,
+.column-picker-toggle:focus-visible {
+  background: var(--surface-hover);
+}
+
+.column-picker-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.column-picker-check {
+  display: flex;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--primary-foreground);
+}
+
+.column-picker-toggle[aria-pressed="true"] .column-picker-check {
+  border-color: var(--focus);
+  background: var(--focus);
+}
+
+.column-picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-picker-move {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.column-picker-move button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.column-picker-move button:hover:not(:disabled),
+.column-picker-move button:focus-visible {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.column-picker-move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.column-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
 /* Ports use the same field and button scale as the rest of the detail view. */
 .port-forward-section {
   container-type: inline-size;
