@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
@@ -40,6 +41,13 @@ type PodContainersProvider interface {
 
 type ExecProvider interface {
 	PodExec(ctx context.Context, contextID, namespace, name, container string, command []string) (string, string, error)
+}
+
+// EphemeralContainerProvider appends an ephemeral debug container to a
+// running Pod through the pods/ephemeralcontainers subresource. Implemented
+// by the session manager's typed core clients.
+type EphemeralContainerProvider interface {
+	AddEphemeralContainer(ctx context.Context, contextID, namespace, podName, name, image string, command, args []string, targetContainer string, env []corev1.EnvVar) (*corev1.EphemeralContainer, error)
 }
 
 type Service struct {
@@ -212,6 +220,108 @@ func (s *Service) Exec(ctx context.Context, request ExecRequest) (ExecResponse, 
 		return ExecResponse{Stdout: stdout, Stderr: stderr}, fmt.Errorf("pod exec: %w", err)
 	}
 	return ExecResponse{Stdout: stdout, Stderr: stderr}, nil
+}
+
+// debug argv caps mirror the exec caps: an injected debug container runs a
+// bounded program, not an arbitrary shell script.
+const (
+	maxDebugArgv         = 32
+	maxDebugArgValue     = 4_096
+	maxDebugEnvVars      = 64
+	maxDebugEnvName      = 512
+	maxDebugContainerRef = 253
+)
+
+// DebugPod injects an ephemeral debug container into a running Pod. The write
+// goes through the pods/ephemeralcontainers subresource, so the workload spec
+// (and therefore the deployment the pod came from) is never modified — the
+// classic answer to distroless pods with no shell inside.
+func (s *Service) DebugPod(ctx context.Context, request PodDebugRequest) (PodDebugResponse, error) {
+	if strings.TrimSpace(request.ContextID) == "" || strings.TrimSpace(request.Namespace) == "" || strings.TrimSpace(request.PodName) == "" {
+		return PodDebugResponse{}, invalid("contextId, namespace and podName are required")
+	}
+	if err := validateDebugContainer(request.Container); err != nil {
+		return PodDebugResponse{}, err
+	}
+	provider, ok := s.clients.(EphemeralContainerProvider)
+	if !ok {
+		return PodDebugResponse{}, invalid("ephemeral container provider is unavailable")
+	}
+	container := request.Container
+	entry, err := provider.AddEphemeralContainer(ctx, request.ContextID, request.Namespace, request.PodName,
+		container.Name, container.Image, container.Command, container.Args, container.TargetContainerName, envVarsToCore(container.Env))
+	if err != nil {
+		return PodDebugResponse{}, err
+	}
+	return PodDebugResponse{Container: ephemeralEntry(entry)}, nil
+}
+
+func validateDebugContainer(container PodDebugContainer) error {
+	if strings.TrimSpace(container.Image) == "" {
+		return invalid("container image is required")
+	}
+	if strings.TrimSpace(container.Name) != "" && len(container.Name) > maxDebugContainerRef {
+		return invalid("container name is too long")
+	}
+	if strings.TrimSpace(container.TargetContainerName) != "" && len(container.TargetContainerName) > maxDebugContainerRef {
+		return invalid("target container name is too long")
+	}
+	for _, field := range []struct {
+		label string
+		value []string
+	}{
+		{"command", container.Command},
+		{"args", container.Args},
+	} {
+		if len(field.value) > maxDebugArgv {
+			return invalid(fmt.Sprintf("container %s has too many entries", field.label))
+		}
+		for _, value := range field.value {
+			if strings.TrimSpace(value) == "" || len(value) > maxDebugArgValue {
+				return invalid(fmt.Sprintf("container %s contains an invalid entry", field.label))
+			}
+		}
+	}
+	if len(container.Env) > maxDebugEnvVars {
+		return invalid("container env has too many entries")
+	}
+	for _, entry := range container.Env {
+		if strings.TrimSpace(entry.Name) == "" || len(entry.Name) > maxDebugEnvName || len(entry.Value) > maxDebugArgValue {
+			return invalid("container env contains an invalid entry")
+		}
+	}
+	return nil
+}
+
+func envVarsToCore(env []EnvVar) []corev1.EnvVar {
+	if len(env) == 0 {
+		return nil
+	}
+	values := make([]corev1.EnvVar, 0, len(env))
+	for _, entry := range env {
+		values = append(values, corev1.EnvVar{Name: entry.Name, Value: entry.Value})
+	}
+	return values
+}
+
+func ephemeralEntry(entry *corev1.EphemeralContainer) PodDebugContainerEntry {
+	result := PodDebugContainerEntry{
+		Name:  entry.Name,
+		Image: entry.Image,
+	}
+	if len(entry.Command) > 0 {
+		result.Command = entry.Command
+	}
+	if len(entry.Args) > 0 {
+		result.Args = entry.Args
+	}
+	if entry.TargetContainerName != "" {
+		result.TargetContainerName = entry.TargetContainerName
+	}
+	for _, item := range entry.Env {
+		result.Env = append(result.Env, EnvVar{Name: item.Name, Value: item.Value})
+	}
+	return result
 }
 
 func (s *Service) Mutate(ctx context.Context, request MutationRequest) (MutationResponse, error) {

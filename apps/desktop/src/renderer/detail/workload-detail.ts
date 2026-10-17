@@ -26,6 +26,8 @@ export interface WorkloadDetails {
   selectorPartial: boolean;
   conditions: WorkloadCondition[];
   containers: WorkloadContainer[];
+  /** Injected debug containers (spec.ephemeralContainers); Pod objects only. */
+  ephemeralContainers: WorkloadContainer[];
   /** Human-readable rollout strategy, e.g. "RollingUpdate · maxSurge 25%". */
   strategy: string;
   revision: string;
@@ -45,6 +47,7 @@ const UNKNOWN: WorkloadDetails = {
   selectorPartial: false,
   conditions: [],
   containers: [],
+  ephemeralContainers: [],
   strategy: "",
   revision: "",
   serviceAccount: "",
@@ -89,6 +92,7 @@ export function parseWorkloadDetails(yamlText: string): WorkloadDetails | undefi
     selectorPartial: Array.isArray(matchExpressions) && matchExpressions.length > 0,
     conditions: parseConditions(status?.conditions),
     containers: parseContainers(podSpec?.containers),
+    ephemeralContainers: parseContainers(podSpec?.ephemeralContainers),
     strategy: formatStrategy(doc.kind, spec),
     revision: stringValue(annotations?.["deployment.kubernetes.io/revision"]),
     serviceAccount:
@@ -252,5 +256,5 @@ function numberValue(value: unknown): number | undefined {
 
 /** Empty projection for callers that render before the YAML arrives. */
 export function emptyWorkloadDetails(): WorkloadDetails {
-  return { ...UNKNOWN, conditions: [], containers: [], annotations: [] };
+  return { ...UNKNOWN, conditions: [], containers: [], ephemeralContainers: [], annotations: [] };
 }

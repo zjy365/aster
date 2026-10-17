@@ -846,6 +846,13 @@ export default function App() {
                 }
               }}
               onCancelMutation={mutation.cancelMutation}
+              onDebugContainerAdded={(name) => {
+                // The ephemeral container lands outside the mutation pipeline;
+                // journal it like any other write and refetch so the containers
+                // overview surfaces the new entry.
+                mutation.recordActivity(`debug-container ${name}`);
+                void detail.refetch();
+              }}
               onNavigateRelated={openResource}
               onBack={detail.clear}
               />

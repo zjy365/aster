@@ -259,6 +259,47 @@ export interface PodExecResponse {
   stderr: string;
 }
 
+/** One NAME=value environment entry for a debug container. */
+export interface PodDebugEnvVar {
+  name: string;
+  value: string;
+}
+
+/**
+ * Requested ephemeral debug container. Only the image is required; a blank
+ * name gets a generated unique suffix core-side (kubectl debug semantics).
+ */
+export interface PodDebugContainerRequest {
+  name?: string;
+  image: string;
+  command?: string[];
+  args?: string[];
+  targetContainerName?: string;
+  env?: PodDebugEnvVar[];
+}
+
+/** Injects an ephemeral debug container into a running Pod. */
+export interface PodDebugRequest {
+  contextId: string;
+  namespace: string;
+  podName: string;
+  container: PodDebugContainerRequest;
+}
+
+/** The ephemeral container entry the API server stored. */
+export interface PodDebugContainerEntry {
+  name: string;
+  image: string;
+  command?: string[];
+  args?: string[];
+  targetContainerName?: string;
+  env?: PodDebugEnvVar[];
+}
+
+export interface PodDebugResponse {
+  container: PodDebugContainerEntry;
+}
+
 export type LogStreamBatch =
   | { subscriptionId: string; type: "line"; text?: string; pod?: string }
   | { subscriptionId: string; type: "error"; message?: string; pod?: string }
@@ -611,6 +652,8 @@ export interface DesktopApi {
     portForwardStart(request: PortForwardStartRequest): Promise<PodPortForward>;
     portForwardStop(id: string): Promise<void>;
     exec(request: PodExecRequest): Promise<PodExecResponse>;
+    /** Injects an ephemeral debug container (kubectl debug) into a running Pod. */
+    debugContainer(request: PodDebugRequest): Promise<PodDebugResponse>;
     mutate(request: ResourceMutationRequest): Promise<ResourceMutationResponse>;
     watch(request: ResourceListRequest, listener: (batch: ResourceWatchBatch) => void): () => void;
   };

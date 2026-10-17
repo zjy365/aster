@@ -30,6 +30,8 @@ export interface MutationState {
   /** Applies the staged mutation; resolves true only when the write succeeded. */
   applyPendingMutation(): Promise<boolean>;
   cancelMutation(): void;
+  /** Records a non-mutation write (e.g. a debug container injection) in the journal. */
+  recordActivity(entry: string): void;
 }
 
 /**
@@ -115,6 +117,16 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
     setMutationMessage("Dry-run discarded");
   }, []);
 
+  // Shares the apply pipeline's journal format so direct writes (debug
+  // container injections) read identically in the session activity aside.
+  const recordActivity = useCallback((entry: string) => {
+    if (!contextId || !entry.trim()) return;
+    setJournalByContext((all) => ({
+      ...all,
+      [contextId]: [`${new Date().toLocaleTimeString()} ${entry.trim()}`, ...(all[contextId] || [])].slice(0, 20),
+    }));
+  }, [contextId]);
+
   return {
     canMutate,
     canCreate,
@@ -126,5 +138,6 @@ export function useMutation({ contextId, kind, namespace, selected }: MutationOp
     mutate,
     applyPendingMutation,
     cancelMutation,
+    recordActivity,
   };
 }

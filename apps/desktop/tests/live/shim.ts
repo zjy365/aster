@@ -241,6 +241,7 @@ const api: DesktopApi = {
     portForwardStart: () => unsupported("portForwardStart"),
     portForwardStop: () => Promise.resolve(),
     exec: () => unsupported("exec"),
+    debugContainer: (request) => corePost("/v1/pods/debug", request),
     mutate: (request) => corePost("/v1/resources/mutate", {
       contextId: request.contextId,
       gvr: gvr(request.resourceKind),

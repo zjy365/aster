@@ -340,7 +340,8 @@ function ContainersSection({
   const containers = details?.containers.length
     ? details.containers
     : (row.images ?? []).map((image) => ({ name: "", image }));
-  if (containers.length === 0) return null;
+  const ephemeral = details?.ephemeralContainers ?? [];
+  if (containers.length === 0 && ephemeral.length === 0) return null;
 
   return (
     <section className="resource-detail-section">
@@ -352,15 +353,31 @@ function ContainersSection({
           </Button>
         )}
       </div>
-      <div className="resource-container-list" data-testid="overview-containers">
-        {containers.map((container) => (
-          <div className="resource-container-row" key={container.name || container.image}>
-            {container.name && <span className="resource-container-name">{container.name}</span>}
-            <code title={container.image}>{container.image}</code>
-            <CopyImageButton image={container.image} />
-          </div>
-        ))}
-      </div>
+      {containers.length > 0 && (
+        <div className="resource-container-list" data-testid="overview-containers">
+          {containers.map((container) => (
+            <div className="resource-container-row" key={container.name || container.image}>
+              {container.name && <span className="resource-container-name">{container.name}</span>}
+              <code title={container.image}>{container.image}</code>
+              <CopyImageButton image={container.image} />
+            </div>
+          ))}
+        </div>
+      )}
+      {ephemeral.length > 0 && (
+        <div className="resource-container-list resource-ephemeral-list" data-testid="overview-ephemeral-containers">
+          {ephemeral.map((container) => (
+            <div className="resource-container-row" key={container.name || container.image}>
+              {container.name && <span className="resource-container-name">{container.name}</span>}
+              <span className="resource-container-badge" title="Injected through kubectl debug; removed with the pod">
+                debug
+              </span>
+              <code title={container.image}>{container.image}</code>
+              <CopyImageButton image={container.image} />
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

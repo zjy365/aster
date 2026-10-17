@@ -1,4 +1,4 @@
-import { Container, FileCode2, RotateCw, Trash2 } from "lucide-react";
+import { Bug, Container, FileCode2, RotateCw, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 /**
@@ -7,7 +7,7 @@ import type { LucideIcon } from "lucide-react";
  * to the shared command registry: keep the shape declarative so row context
  * menus and the palette can consume the same descriptors later.
  */
-export type ResourceActionId = "image" | "restart" | "edit" | "delete";
+export type ResourceActionId = "image" | "restart" | "edit" | "delete" | "debug-container";
 
 export interface ResourceActionDescriptor {
   id: ResourceActionId;
@@ -22,6 +22,19 @@ export interface ResourceActionDescriptor {
 }
 
 const ROLLABLE_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet"]);
+
+/**
+ * Ephemeral debug containers are Pod-scoped: kubectl-debug semantics that
+ * inject a helper container without touching the workload spec, so pods
+ * running distroless images stay inspectable.
+ */
+const DEBUG_CONTAINER: ResourceActionDescriptor = {
+  id: "debug-container",
+  label: "Add debug container",
+  icon: Bug,
+  danger: false,
+  needsInput: true,
+};
 
 const UPDATE_IMAGE: ResourceActionDescriptor = {
   id: "image",
@@ -66,6 +79,7 @@ const DELETE: ResourceActionDescriptor = {
 export function resourceActionsFor(kind: string): ResourceActionDescriptor[] {
   const actions: ResourceActionDescriptor[] = [];
   if (ROLLABLE_KINDS.has(kind)) actions.push(UPDATE_IMAGE, RESTART);
+  if (kind === "Pod") actions.push(DEBUG_CONTAINER);
   // Secrets stay read-only: their data never leaves the core, so no Edit anchor.
   if (kind !== "Secret") actions.push(EDIT);
   actions.push(DELETE);

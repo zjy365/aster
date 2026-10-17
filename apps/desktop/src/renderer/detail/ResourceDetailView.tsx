@@ -36,6 +36,7 @@ import { useResourceList } from "../hooks/useResourceList";
 import { findEnabledResourceKind } from "../lib/resource-catalog";
 import { newestEventsFirst } from "../lib/resource-events";
 import { DetailHeader } from "./DetailHeader";
+import { AddDebugContainerDialog } from "./AddDebugContainerDialog";
 import { LogViewer } from "./LogViewer";
 import { MutationDiffView } from "./MutationDiffView";
 import { OverviewTab, type PodsPreview } from "./OverviewTab";
@@ -85,6 +86,8 @@ export interface ResourceDetailViewProps {
   onMutate(request: MutationDraft): Promise<void>;
   onApplyMutation(): Promise<void>;
   onCancelMutation(): void;
+  /** Records a successful debug-container injection (journal + refresh). */
+  onDebugContainerAdded(name: string): void;
   onNavigateRelated(item: RelatedResource): void;
   onBack(): void;
 }
@@ -106,12 +109,14 @@ export function ResourceDetailView({
   onMutate,
   onApplyMutation,
   onCancelMutation,
+  onDebugContainerAdded,
   onNavigateRelated,
   onBack,
 }: ResourceDetailViewProps) {
   const [tab, setTab] = useState<DetailTab>("overview");
   const [operationDialog, setOperationDialog] = useState<OperationDialog>(null);
   const [operationValue, setOperationValue] = useState("");
+  const [debugDialogOpen, setDebugDialogOpen] = useState(false);
   const [podsError, setPodsError] = useState("");
   // Lifted from the YAML tab so the header Edit action can drive it.
   const [yamlEditing, setYamlEditing] = useState(false);
@@ -119,6 +124,7 @@ export function ResourceDetailView({
   useEffect(() => {
     setTab("overview");
     setOperationDialog(null);
+    setDebugDialogOpen(false);
     setYamlEditing(false);
   }, [row?.uid]);
 
@@ -132,7 +138,8 @@ export function ResourceDetailView({
       if (event.defaultPrevented || event.isComposing) return;
       // pendingMutation: the dry-run review modal is up — re-firing a shortcut
       // behind it would re-tab to YAML editing or overwrite the staged mutation.
-      if (operationDialog || mutationBusy || pendingMutation) return;
+      // debugDialogOpen: same for the debug container form.
+      if (operationDialog || debugDialogOpen || mutationBusy || pendingMutation) return;
       const active = document.activeElement;
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || (active instanceof HTMLElement && active.isContentEditable)) return;
       // ⌘⌫ for delete (standard macOS destructive gesture). Checked before the
@@ -160,7 +167,7 @@ export function ResourceDetailView({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row, operationDialog, mutationBusy, pendingMutation, onMutate]);
+  }, [row, operationDialog, debugDialogOpen, mutationBusy, pendingMutation, onMutate]);
 
   // Workload facts parsed from the live YAML the core already shipped; powers
   // the conditions/strategy/selector rows, annotations, and the pods list.
@@ -271,6 +278,10 @@ export function ResourceDetailView({
   function runAction(id: ResourceActionId) {
     if (id === "image") {
       openOperation(id);
+      return;
+    }
+    if (id === "debug-container") {
+      setDebugDialogOpen(true);
       return;
     }
     if (id === "edit") {
@@ -426,6 +437,18 @@ export function ResourceDetailView({
           if (!open) setOperationDialog(null);
         }}
       />
+
+      {isPod && (
+        <AddDebugContainerDialog
+          contextId={contextId}
+          namespace={currentRow.namespace}
+          podName={currentRow.name}
+          containers={details?.containers.map((container) => container.name).filter(Boolean) ?? []}
+          open={debugDialogOpen}
+          onOpenChange={setDebugDialogOpen}
+          onAdded={onDebugContainerAdded}
+        />
+      )}
 
       <AlertDialog
         open={reviewOpen}
