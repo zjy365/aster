@@ -4691,6 +4691,99 @@ button.overview-card:focus-visible {
   border-color: var(--focus);
 }
 
+/* Chart version combobox: the same input with a published-versions dropdown
+   and a manual-entry fallback notice when the repository cannot be read. */
+.helm-version-combo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.helm-version-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.helm-version-input .helm-upgrade-input {
+  flex: 1;
+  padding-right: 24px;
+}
+
+.helm-version-affordance {
+  position: absolute;
+  right: 8px;
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.helm-version-affordance[data-open] {
+  transform: rotate(180deg);
+}
+
+.helm-version-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 216px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+}
+
+.helm-version-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.helm-version-option[data-highlighted] {
+  background: var(--surface-muted);
+}
+
+.helm-version-option[aria-selected="true"] strong {
+  color: var(--focus);
+}
+
+.helm-version-option strong {
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-weight: 600;
+}
+
+.helm-version-app {
+  color: var(--text-secondary);
+}
+
+.helm-version-created {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.helm-version-notice {
+  color: var(--warning);
+  font-size: 10px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 /* Kite-style split: chart defaults sit read-only beside the editable values,
    so parameters that only exist as defaults (replicas, probes…) are visible
    while editing. Both panes share one height and scroll independently. */

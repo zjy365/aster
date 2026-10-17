@@ -124,3 +124,26 @@ type RollbackRequest struct {
 type RollbackResponse struct {
 	Ok bool `json:"ok"`
 }
+
+type ChartVersionsRequest struct {
+	// ContextID is optional and currently unused: a repository index is
+	// user-global (resolved through the local helm repo config), not scoped
+	// to a cluster. It stays in the shape so clients can pass it uniformly.
+	ContextID string `json:"contextId,omitempty"`
+	// RepoURL is the chart repository whose index should be listed.
+	RepoURL string `json:"repoUrl"`
+	Chart   string `json:"chart"`
+}
+
+// ChartVersionInfo is one pickable version of a chart in a repository,
+// newest first. It carries only index metadata, never chart contents.
+type ChartVersionInfo struct {
+	Version     string    `json:"version"`
+	AppVersion  string    `json:"appVersion,omitempty"`
+	Created     time.Time `json:"created,omitempty"`
+	Description string    `json:"description,omitempty"`
+}
+
+type ChartVersionsResponse struct {
+	Versions []ChartVersionInfo `json:"versions"`
+}

@@ -452,6 +452,28 @@ export interface HelmUpgradeResponse {
   revision: number;
 }
 
+export interface HelmChartVersionsRequest {
+  /**
+   * Chart repository URL whose index should be listed. Credentials resolve
+   * from the user's local helm repo config (repositories.yaml), matching how
+   * the upgrade path pulls the chart.
+   */
+  repoUrl: string;
+  chart: string;
+}
+
+/** One pickable chart version from a repository index, newest first. */
+export interface HelmChartVersion {
+  version: string;
+  appVersion?: string;
+  created?: string;
+  description?: string;
+}
+
+export interface HelmChartVersionsResponse {
+  versions: HelmChartVersion[];
+}
+
 export interface OverviewCount {
   total: number;
   ready: number;
@@ -597,6 +619,8 @@ export interface DesktopApi {
     uninstall(request: HelmUninstallRequest): Promise<void>;
     rollback(request: HelmRollbackRequest): Promise<void>;
     upgrade(request: HelmUpgradeRequest): Promise<HelmUpgradeResponse>;
+    /** Lists the repository's published versions for a chart, newest first. */
+    chartVersions(request: HelmChartVersionsRequest): Promise<HelmChartVersionsResponse>;
   };
   resources: {
     list(request: ResourceListRequest): Promise<ResourceListResponse>;

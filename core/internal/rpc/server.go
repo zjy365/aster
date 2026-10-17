@@ -52,6 +52,7 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("POST /v1/helm/releases/uninstall", server.uninstallHelmRelease)
 	mux.HandleFunc("POST /v1/helm/releases/rollback", server.rollbackHelmRelease)
 	mux.HandleFunc("POST /v1/helm/releases/upgrade", server.upgradeHelmRelease)
+	mux.HandleFunc("GET /v1/helm/chart-versions", server.helmChartVersions)
 	mux.HandleFunc("POST /v1/resources/list", server.listResources)
 	mux.HandleFunc("POST /v1/resources/get", server.getResource)
 	mux.HandleFunc("POST /v1/resources/mutate", server.mutateResource)
@@ -288,6 +289,27 @@ func (s *Server) upgradeHelmRelease(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	result, err := s.helm.Upgrade(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+// helmChartVersions lists the versions an upgrade can pin for a chart, read
+// from the repository's index.yaml through the user's local helm repo config.
+// It touches no cluster, so contextId is optional.
+func (s *Server) helmChartVersions(writer http.ResponseWriter, request *http.Request) {
+	query := request.URL.Query()
+	value := helm.ChartVersionsRequest{
+		ContextID: query.Get("contextId"),
+		RepoURL:   query.Get("repoUrl"),
+		Chart:     query.Get("chart"),
+	}
+	if rejectInvalid(writer, validateHelmChartVersionsRequest(value)) {
+		return
+	}
+	result, err := s.helm.ChartVersions(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
 		return

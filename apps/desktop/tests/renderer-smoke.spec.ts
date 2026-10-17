@@ -326,6 +326,20 @@ const MOCK_DESKTOP_API = `
         }
         return { revision: 4 };
       },
+      // Recorded so the version-list assertions can see what was asked for.
+      chartVersions: async (request) => {
+        (window.__chartVersionRequests = window.__chartVersionRequests || []).push(request);
+        if (request.repoUrl.includes("unreachable")) {
+          throw new Error("simulated repository failure");
+        }
+        return {
+          versions: [
+            { version: "1.3.0", appVersion: "7.3.0", created: "2026-09-01T00:00:00Z", description: "web chart" },
+            { version: "1.2.3", appVersion: "7.0.1", created: "2026-03-03T00:00:00Z" },
+            { version: "1.2.2", appVersion: "7.0.0", created: "2026-02-02T00:00:00Z" },
+          ],
+        };
+      },
     },
     resources: {
       list: async (request) => {
@@ -1933,6 +1947,46 @@ test("helm view lists releases and opens a detail", async ({ page }) => {
   await expect(toast).toBeVisible();
   await screenshot(page, "helm-upgrade-toast-1280");
   await expect(toast).toHaveCount(0, { timeout: 10_000 });
+
+  // Filling a repository URL switches the upgrade to pulling a chart: the
+  // version field becomes a combobox whose options load from the repository
+  // index, keyboard-first like the rest of the app.
+  await page.getByTestId("helm-upgrade").click();
+  await expect(upgradeDialog).toBeVisible();
+  await upgradeDialog.getByTestId("helm-upgrade-repo-url").fill("https://charts.example.test");
+  const versionInput = upgradeDialog.getByTestId("helm-upgrade-version");
+  await expect(versionInput).toBeEnabled();
+  // Clearing the installed version shows the repository's full list (typing
+  // filters it); focusing while it loads opens it as soon as it arrives.
+  await versionInput.fill("");
+  await versionInput.click();
+  const versionList = upgradeDialog.getByTestId("helm-version-list");
+  await expect(versionList).toBeVisible();
+  // The lookup asked the repository for exactly this chart.
+  const asked = await page.evaluate(() =>
+    (window as unknown as { __chartVersionRequests?: Array<{ repoUrl: string; chart: string }> })
+      .__chartVersionRequests,
+  );
+  expect(asked?.[0]).toEqual({ repoUrl: "https://charts.example.test", chart: "web" });
+  const firstOption = versionList.getByTestId("helm-version-option").first();
+  await expect(firstOption).toContainText("1.3.0");
+  await expect(firstOption).toContainText("app 7.3.0");
+  // Arrow keys move the highlight and Enter picks — no mouse involved.
+  await versionInput.press("ArrowDown");
+  await versionInput.press("Enter");
+  await expect(versionInput).toHaveValue("1.2.3");
+  await upgradeDialog.getByTestId("helm-upgrade-review").click();
+  await expect(upgradeDialog.getByTestId("helm-upgrade-summary")).toContainText(
+    "Pulls chart web 1.2.3 from https://charts.example.test",
+  );
+  // A repository whose index cannot be read degrades to manual entry with a
+  // notice instead of blocking the upgrade.
+  await upgradeDialog.getByRole("button", { name: "Back to edit" }).click();
+  await upgradeDialog.getByTestId("helm-upgrade-repo-url").fill("https://unreachable.example.test");
+  await expect(upgradeDialog.getByTestId("helm-version-notice")).toBeVisible();
+  await expect(versionInput).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await expect(upgradeDialog).not.toBeVisible();
 
   // The unified toolbar back returns to the release list; the helm tab stays active.
   await page.getByTestId("toolbar-back").click();

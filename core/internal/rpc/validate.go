@@ -383,6 +383,24 @@ func validateHelmUpgradeRequest(value helm.UpgradeRequest) error {
 	return checkLength("values", value.Values, maxYAML)
 }
 
+func validateHelmChartVersionsRequest(value helm.ChartVersionsRequest) error {
+	// contextId is optional: repository indexes resolve through the user's
+	// local helm repo config, not a cluster. Only its cap applies when sent.
+	if err := checkLength("contextId", value.ContextID, maxContextID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(value.RepoURL) == "" {
+		return fmt.Errorf("repoUrl is required")
+	}
+	if err := checkLength("repoUrl", value.RepoURL, maxRepoURL); err != nil {
+		return err
+	}
+	if strings.TrimSpace(value.Chart) == "" {
+		return fmt.Errorf("chart is required")
+	}
+	return checkLength("chart", value.Chart, maxName)
+}
+
 func checkLength(label, value string, max int) error {
 	if len(value) > max {
 		return fmt.Errorf("%s is too long", label)

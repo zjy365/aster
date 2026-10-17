@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -293,6 +294,17 @@ func TestServerValidatesHelmRequests(t *testing.T) {
 	server.Handler().ServeHTTP(response, missingChart)
 	if response.Code != http.StatusBadRequest || !contains(response.Body.String(), `"code":"invalid_request"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	for _, target := range []string{
+		"/v1/helm/chart-versions?chart=web",
+		"/v1/helm/chart-versions?repoUrl=" + url.QueryEscape("https://charts.example.test"),
+		"/v1/helm/chart-versions?repoUrl=not-a-url&chart=web",
+	} {
+		invalid := performRequest(t, server, http.MethodGet, target)
+		if invalid.Code != http.StatusBadRequest || !contains(invalid.Body.String(), `"code":"invalid_request"`) {
+			t.Fatalf("target %s: status=%d body=%s", target, invalid.Code, invalid.Body.String())
+		}
 	}
 }
 
