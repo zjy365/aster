@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ContextInfo, NamespaceInfo, NamespaceScope } from "../../shared/types";
 import { messageOf } from "../lib/format";
 import { desktop } from "../lib/desktop";
+import { clusterSelectionKey, unionNamespaceLists } from "../lib/multi-cluster";
 import {
   NAMESPACE_CACHE_TTL_MS,
   readNamespaceCache,
@@ -36,11 +37,17 @@ export interface NamespacesState {
  * replacing the rows in place. The generation guard discards a slow fetch
  * started under a previous context, and loadingRef keeps the effect-triggered
  * refresh and a later picker open from doubling up.
+ *
+ * An aggregate view (contextIds with 2+ entries) skips the per-cluster cache
+ * and unions the live lists instead: the scope's namespaces are offered from
+ * every selected cluster, and a namespace only one cluster knows is still
+ * selectable — the clusters without it simply return no rows for it.
  */
 export function useNamespaces(
   contextId: string,
   contexts: ContextInfo[],
   onError: (message: string) => void,
+  contextIds?: string[],
 ): NamespacesState {
   const [namespaces, setNamespaces] = useState<NamespaceInfo[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -51,8 +58,15 @@ export function useNamespaces(
   // Bumped on every context change so a slow fetch started under the previous
   // context is discarded when it resolves late.
   const generationRef = useRef(0);
+  const aggregate = (contextIds?.length ?? 0) > 1;
+  // Order-insensitive identity of the cluster selection, so the reset effect
+  // below does not churn on array re-creation with equal contents.
+  const clusterKey = useMemo(
+    () => (aggregate ? clusterSelectionKey(contextIds!) : ""),
+    [aggregate, contextIds],
+  );
 
-  // Fetches the current context's inventory. Cold loads (no retained list)
+  // Fetches the current scope's inventory. Cold loads (no retained list)
   // show the picker's loading row; stale-while-revalidate refreshes keep the
   // retained list on screen and replace it in place.
   const fetchList = useCallback((showLoading: boolean) => {
@@ -60,6 +74,29 @@ export function useNamespaces(
     loadingRef.current = true;
     if (showLoading) setLoading(true);
     const generation = generationRef.current;
+    if (aggregate) {
+      // Union fan-out: one ordinary per-cluster list call each; a cluster
+      // that fails drops out of the union instead of failing the whole scope,
+      // and only a total outage surfaces as an error.
+      void Promise.all((contextIds ?? [contextId]).map((id) =>
+        desktop.namespaces.list(id)
+          .then((result) => ({ names: result.namespaces.map((item) => item.name), truncated: result.truncated, failed: false as const }))
+          .catch(() => ({ names: [] as string[], truncated: false, failed: true as const })),
+      )).then((results) => {
+        if (generation !== generationRef.current) return;
+        loadingRef.current = false;
+        setLoading(false);
+        if (results.every((result) => result.failed)) {
+          onError("Could not load namespaces from any selected cluster");
+          return;
+        }
+        const names = unionNamespaceLists(results.filter((result) => !result.failed).map((result) => result.names));
+        setNamespaces(names.map((name) => ({ name })));
+        setTruncated(results.some((result) => result.truncated));
+        setLoaded(true);
+      });
+      return;
+    }
     desktop.namespaces.list(contextId)
       .then((result) => {
         if (generation !== generationRef.current) return;
@@ -78,7 +115,7 @@ export function useNamespaces(
         setLoading(false);
         onError(messageOf(cause));
       });
-  }, [contextId, onError]);
+  }, [contextId, onError, aggregate, contextIds]);
 
   useEffect(() => {
     generationRef.current += 1;
@@ -99,6 +136,7 @@ export function useNamespaces(
     setNamespaceScope((current) => (
       current.length === (defaultNamespace ? 1 : 0) && current[0] === defaultNamespace ? current : defaultNamespace ? [defaultNamespace] : []
     ));
+    if (aggregate) return;
     // A retained list renders at once; a stale one refreshes in the background.
     const cached = readNamespaceCache(contextId);
     if (cached) {
@@ -109,20 +147,22 @@ export function useNamespaces(
     }
     // Only a context switch resets the list; contexts identity churn must not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextId]);
+  }, [contextId, clusterKey]);
 
   const load = useCallback(() => {
     if (!contextId || loadingRef.current) return;
-    const cached = readNamespaceCache(contextId);
-    if (cached) {
-      // Fresh lists need nothing; stale ones re-fetch quietly (the switch
-      // effect may already have started the refresh, which loadingRef guards).
-      if (Date.now() - cached.fetchedAt >= NAMESPACE_CACHE_TTL_MS) fetchList(false);
-      return;
+    if (!aggregate) {
+      const cached = readNamespaceCache(contextId);
+      if (cached) {
+        // Fresh lists need nothing; stale ones re-fetch quietly (the switch
+        // effect may already have started the refresh, which loadingRef guards).
+        if (Date.now() - cached.fetchedAt >= NAMESPACE_CACHE_TTL_MS) fetchList(false);
+        return;
+      }
     }
-    // Cold path: first time this cluster's list is needed.
+    // Cold path: first time this scope's list is needed (always, in aggregate).
     fetchList(true);
-  }, [contextId, fetchList]);
+  }, [contextId, aggregate, fetchList]);
 
   return { namespaces, truncated, loading, loaded, namespaceScope, setNamespaceScope, load };
 }
