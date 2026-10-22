@@ -3644,3 +3644,185 @@ test("node detail cordons, uncordons and drains with streamed progress", async (
   await screenshot(page, "node-drain-1280");
   expect(failures).toEqual([]);
 });
+
+test("column picker customizes visibility and order, per kind, persisted", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  // Deployment rows carry only the projected summary fields; enrich them
+  // with labels and a spec so this test also exercises the generic curated
+  // column (Labels) and discovery (spec.replicas, spec.paused).
+  await page.addInitScript(() => {
+    const desktop = (window as unknown as {
+      __ASTER_DESKTOP__: {
+        resources: {
+          list(request: unknown): Promise<{ items: unknown[] }>;
+          watch(request: unknown, listener: (batch: unknown) => void): () => void;
+        };
+      };
+    }).__ASTER_DESKTOP__;
+    if (!desktop) return;
+    const enrich = (row: Record<string, unknown>) => ({
+      ...row,
+      labels: { app: String(row.name), team: "platform" },
+      spec: { replicas: 2, paused: false },
+    });
+    const baseList = desktop.resources.list.bind(desktop.resources);
+    desktop.resources.list = async (request) => {
+      const result = await baseList(request);
+      return { ...result, items: result.items.map((row) => enrich(row as Record<string, unknown>)) };
+    };
+    const baseWatch = desktop.resources.watch.bind(desktop.resources);
+    desktop.resources.watch = (request, listener) => baseWatch(request, (batch) => {
+      const typed = batch as { items?: unknown[] };
+      listener(typed.items ? { ...batch as Record<string, unknown>, items: typed.items.map((row) => enrich(row as Record<string, unknown>)) } : batch);
+    });
+  });
+  await page.goto("/");
+  await connectToDev(page);
+
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const headerTexts = () => grid.locator(".table-header").locator("span[role=columnheader]").allInnerTexts();
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+
+  // The default set renders through the customizable path unchanged.
+  await expect(grid.getByRole("columnheader")).toHaveCount(6); // checkbox + 5 columns
+
+  // The picker opens from the pane heading and lists every offered column.
+  await page.getByTestId("table-columns-trigger").click();
+  const picker = page.getByTestId("column-picker");
+  await expect(picker).toBeVisible();
+  await expect(picker.getByTestId("column-toggle-name")).toHaveAttribute("aria-pressed", "true");
+  // Rows carry images (curated for the kind), labels (generic curated) and
+  // spec fields (discovered from the loaded rows), all offered hidden.
+  for (const id of ["images", "labels", "spec.replicas"]) {
+    await expect(picker.getByTestId(`column-toggle-${id}`)).toHaveAttribute("aria-pressed", "false");
+  }
+  await screenshot(page, "column-picker-1280");
+
+  // Toggling Images on adds the column with real row data; toggling
+  // Namespace off removes it.
+  await picker.getByTestId("column-toggle-images").click();
+  await picker.getByTestId("column-toggle-namespace").click();
+  await expect(grid.getByRole("columnheader", { name: "Images" })).toBeVisible();
+  await expect(grid.getByRole("columnheader", { name: "Namespace" })).toHaveCount(0);
+  await expect(grid.getByRole("row").nth(1)).toContainText("nginx:1.27");
+
+  // Keyboard reorder: focus the Status row, arrow it up past Name (Namespace
+  // is hidden now, so one effective move; the second press clamps).
+  const statusRow = picker.getByTestId("column-toggle-status");
+  await statusRow.focus();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  expect(await headerTexts()).toEqual(["", "Status", "Name", "Ready", "Age", "Images"]);
+  await expect(statusRow).toBeFocused();
+  // Escape closes and returns focus to the trigger.
+  await page.keyboard.press("Escape");
+  await expect(picker).toHaveCount(0);
+  await expect(page.getByTestId("table-columns-trigger")).toBeFocused();
+
+  // Preferences persist per kind in localStorage across a reload…
+  await page.reload();
+  await connectToDev(page);
+  const reloaded = page.getByRole("grid", { name: "Resources" });
+  await expect(reloaded.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+  expect(await reloaded.locator(".table-header").locator("span[role=columnheader]").allInnerTexts())
+    .toEqual(["", "Status", "Name", "Ready", "Age", "Images"]);
+
+  // …and are isolated per kind: pods render their own default set (the
+  // pinned usage columns may join once live metrics land, so assert on the
+  // columns that must be back, not the exact list).
+  await page.getByTestId("resource-nav-pods").click();
+  const podsGrid = page.getByRole("grid", { name: "Resources" });
+  await expect(podsGrid.getByRole("row").nth(1)).toContainText("pods-0", { timeout: 15_000 });
+  const podsHeader = await podsGrid.locator(".table-header").locator("span[role=columnheader]").allInnerTexts();
+  expect(podsHeader).toContain("Namespace");
+  expect(podsHeader).not.toContain("Images");
+
+  // Many columns exceed the pane: the viewport scrolls horizontally and the
+  // header tracks it in lockstep, cells staying under their headers.
+  await page.getByTestId("resource-nav-deployments").click();
+  const deploymentsGrid = page.getByRole("grid", { name: "Resources" });
+  await expect(deploymentsGrid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+  await page.getByTestId("table-columns-trigger").click();
+  const widePicker = page.getByTestId("column-picker");
+  for (const id of ["namespace", "apiVersion", "labels", "spec.replicas", "spec.paused"]) {
+    await widePicker.getByTestId(`column-toggle-${id}`).click();
+  }
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 960, height: 600 });
+  const viewport = deploymentsGrid.locator(".table-viewport");
+  await expect
+    .poll(() => viewport.evaluate((el) => el.scrollWidth - el.clientWidth))
+    .toBeGreaterThan(0);
+  const nameBefore = await deploymentsGrid.getByRole("columnheader", { name: "Name", exact: true }).boundingBox();
+  await viewport.evaluate((el) => { el.scrollLeft = 200; });
+  // The header mirrors the scroll as a translate (the scroll event is
+  // async, so poll until it lands).
+  const header = deploymentsGrid.locator(".table-header");
+  await expect.poll(() => header.evaluate((el) => el.style.transform)).toBe("translateX(-200px)");
+  const nameAfter = await deploymentsGrid.getByRole("columnheader", { name: "Name", exact: true }).boundingBox();
+  expect(nameAfter!.x).toBeLessThan(nameBefore!.x);
+  // The Name header stays aligned over the Name cells (checkbox cell is
+  // gridcell 0, name is gridcell 1).
+  // The Name header stays aligned over the Name cells. Column order is
+  // [checkbox, Status, Name, …] after the reorder, so Name is gridcell 2.
+  const nameCell = await deploymentsGrid.getByRole("row").nth(1).getByRole("gridcell").nth(2).boundingBox();
+  expect(Math.abs(nameAfter!.x - nameCell!.x)).toBeLessThanOrEqual(2);
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  // Reset to default restores the kind's fixed set and drops the entry.
+  await page.getByTestId("table-columns-trigger").click();
+  const resetPicker = page.getByTestId("column-picker");
+  await resetPicker.getByTestId("column-picker-reset").click();
+  expect(await headerTexts()).toEqual(["", "Name", "Namespace", "Status", "Ready", "Age"]);
+  await page.keyboard.press("Escape");
+
+  await expectNoOverflow(page, "column picker 1280x800");
+  expect(failures).toEqual([]);
+});
+
+test("custom column grid keeps the name track wide enough", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0");
+  const name = grid.getByRole("columnheader", { name: "Name", exact: true });
+  const cell = grid.getByRole("row").nth(1).getByRole("gridcell").nth(1);
+  expect((await name.boundingBox())!.width).toBeGreaterThanOrEqual(180);
+  expect((await cell.boundingBox())!.width).toBeGreaterThanOrEqual(180);
+  await expectNoOverflow(page, "custom column name track");
+  await screenshot(page, "custom-column-name-track");
+  expect(failures).toEqual([]);
+});
+
+test("custom column headers stay aligned when reordered while scrolled", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.goto("/");
+  await connectToDev(page);
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0");
+  await page.getByTestId("table-columns-trigger").click();
+  const picker = page.getByTestId("column-picker");
+  await picker.getByTestId("column-toggle-images").click();
+  await picker.getByTestId("column-toggle-apiVersion").click();
+  await page.keyboard.press("Escape");
+  const viewport = grid.locator(".table-viewport");
+  const header = grid.locator(".table-header");
+  await viewport.evaluate((element) => { element.scrollLeft = 60; });
+  await expect.poll(() => header.evaluate((element) => element.style.transform)).toBe("translateX(-60px)");
+  await page.getByTestId("table-columns-trigger").click();
+  await picker.getByTestId("column-toggle-name").focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => header.evaluate((element) => element.style.transform)).toBe("translateX(-60px)");
+  const name = await grid.getByRole("columnheader", { name: "Name", exact: true }).boundingBox();
+  const cell = await grid.getByRole("row").nth(1).getByRole("gridcell").nth(2).boundingBox();
+  expect(Math.abs(name!.x - cell!.x)).toBeLessThanOrEqual(2);
+  await expectNoOverflow(page, "reordered scrolled custom columns");
+  await screenshot(page, "custom-column-reorder-scrolled");
+  expect(failures).toEqual([]);
+});
+
