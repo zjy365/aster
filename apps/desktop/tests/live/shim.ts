@@ -249,6 +249,10 @@ const api: DesktopApi = {
     followWorkloadLogs: () => () => {},
     portForwardStart: () => unsupported("portForwardStart"),
     portForwardStop: () => Promise.resolve(),
+    nodeCordon: (request) => corePost("/v1/nodes/cordon", request),
+    // The /__core__ proxy cannot relay a never-ending ndjson stream, so the
+    // live harness stubs drain progress like the other shell-only streams.
+    drainNode: () => () => {},
     exec: () => unsupported("exec"),
     mutate: (request) => corePost("/v1/resources/mutate", {
       contextId: request.contextId,

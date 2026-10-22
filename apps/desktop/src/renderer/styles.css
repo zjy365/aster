@@ -3006,6 +3006,111 @@ h2 {
   max-width: 760px;
 }
 
+/* Node drain dialog: option checklist, then a scrolling per-pod log. */
+
+.node-drain-dialog {
+  width: min(680px, calc(100vw - 40px));
+  max-width: 680px;
+}
+
+.node-drain-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.node-drain-warning svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--warning);
+}
+
+.node-drain-options {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.node-drain-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.node-drain-option input {
+  margin-top: 3px;
+  accent-color: var(--primary);
+}
+
+.node-drain-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.node-drain-option strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.node-drain-option small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.node-drain-progress {
+  display: grid;
+  gap: 4px;
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  padding: 10px 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.node-drain-line {
+  margin: 0;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.node-drain-line[data-tone="ok"] {
+  color: var(--healthy);
+}
+
+.node-drain-line[data-tone="warn"] {
+  color: var(--warning);
+}
+
+.node-drain-line[data-tone="error"] {
+  color: var(--failed);
+}
+
+.node-drain-error {
+  color: var(--failed);
+  font-size: 12px;
+}
+
+.node-drain-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .mutation-review-status {
   color: var(--text-secondary);
   font-size: 11px;

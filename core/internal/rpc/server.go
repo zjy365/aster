@@ -69,6 +69,8 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("POST /v1/pods/exec", server.podExec)
 	mux.HandleFunc("POST /v1/pods/portforward", server.startPortForward)
 	mux.HandleFunc("POST /v1/pods/portforward/stop", server.stopPortForward)
+	mux.HandleFunc("POST /v1/nodes/cordon", server.cordonNode)
+	mux.HandleFunc("POST /v1/nodes/drain", server.drainNode)
 	mux.HandleFunc("POST /v1/resources/watch", server.watchResources)
 	server.handler = server.authenticate(mux)
 	return server, nil
@@ -537,6 +539,69 @@ func (s *Server) stopPortForward(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) cordonNode(writer http.ResponseWriter, request *http.Request) {
+	var value resources.NodeCordonRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateNodeCordonRequest(value)) {
+		return
+	}
+	result, err := s.resources.Cordon(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+// drainNode streams one ndjson event per drain step until the summary event
+// closes the stream; the drain itself is aborted when the client disconnects.
+func (s *Server) drainNode(writer http.ResponseWriter, request *http.Request) {
+	var value resources.NodeDrainRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validateNodeDrainRequest(value)) {
+		return
+	}
+	flusher, ok := writer.(http.Flusher)
+	if !ok {
+		writeError(writer, http.StatusInternalServerError, "streaming_unsupported", fmt.Errorf("streaming unsupported"))
+		return
+	}
+	events, err := s.resources.StreamDrain(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+
+	writer.Header().Set("Content-Type", "application/x-ndjson")
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("X-Content-Type-Options", "nosniff")
+	writer.WriteHeader(http.StatusOK)
+	flusher.Flush()
+	encoder := json.NewEncoder(writer)
+	for {
+		select {
+		case <-request.Context().Done():
+			// Draining the producer runs its cancellation path to completion
+			// before the request returns, mirroring the watch lifecycle.
+			for range events {
+			}
+			return
+		case event, open := <-events:
+			if !open {
+				return
+			}
+			if err := encoder.Encode(event); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 func (s *Server) podMetrics(writer http.ResponseWriter, request *http.Request) {

@@ -271,6 +271,22 @@ func validatePortForwardStopRequest(value resources.PortForwardStopRequest) erro
 	return checkLength("id", value.ID, maxPortForwardID)
 }
 
+func validateNodeCordonRequest(value resources.NodeCordonRequest) error {
+	if err := validateContextID(value.ContextID); err != nil {
+		return err
+	}
+	if value.NodeName == "" {
+		return fmt.Errorf("nodeName is required")
+	}
+	return checkLength("nodeName", value.NodeName, maxName)
+}
+
+// validateNodeDrainRequest bounds the drain request; the options are four
+// booleans with nothing further to constrain.
+func validateNodeDrainRequest(value resources.NodeDrainRequest) error {
+	return validateNodeCordonRequest(resources.NodeCordonRequest{ContextID: value.ContextID, NodeName: value.NodeName})
+}
+
 func validateWatchRequest(value resources.WatchRequest) error {
 	if err := validateContextID(value.ContextID); err != nil {
 		return err

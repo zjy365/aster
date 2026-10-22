@@ -1,4 +1,4 @@
-import { Container, FileCode2, RotateCw, Trash2 } from "lucide-react";
+import { CircleSlash, Container, FileCode2, LogOut, PlugZap, RotateCw, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 /**
@@ -7,7 +7,7 @@ import type { LucideIcon } from "lucide-react";
  * to the shared command registry: keep the shape declarative so row context
  * menus and the palette can consume the same descriptors later.
  */
-export type ResourceActionId = "image" | "restart" | "edit" | "delete";
+export type ResourceActionId = "image" | "restart" | "edit" | "delete" | "cordon" | "uncordon" | "drain";
 
 export interface ResourceActionDescriptor {
   id: ResourceActionId;
@@ -41,6 +41,31 @@ const RESTART: ResourceActionDescriptor = {
   shortcut: "R",
 };
 
+const CORDON: ResourceActionDescriptor = {
+  id: "cordon",
+  label: "Cordon",
+  icon: CircleSlash,
+  danger: false,
+  needsInput: false,
+};
+
+const UNCORDON: ResourceActionDescriptor = {
+  id: "uncordon",
+  label: "Uncordon",
+  icon: PlugZap,
+  danger: false,
+  needsInput: false,
+};
+
+/** Drain evicts every pod on the node — destructive for workloads, so it carries the destructive tone. */
+const DRAIN: ResourceActionDescriptor = {
+  id: "drain",
+  label: "Drain…",
+  icon: LogOut,
+  danger: true,
+  needsInput: false,
+};
+
 /**
  * Full-YAML editing is the universal write path: it stays anchored immediately
  * left of Delete so its position is identical across every kind.
@@ -63,9 +88,17 @@ const DELETE: ResourceActionDescriptor = {
   shortcut: "⌘⌫",
 };
 
-export function resourceActionsFor(kind: string): ResourceActionDescriptor[] {
+export interface ResourceActionContext {
+  /** Live spec.unschedulable for Node rows; picks the Cordon/Uncordon label. */
+  nodeUnschedulable?: boolean;
+}
+
+export function resourceActionsFor(kind: string, context?: ResourceActionContext): ResourceActionDescriptor[] {
   const actions: ResourceActionDescriptor[] = [];
   if (ROLLABLE_KINDS.has(kind)) actions.push(UPDATE_IMAGE, RESTART);
+  if (kind === "Node") {
+    actions.push(context?.nodeUnschedulable ? UNCORDON : CORDON, DRAIN);
+  }
   // Secrets stay read-only: their data never leaves the core, so no Edit anchor.
   if (kind !== "Secret") actions.push(EDIT);
   actions.push(DELETE);

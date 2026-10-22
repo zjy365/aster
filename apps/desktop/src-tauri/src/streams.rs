@@ -33,6 +33,7 @@ pub struct Streams {
     watches: Mutex<HashMap<String, CancellationToken>>,
     logs: Mutex<HashMap<String, CancellationToken>>,
     helm: Mutex<HashMap<String, CancellationToken>>,
+    drains: Mutex<HashMap<String, CancellationToken>>,
 }
 
 impl Streams {
@@ -42,6 +43,7 @@ impl Streams {
             watches: Mutex::new(HashMap::new()),
             logs: Mutex::new(HashMap::new()),
             helm: Mutex::new(HashMap::new()),
+            drains: Mutex::new(HashMap::new()),
         }
     }
 
@@ -84,6 +86,20 @@ impl Streams {
 
     pub fn stop_helm(&self, id: &str) {
         Self::cancel(&self.helm, id);
+    }
+
+    pub fn start_drain(self: &Arc<Self>, id: String, request: Value, channel: Channel<Value>) {
+        let token = Self::replace_all(&self.drains, &id);
+        let this = Arc::clone(self);
+        let sink: BatchSink = Arc::new(move |batch| channel.send(batch).is_ok());
+        tauri::async_runtime::spawn(async move {
+            this.run_drain(request, &sink, token.clone()).await;
+            Self::finish(&this.drains, &id, &token);
+        });
+    }
+
+    pub fn stop_drain(&self, id: &str) {
+        Self::cancel(&self.drains, id);
     }
 
     async fn run_helm(&self, request: Value, sink: &BatchSink, token: CancellationToken) {
@@ -131,6 +147,51 @@ impl Streams {
         Self::cancel_map(&self.watches);
         Self::cancel_map(&self.logs);
         Self::cancel_map(&self.helm);
+        Self::cancel_map(&self.drains);
+    }
+
+    /// One drain request against the core's ndjson stream. Unlike helm there
+    /// is no silence timeout: a drain legitimately waits minutes while pods
+    /// terminate under PodDisruptionBudgets, so cancellation and the core's
+    /// terminal summary event are the only ends. Events are forwarded
+    /// verbatim; the renderer owns their interpretation.
+    async fn run_drain(&self, request: Value, sink: &BatchSink, token: CancellationToken) {
+        let stream = match self.core.post_stream("/v1/nodes/drain", request).await {
+            Ok(stream) => stream,
+            Err(message) => {
+                let _ = sink(json!({"type": "summary", "complete": false, "error": message}));
+                return;
+            }
+        };
+        let stream = stream.map(|chunk| chunk.map_err(crate::core_client::transport_error));
+        let mut lines = Ndjson::new(stream);
+        loop {
+            match lines.next(&token).await {
+                NdjsonItem::Cancelled => return,
+                NdjsonItem::Ended => {
+                    let _ = sink(json!({
+                        "type": "summary",
+                        "complete": false,
+                        "error": "Drain ended before completion. The node stays cordoned; retry to continue.",
+                    }));
+                    return;
+                }
+                NdjsonItem::Failed(message) => {
+                    let _ = sink(json!({"type": "summary", "complete": false, "error": message}));
+                    return;
+                }
+                NdjsonItem::Line(line) => {
+                    let event: Value = match serde_json::from_str(&line) {
+                        Ok(value) => value,
+                        Err(_) => continue,
+                    };
+                    let terminal = matches!(event.get("type").and_then(Value::as_str), Some("summary"));
+                    if !sink(event) || terminal {
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     /// A renderer keeps at most one subscription of each kind; starting a new

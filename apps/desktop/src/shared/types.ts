@@ -291,6 +291,56 @@ export interface PodPortForward {
   pod?: string;
 }
 
+export interface NodeCordonRequest {
+  contextId: string;
+  nodeName: string;
+  /** True cordons (stop scheduling new pods); false uncordons. */
+  unschedulable: boolean;
+}
+
+export interface NodeCordonResponse {
+  nodeName: string;
+  unschedulable: boolean;
+  /** False when the node already carried the requested state. */
+  changed: boolean;
+}
+
+export interface NodeDrainOptions {
+  /** Skip DaemonSet-managed pods instead of aborting the drain. */
+  ignoreDaemonsets: boolean;
+  /** Evict pods that no controller manages. */
+  force: boolean;
+  /** Proceed past pods with emptyDir volumes (their local data is lost). */
+  deleteEmptyDirData: boolean;
+  /** DELETE pods instead of the eviction API, bypassing PodDisruptionBudgets. */
+  disableEviction: boolean;
+}
+
+export interface NodeDrainRequest {
+  contextId: string;
+  nodeName: string;
+  options?: NodeDrainOptions;
+}
+
+/** One ndjson line of the drain stream: the leading cordon, per-pod steps, summary. */
+export interface NodeDrainEvent {
+  type: "cordon" | "pod" | "summary";
+  node?: string;
+  unschedulable?: boolean;
+  changed?: boolean;
+  namespace?: string;
+  pod?: string;
+  status?: "evicting" | "evicted" | "deleting" | "deleted" | "failed" | "skipped";
+  reason?: string;
+  message?: string;
+  total?: number;
+  evicted?: number;
+  skipped?: number;
+  failed?: number;
+  complete?: boolean;
+  error?: string;
+}
+
 export interface PortForwardStartRequest {
   contextId: string;
   namespace: string;
@@ -660,6 +710,9 @@ export interface DesktopApi {
     followWorkloadLogs(request: WorkloadLogsRequest, listener: (batch: LogStreamBatch) => void): () => void;
     portForwardStart(request: PortForwardStartRequest): Promise<PodPortForward>;
     portForwardStop(id: string): Promise<void>;
+    nodeCordon(request: NodeCordonRequest): Promise<NodeCordonResponse>;
+    /** Streams drain progress; the dispose function aborts the drain. */
+    drainNode(request: NodeDrainRequest, listener: (event: NodeDrainEvent) => void): () => void;
     exec(request: PodExecRequest): Promise<PodExecResponse>;
     mutate(request: ResourceMutationRequest): Promise<ResourceMutationResponse>;
     watch(request: ResourceListRequest, listener: (batch: ResourceWatchBatch) => void): () => void;
