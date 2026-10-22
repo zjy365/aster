@@ -66,6 +66,7 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("POST /v1/workloads/logs", server.workloadLogs)
 	mux.HandleFunc("POST /v1/workloads/logs/stream", server.streamWorkloadLogs)
 	mux.HandleFunc("POST /v1/metrics/pods", server.podMetrics)
+	mux.HandleFunc("GET /v1/metrics/nodes", server.nodeMetrics)
 	mux.HandleFunc("POST /v1/pods/exec", server.podExec)
 	mux.HandleFunc("POST /v1/pods/debug", server.podDebug)
 	mux.HandleFunc("POST /v1/pods/portforward", server.startPortForward)
@@ -626,6 +627,24 @@ func (s *Server) podMetrics(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	result, err := s.resources.PodMetrics(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+// nodeMetrics serves the cluster-scoped node usage snapshot; the context
+// rides the query string like the other GET endpoints, and a missing
+// Metrics Server degrades through writeServiceError exactly like pod
+// metrics, so both surfaces show the same error envelope.
+func (s *Server) nodeMetrics(writer http.ResponseWriter, request *http.Request) {
+	contextID := request.URL.Query().Get("contextId")
+	if err := validateContextID(contextID); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	result, err := s.resources.NodeMetrics(request.Context(), resources.NodeMetricsRequest{ContextID: contextID})
 	if err != nil {
 		writeServiceError(writer, err)
 		return

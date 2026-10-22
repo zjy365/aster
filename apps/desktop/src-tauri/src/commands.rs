@@ -135,6 +135,13 @@ pub async fn metrics_pods(state: State<'_, AppState>, request: Value) -> Result<
 }
 
 #[tauri::command]
+pub async fn metrics_nodes(state: State<'_, AppState>, context_id: String) -> Result<Value, String> {
+    // Cluster-scoped counterpart of metrics_pods: the context rides the query
+    // string like the other GET forwards (overview, discovery).
+    state.core.get(&format!("/v1/metrics/nodes?contextId={}", url_encode(&context_id))).await
+}
+
+#[tauri::command]
 pub async fn pods_logs(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
     state.core.post("/v1/pods/logs", request).await
 }

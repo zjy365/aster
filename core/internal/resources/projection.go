@@ -63,6 +63,10 @@ func project(object *unstructured.Unstructured) ResourceRow {
 		row.Status = nodeStatus(object.Object)
 		row.Addresses = nodeAddresses(object.Object)
 		row.Version, _, _ = unstructured.NestedString(object.Object, "status", "nodeInfo", "kubeletVersion")
+		if allocatable, found, _ := unstructured.NestedStringMap(object.Object, "status", "allocatable"); found {
+			row.AllocatableCPU = allocatable["cpu"]
+			row.AllocatableMemory = allocatable["memory"]
+		}
 	case "Role", "ClusterRole":
 		row.Rules = policyRules(object.Object)
 	case "RoleBinding", "ClusterRoleBinding":

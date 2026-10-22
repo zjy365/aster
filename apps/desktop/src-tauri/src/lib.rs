@@ -135,6 +135,7 @@ pub fn run() {
             commands::resources_related,
             commands::resources_search,
             commands::metrics_pods,
+            commands::metrics_nodes,
             commands::pods_logs,
             commands::workloads_logs,
             commands::pods_exec,

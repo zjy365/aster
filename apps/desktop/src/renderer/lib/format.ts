@@ -155,3 +155,13 @@ export function totalPodUsage(containers: { cpu?: string; memory?: string }[]): 
     memoryBytes: memorySeen ? memoryBytes : undefined,
   };
 }
+
+/**
+ * Usage as a share of capacity in percent. Undefined when either side is
+ * unparsable or the capacity is zero (a node that reports no allocatable),
+ * so callers fall back to the bare usage value.
+ */
+export function usagePercent(used: number | undefined, capacity: number | undefined): number | undefined {
+  if (used === undefined || capacity === undefined || capacity <= 0) return undefined;
+  return (used / capacity) * 100;
+}

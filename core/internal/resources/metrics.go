@@ -14,7 +14,10 @@ import (
 // Pod metrics via metrics.k8s.io, accessed directly by GVR — the metrics API
 // is not part of the resource catalog and never goes through discovery.
 
-var podsMetricsGVR = schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"}
+var (
+	podsMetricsGVR  = schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"}
+	nodesMetricsGVR = schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}
+)
 
 func (s *Service) PodMetrics(ctx context.Context, request MetricsRequest) (MetricsResponse, error) {
 	if strings.TrimSpace(request.ContextID) == "" {
@@ -76,3 +79,48 @@ func (s *Service) PodMetrics(ctx context.Context, request MetricsRequest) (Metri
 // same continue token cannot spin the request forever. At 5000 per page this
 // covers 100k pods, matching the overview snapshot ceiling.
 const maxMetricsPages = 20
+
+// NodeMetrics lists current per-node CPU/memory usage from metrics.k8s.io.
+// Nodes are cluster-scoped, so there is no namespace branch; pagination and
+// the missing-Metrics-Server error path are shared with PodMetrics, and a
+// cluster without the metrics API surfaces as the same stable error.
+func (s *Service) NodeMetrics(ctx context.Context, request NodeMetricsRequest) (NodeMetricsResponse, error) {
+	if strings.TrimSpace(request.ContextID) == "" {
+		return NodeMetricsResponse{}, invalid("contextId is required")
+	}
+	client, err := s.clients.Client(request.ContextID)
+	if err != nil {
+		return NodeMetricsResponse{}, err
+	}
+	response := NodeMetricsResponse{Nodes: make([]NodeMetric, 0)}
+	continueToken := ""
+	pages := 0
+	for {
+		pages++
+		if pages > maxMetricsPages {
+			return NodeMetricsResponse{}, fmt.Errorf("node metrics exceeded %d pages", maxMetricsPages)
+		}
+		options := metav1.ListOptions{Limit: maxPageSize, Continue: continueToken}
+		list, err := client.Resource(nodesMetricsGVR).List(ctx, options)
+		if err != nil {
+			return NodeMetricsResponse{}, err
+		}
+		for index := range list.Items {
+			item := &list.Items[index]
+			usage, _, _ := unstructured.NestedStringMap(item.Object, "usage")
+			metric := NodeMetric{
+				Name:   item.GetName(),
+				CPU:    usage["cpu"],
+				Memory: usage["memory"],
+			}
+			metric.Window, _, _ = unstructured.NestedString(item.Object, "window")
+			metric.Timestamp, _, _ = unstructured.NestedString(item.Object, "timestamp")
+			response.Nodes = append(response.Nodes, metric)
+		}
+		continueToken = list.GetContinue()
+		if continueToken == "" {
+			break
+		}
+	}
+	return response, nil
+}

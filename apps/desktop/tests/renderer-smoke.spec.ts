@@ -87,6 +87,9 @@ const MOCK_DESKTOP_API = `
     available: 2,
     updated: 2,
     images: ["nginx:1.27"],
+    // Node rows carry allocatable capacity so the usage columns can show
+    // pressure relative to it.
+    ...(kind.kind === "Node" ? { allocatableCpu: "4", allocatableMemory: "16Gi" } : {}),
   });
 
   const pageOf = (request) => {
@@ -169,6 +172,22 @@ const MOCK_DESKTOP_API = `
     "      ports:",
     "        - containerPort: 80",
     "          protocol: TCP",
+  ].join("\\n");
+
+  // A Node object with allocatable capacity, the usage columns' denominator.
+  const nodeYaml = (name) => [
+    "apiVersion: v1",
+    "kind: Node",
+    "metadata:",
+    "  name: " + name,
+    "status:",
+    "  conditions:",
+    "    - type: Ready",
+    "      status: \\"True\\"",
+    "  allocatable:",
+    "    cpu: \\"4\\"",
+    "    memory: 16Gi",
+    "    pods: \\"110\\"",
   ].join("\\n");
 
   window.__ASTER_DESKTOP__ = {
@@ -275,6 +294,16 @@ const MOCK_DESKTOP_API = `
           { name: "pods-2", namespace: namespace || "default", containers: [{ name: "app", cpu: value(200, 2) + "m", memory: (192 + (2 % 3) * 8) + "Mi" }] },
         ];
       },
+      // Cluster-scoped snapshot; the row fixture pairs it with 4-core /
+      // 16GiB allocatable nodes so the table can show pressure percentages.
+      nodes: async () => {
+        const value = (base, index) => base + (index % 3) * 5;
+        return [
+          { name: "nodes-0", cpu: value(620, 0) + "m", memory: (6144 + (0 % 3) * 256) + "Mi", window: "30s", timestamp: "2026-10-17T00:00:00Z" },
+          { name: "nodes-1", cpu: value(310, 1) + "m", memory: (3072 + (1 % 3) * 256) + "Mi", window: "30s", timestamp: "2026-10-17T00:00:00Z" },
+          { name: "nodes-2", cpu: value(930, 2) + "m", memory: (9216 + (2 % 3) * 256) + "Mi", window: "30s", timestamp: "2026-10-17T00:00:00Z" },
+        ];
+      },
     },
     overview: {
       get: async () => ({
@@ -374,7 +403,9 @@ const MOCK_DESKTOP_API = `
           ? deploymentYaml(request.name)
           : request.resourceKind.kind === "Pod"
             ? podYaml(request.name)
-            : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
+            : request.resourceKind.kind === "Node"
+              ? nodeYaml(request.name)
+              : "apiVersion: apps/v1\\nkind: " + request.resourceKind.kind + "\\nmetadata:\\n  name: " + request.name + "\\n";
         if (appliedReplicas !== null && request.resourceKind.kind === "Deployment") {
           fresh.desired = appliedReplicas;
           fresh.resourceVersion = "1002";
@@ -1543,6 +1574,48 @@ test("pod detail shows live resource usage charts", async ({ page }) => {
   await expect(usage.getByTestId("pod-usage-refresh")).toBeVisible();
   await expectNoOverflow(page, "pod detail usage 1280x800");
   await screenshot(page, "pod-usage-1280");
+
+  // The chart surface itself renders an SVG per series (CPU and memory).
+  await expect(usage.locator(".recharts-wrapper svg").first()).toBeVisible();
+  await expect(usage.locator(".pod-usage-area")).toHaveCount(2);
+  expect(failures).toEqual([]);
+});
+
+test("node table and detail show live resource usage", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await connectToDev(page);
+
+  await page.getByTestId("resource-nav-nodes").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const firstRow = grid.getByRole("row").nth(1);
+  await expect(firstRow).toContainText("nodes-0", { timeout: 15_000 });
+
+  // The Node table carries the usage columns ahead of Ready; each value is
+  // paired with its share of the row's allocatable capacity.
+  const headerText = await grid.getByRole("row").first().textContent();
+  expect(headerText?.indexOf("CPU") ?? -1).toBeGreaterThan(-1);
+  expect(headerText!.indexOf("CPU")).toBeLessThan(headerText!.indexOf("Ready"));
+  expect(headerText!.indexOf("Memory")).toBeLessThan(headerText!.indexOf("Ready"));
+  await expect(firstRow).toContainText("620m · 16%");
+  await expect(firstRow).toContainText("6.0 GiB · 38%");
+  await expectNoOverflow(page, "node table with metrics 1280x800");
+  await screenshot(page, "node-table-metrics-1280");
+
+  await firstRow.click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+
+  // The overview renders the usage charts once the first sample lands.
+  const usage = page.getByTestId("node-usage");
+  await expect(usage).toBeVisible({ timeout: 15_000 });
+  await expect(usage).toContainText("Resource usage");
+  await expect(usage).toContainText("620m");
+  await expect(usage).toContainText("6.0 GiB");
+  await expect(usage.getByTestId("node-usage-refresh")).toBeVisible();
+  await expectNoOverflow(page, "node detail usage 1280x800");
+  await screenshot(page, "node-usage-1280");
 
   // The chart surface itself renders an SVG per series (CPU and memory).
   await expect(usage.locator(".recharts-wrapper svg").first()).toBeVisible();
@@ -3674,7 +3747,7 @@ test("node detail cordons, uncordons and drains with streamed progress", async (
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
-  // The generic Node YAML carries no spec, so pin unschedulable: true to
+  // The Node YAML carries no spec, so pin unschedulable: true to
   // exercise the Uncordon half of the toggle before draining.
   await page.evaluate(() => {
     const fixture = window as unknown as {
@@ -3684,7 +3757,7 @@ test("node detail cordons, uncordons and drains with streamed progress", async (
     fixture.__ASTER_DESKTOP__.resources.get = async (request) => {
       const result = await base(request);
       if (request.resourceKind.kind === "Node") {
-        return { ...result, yaml: result.yaml + "spec:\n  unschedulable: true\n" };
+        return { ...result, yaml: result.yaml + "\nspec:\n  unschedulable: true\n" };
       }
       return result;
     };
@@ -3913,3 +3986,40 @@ test("custom column headers stay aligned when reordered while scrolled", async (
   expect(failures).toEqual([]);
 });
 
+
+
+test("aggregate node tables keep cluster identity without borrowing primary metrics", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await page.evaluate(() => {
+    const api = window.__ASTER_DESKTOP__!;
+    const original = api.metrics.nodes;
+    (window as unknown as { nodeCalls: string[] }).nodeCalls = [];
+    api.metrics.nodes = async (contextId) => {
+      (window as unknown as { nodeCalls: string[] }).nodeCalls.push(contextId);
+      return original(contextId);
+    };
+  });
+  await page.getByTestId("context-picker-multi").click();
+  await page.getByTestId("context-option-dev").click();
+  await page.getByTestId("context-option-prod").click();
+  await page.getByTestId("context-picker-connect").click();
+  await page.getByTestId("resource-nav-nodes").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await expect(grid.getByRole("row").nth(1)).toContainText("nodes-0");
+  await expect(grid.getByRole("columnheader", { name: "Cluster", exact: true })).toBeVisible();
+  await expect(grid.getByRole("columnheader", { name: "CPU", exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { nodeCalls: string[] }).nodeCalls)).toEqual([]);
+  // Cluster identity remains a pinned column even when Name is hidden.
+  await page.getByTestId("table-columns-trigger").click();
+  await page.getByTestId("column-picker").getByTestId("column-toggle-name").click();
+  await page.keyboard.press("Escape");
+  const first = grid.getByRole("row").nth(1);
+  await expect(first.getByRole("gridcell").nth(1)).toHaveText("dev");
+  const header = await grid.getByRole("columnheader", { name: "Cluster", exact: true }).boundingBox();
+  const cell = await first.locator(".cluster-cell").boundingBox();
+  expect(Math.abs(header!.x - cell!.x)).toBeLessThanOrEqual(2);
+  await expectNoOverflow(page, "aggregate node table with custom columns");
+  await screenshot(page, "aggregate-node-columns-1280");
+});

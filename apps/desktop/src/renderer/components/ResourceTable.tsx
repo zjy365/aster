@@ -3,7 +3,7 @@ import { AlertCircle, Boxes, Check, LoaderCircle, Minus, type LucideProps } from
 import { Checkbox } from "@base-ui/react/checkbox";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ResourceRow } from "../../shared/types";
-import { formatAge, formatCpuUsage, formatMemoryUsage, formatReady } from "../lib/format";
+import { cpuToMillicores, formatAge, formatCpuUsage, formatMemoryUsage, formatReady, memoryToBytes, usagePercent } from "../lib/format";
 import type { TableColumn } from "../lib/table-columns";
 
 type Icon = ComponentType<LucideProps>;
@@ -45,16 +45,17 @@ function trackMinWidth(track: string): number {
  * cells) extend the viewport's scrollable width — that is what makes many
  * columns horizontally scrollable with the header in lockstep.
  */
-function customGrid(columns: readonly TableColumn[], withMetrics: boolean, withCluster: boolean): { template: string; minWidthPx: number } {
+function customGrid(columns: readonly TableColumn[], withMetrics: boolean, withCluster: boolean, withNodeMetrics: boolean): { template: string; minWidthPx: number } {
   const tracks: string[] = [];
+  const metricsWidths = withNodeMetrics ? ["minmax(112px, 0.9fr)", "minmax(128px, 1fr)"] : METRICS_WIDTHS;
   const insertAt = withMetrics ? metricsInsertIndex(columns) : columns.length;
   columns.forEach((column, index) => {
     if (withCluster && index === clusterInsertIndex(columns)) tracks.push("minmax(100px, 0.8fr)");
-    if (index === insertAt) tracks.push(...METRICS_WIDTHS);
+    if (index === insertAt) tracks.push(...metricsWidths);
     tracks.push(column.width);
   });
   if (withCluster && clusterInsertIndex(columns) >= columns.length) tracks.push("minmax(100px, 0.8fr)");
-  if (withMetrics && insertAt >= columns.length) tracks.push(...METRICS_WIDTHS);
+  if (withMetrics && insertAt >= columns.length) tracks.push(...metricsWidths);
   const all = ["32px", ...tracks];
   return {
     template: all.join(" "),
@@ -82,7 +83,7 @@ export function podUsageKey(namespace: string, name: string): string {
   return `${namespace}/${name}`;
 }
 
-export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics, columns, clusterLabel }: {
+export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onToggleAll, hasMore, loadingMore, onLoadMore, loading, error, onSelect, podMetrics, nodeMetrics, columns, clusterLabel }: {
   rows: ResourceRow[];
   selected?: ResourceRow;
   checkedRows: ReadonlySet<string>;
@@ -104,6 +105,8 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   columns?: readonly TableColumn[];
   /** Present in aggregate views; source identity stays visible with any column order. */
   clusterLabel?: (row: ResourceRow) => string;
+  /** Live CPU/memory keyed by node name; present only for the Node kind. */
+  nodeMetrics?: ReadonlyMap<string, { cpu?: string; memory?: string }>;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   // A trailing "load more" row keeps server pagination reachable without a
@@ -115,9 +118,10 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
   // Custom mode: one template drives header and every row (CSS variable on
   // the frame), and the header tracks the viewport's horizontal scroll so
   // many columns keep header and cells aligned.
+  const usageColumns = Boolean(podMetrics || nodeMetrics);
   const customColumns = columns && columns.length > 0 ? columns : null;
   const header = useRef<HTMLDivElement>(null);
-  const grid = customColumns ? customGrid(customColumns, Boolean(podMetrics), Boolean(clusterLabel)) : null;
+  const grid = customColumns ? customGrid(customColumns, usageColumns, Boolean(clusterLabel), Boolean(nodeMetrics)) : null;
   const gridTemplate = grid?.template ?? "";
   const syncHeaderScroll = () => {
     if (header.current && viewport.current) {
@@ -195,7 +199,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
     >
       <div
         ref={header}
-        className={`table-header resource-grid ${podMetrics && !customColumns ? "pod-metrics-grid" : ""} ${customColumns ? "table-grid-custom" : clusterLabel ? "cluster-grid" : ""}`}
+        className={`table-header resource-grid ${usageColumns && !customColumns ? "pod-metrics-grid" : ""} ${customColumns ? "table-grid-custom" : clusterLabel ? "cluster-grid" : ""}`}
         role="row"
         aria-rowindex={1}
       >
@@ -218,7 +222,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
             {customColumns.map((column, index) => (
               <Fragment key={column.id}>
                 {clusterLabel && index === clusterInsertIndex(customColumns) && <span role="columnheader">Cluster</span>}
-                {podMetrics && index === metricsInsertIndex(customColumns) ? (
+                {usageColumns && index === metricsInsertIndex(customColumns) ? (
                   <>
                     <span role="columnheader">CPU</span>
                     <span role="columnheader">Memory</span>
@@ -228,7 +232,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
               </Fragment>
             ))}
             {clusterLabel && clusterInsertIndex(customColumns) >= customColumns.length && <span role="columnheader">Cluster</span>}
-            {podMetrics && metricsInsertIndex(customColumns) >= customColumns.length ? (
+            {usageColumns && metricsInsertIndex(customColumns) >= customColumns.length ? (
               <>
                 <span role="columnheader">CPU</span>
                 <span role="columnheader">Memory</span>
@@ -241,7 +245,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
             {clusterLabel && <span role="columnheader">Cluster</span>}
             <span role="columnheader">Namespace</span>
             <span role="columnheader">Status</span>
-            {podMetrics && (
+            {usageColumns && (
               <>
                 <span role="columnheader">CPU</span>
                 <span role="columnheader">Memory</span>
@@ -275,6 +279,15 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
             const active = selected?.uid === row.uid;
             const checked = checkedRows.has(rowKey(row));
             const usage = podMetrics?.get(podUsageKey(row.namespace, row.name));
+            // Node usage reads capacity off the row itself, so the cell shows
+            // pressure relative to allocatable, not just the absolute number.
+            const nodeUsage = nodeMetrics?.get(row.name);
+            const nodeCpu = nodeUsage?.cpu
+              ? nodeUsageCell(nodeUsage.cpu, row.allocatableCpu, formatCpuUsage, cpuToMillicores)
+              : undefined;
+            const nodeMemory = nodeUsage?.memory
+              ? nodeUsageCell(nodeUsage.memory, row.allocatableMemory, formatMemoryUsage, memoryToBytes)
+              : undefined;
             return (
               <div
                 role="row"
@@ -282,7 +295,7 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                 aria-selected={active}
                 data-row-index={virtualRow.index}
                 tabIndex={virtualRow.index === clampedFocus ? 0 : -1}
-                className={`table-row resource-grid ${podMetrics && !customColumns ? "pod-metrics-grid" : ""} ${customColumns ? "table-grid-custom" : clusterLabel ? "cluster-grid" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
+                className={`table-row resource-grid ${usageColumns && !customColumns ? "pod-metrics-grid" : ""} ${customColumns ? "table-grid-custom" : clusterLabel ? "cluster-grid" : ""} ${active ? "selected" : ""} ${checked ? "checked" : ""}`}
                 key={rowKey(row)}
                 onClick={() => {
                   setFocusIndex(virtualRow.index);
@@ -310,13 +323,13 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                     {customColumns.map((column, index) => (
                       <Fragment key={column.id}>
                         {clusterLabel && index === clusterInsertIndex(customColumns) && <span role="gridcell" className="cluster-cell">{clusterLabel(row)}</span>}
-                        {podMetrics && index === metricsInsertIndex(customColumns) ? (
+                        {usageColumns && index === metricsInsertIndex(customColumns) ? (
                           <>
                             <span role="gridcell" className="tabular pod-usage-cell">
-                              {usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
+                              {nodeMetrics ? nodeCpu?.text ?? "—" : usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
                             </span>
                             <span role="gridcell" className="tabular pod-usage-cell">
-                              {usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
+                              {nodeMetrics ? nodeMemory?.text ?? "—" : usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
                             </span>
                           </>
                         ) : null}
@@ -328,13 +341,13 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                       </Fragment>
                     ))}
                     {clusterLabel && clusterInsertIndex(customColumns) >= customColumns.length && <span role="gridcell" className="cluster-cell">{clusterLabel(row)}</span>}
-                    {podMetrics && metricsInsertIndex(customColumns) >= customColumns.length ? (
+                    {usageColumns && metricsInsertIndex(customColumns) >= customColumns.length ? (
                       <>
                         <span role="gridcell" className="tabular pod-usage-cell">
-                          {usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
+                          {nodeMetrics ? nodeCpu?.text ?? "—" : usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
                         </span>
                         <span role="gridcell" className="tabular pod-usage-cell">
-                          {usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
+                          {nodeMetrics ? nodeMemory?.text ?? "—" : usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
                         </span>
                       </>
                     ) : null}
@@ -345,13 +358,13 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
                     {clusterLabel && <span role="gridcell" className="cluster-cell">{clusterLabel(row)}</span>}
                     <span role="gridcell">{row.namespace || "Cluster-scoped"}</span>
                     <span role="gridcell">{row.status || "Unknown"}</span>
-                    {podMetrics && (
+                    {usageColumns && (
                       <>
                         <span role="gridcell" className="tabular pod-usage-cell">
-                          {usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
+                          {nodeMetrics ? nodeCpu?.text ?? "—" : usage?.cpu ? formatCpuUsage(usage.cpu) : "—"}
                         </span>
                         <span role="gridcell" className="tabular pod-usage-cell">
-                          {usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
+                          {nodeMetrics ? nodeMemory?.text ?? "—" : usage?.memory ? formatMemoryUsage(usage.memory) : "—"}
                         </span>
                       </>
                     )}
@@ -370,6 +383,27 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
 
 export function TableState({ icon: StateIcon, title, detail, tone, spinning }: { icon: Icon; title: string; detail: string; tone?: "error"; spinning?: boolean }) {
   return <div className={`table-state ${tone || ""}`}><StateIcon className={spinning ? "spin" : ""} size={22} /><strong>{title}</strong><p>{detail}</p></div>;
+}
+
+/** Formats one node usage cell: the humanized value plus its share of the
+ * node's allocatable capacity ("620m · 16%"), falling back to the bare value
+ * when capacity is missing or unparsable. */
+function nodeUsageCell(
+  used: string,
+  allocatable: string | undefined,
+  format: (value: string) => string,
+  toNumber: (value: string) => number | undefined,
+): { text: string; title: string } {
+  const formatted = format(used);
+  const percent = usagePercent(toNumber(used), allocatable === undefined ? undefined : toNumber(allocatable));
+  if (percent === undefined) {
+    return { text: formatted, title: formatted };
+  }
+  const share = Math.round(percent);
+  return {
+    text: `${formatted} · ${share}%`,
+    title: `${share}% of ${format(allocatable!)} allocatable`,
+  };
 }
 
 export function StatusDot({ status }: { status?: string }) {
