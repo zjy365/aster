@@ -107,7 +107,7 @@ export function AddDebugContainerDialog({
             <DialogTitle>Add debug container</DialogTitle>
             <DialogDescription>
               Inject an ephemeral container into {podName} to inspect its filesystem, network, and
-              processes — the pod spec and its owning workload are never modified, and the container
+              processes. The owning workload template stays unchanged, and the container
               is removed with the pod. Minimal images without a shell become debuggable this way.
             </DialogDescription>
           </DialogHeader>
