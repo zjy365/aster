@@ -5,6 +5,7 @@ mod menu;
 mod settings;
 mod sidecar;
 mod streams;
+mod terminal;
 mod updater;
 
 use std::sync::Arc;
@@ -21,6 +22,9 @@ pub struct AppState {
     pub settings: Arc<settings::SettingsFile>,
     pub streams: Arc<streams::Streams>,
     pub updater: Arc<updater::Updater>,
+    /// Staged single-context kubeconfigs behind the "Open kubectl here"
+    /// handoff; every staged file is registered here and deleted on exit.
+    pub terminal: Arc<terminal::TempKubeconfigs>,
 }
 
 /// The webview may only load app content: the custom protocols (macOS
@@ -58,12 +62,16 @@ pub fn run() {
             let sidecar = Arc::new(sidecar::Sidecar::new(app.handle().clone(), settings.clone()));
             let core = Arc::new(core_client::CoreClient::new(sidecar.clone()));
             let updater = updater::Updater::new(app.handle().clone());
+            let terminal = Arc::new(terminal::TempKubeconfigs::new());
+            // Leftovers from a crashed run never outlive their grace period.
+            terminal::sweep_stale(&terminal.staging_dir(), std::time::Duration::from_secs(24 * 60 * 60));
             app.manage(AppState {
                 sidecar: sidecar.clone(),
                 core: core.clone(),
                 settings,
                 streams: Arc::new(streams::Streams::new(core)),
                 updater: updater.clone(),
+                terminal,
             });
             menu::install(app.handle())?;
             let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -148,6 +156,8 @@ pub fn run() {
             commands::import_kubeconfig_content,
             commands::save_text_file,
             commands::appearance_set_theme_source,
+            commands::terminal_kubectl_available,
+            commands::terminal_open_kubectl,
             commands::updater_state,
             commands::updater_check,
             commands::updater_download,
@@ -167,6 +177,8 @@ pub fn run() {
             tauri::RunEvent::Exit => {
                 let state = app.state::<AppState>();
                 tauri::async_runtime::block_on(state.sidecar.stop());
+                // Staged kubeconfigs are credentials: none outlive the app.
+                state.terminal.cleanup_all();
             }
             _ => {}
         });

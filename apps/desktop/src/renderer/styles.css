@@ -932,6 +932,7 @@ h2 {
   min-height: 44px;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-top: 8px;
   color: var(--text-secondary);
   font-size: 11px;
@@ -940,6 +941,37 @@ h2 {
 .context-picker-footer strong {
   color: var(--text);
   font-weight: 600;
+}
+
+/* Status text yields space to the action group instead of pushing it out. */
+.context-picker-selection {
+  min-width: 0;
+}
+
+.context-picker-selection .context-alias-error {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.context-picker-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Terminal handoff: same height as Connect so the footer pair reads as one
+   action group; outline keeps it secondary to connecting. */
+.open-kubectl {
+  height: 32px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 6px;
+}
+
+.open-kubectl:disabled {
+  cursor: not-allowed;
 }
 
 .connect-context {

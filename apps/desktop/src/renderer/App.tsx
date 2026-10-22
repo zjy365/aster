@@ -219,6 +219,19 @@ export default function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [sourcesReport, setSourcesReport] = useState<SourcesReport>({ chain: [], configured: [] });
   const [appVersion, setAppVersion] = useState("");
+  // Terminal handoff: probed once so the picker can disable the action with
+  // an explanation instead of failing on click. null = probe still pending.
+  const [kubectlAvailable, setKubectlAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    desktop.terminal
+      .kubectlAvailable()
+      .then((available) => active && setKubectlAvailable(available))
+      .catch(() => active && setKubectlAvailable(false));
+    return () => {
+      active = false;
+    };
+  }, []);
   const reloadSources = useCallback(async () => {
     try {
       setSourcesReport(await desktop.contexts.sourcesReport());
@@ -642,6 +655,8 @@ export default function App() {
           setSettings(await desktop.settings.setContextAlias(contextId, alias));
         }}
         onOpenExternal={(url) => void desktop.app.openExternal(url)}
+        kubectlAvailable={kubectlAvailable}
+        onOpenKubectl={(contextId) => desktop.terminal.openKubectl(contextId)}
       />
       {forwardCleanupNotice || (updateCard && <UpdateNotice card={updateCard} onOpenExternal={(url) => void desktop.app.openExternal(url)} />)}
       </>
