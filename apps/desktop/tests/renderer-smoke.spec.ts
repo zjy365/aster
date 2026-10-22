@@ -3632,6 +3632,44 @@ for (const navigation of ["related", "palette"] as const) {
   });
 }
 
+for (const operation of ["cordon", "drain"] as const) {
+  test(`node ${operation} dialog owns destructive keyboard shortcuts`, async ({ page }) => {
+    const failures = collectFailures(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/");
+    await page.evaluate(() => {
+      const fixture = window as unknown as {
+        __nodeMutationAttempts: number;
+        __ASTER_DESKTOP__: { resources: { mutate(request: unknown): Promise<unknown> } };
+      };
+      fixture.__nodeMutationAttempts = 0;
+      const mutate = fixture.__ASTER_DESKTOP__.resources.mutate;
+      fixture.__ASTER_DESKTOP__.resources.mutate = (request) => {
+        fixture.__nodeMutationAttempts++;
+        return mutate(request);
+      };
+    });
+    await connectToDev(page);
+    await page.getByTestId("resource-nav-nodes").click();
+    await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+    await page.getByTestId(`resource-action-${operation}`).click();
+    const dialog = page.getByTestId(`node-${operation}-dialog`);
+    const confirm = page.getByTestId(`node-${operation}-confirm`);
+    await expect(dialog).toBeVisible();
+    // Buttons are deliberately outside the editable-element shortcut guard.
+    await confirm.focus();
+    await page.keyboard.press("Meta+Backspace");
+    await page.keyboard.press("e");
+    expect(await page.evaluate(() => (window as unknown as { __nodeMutationAttempts: number }).__nodeMutationAttempts)).toBe(0);
+    await expect(page.getByTestId("mutation-review-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("resource-yaml-editor")).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expectNoOverflow(page, `node ${operation} keyboard ownership 1280x800`);
+    await screenshot(page, `node-${operation}-keyboard-1280`);
+    expect(failures).toEqual([]);
+  });
+}
+
 test("node detail cordons, uncordons and drains with streamed progress", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
