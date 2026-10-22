@@ -6,7 +6,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 )
 
 // Port forwards: local random ports on loopback, owned by this service and
@@ -24,6 +26,9 @@ type ForwardTargetResolver interface {
 
 type portForwardEntry struct {
 	stop func()
+	// session is the read-only metadata served by ListPortForwards; it is
+	// written once at registration and never mutated afterwards.
+	session PortForwardSession
 }
 
 func (s *Service) StartPortForward(ctx context.Context, request PortForwardRequest) (PortForwardResponse, error) {
@@ -74,7 +79,19 @@ func (s *Service) StartPortForward(ctx context.Context, request PortForwardReque
 	}
 	id := newPortForwardID()
 	s.portForwardMu.Lock()
-	s.portForwards[id] = portForwardEntry{stop: func() { cancel(); stop() }}
+	s.portForwards[id] = portForwardEntry{
+		stop: func() { cancel(); stop() },
+		session: PortForwardSession{
+			ID:          id,
+			ContextID:   request.ContextID,
+			Namespace:   request.Namespace,
+			ResourceRef: PortForwardResourceRef{Kind: kind, Name: request.Name},
+			LocalPort:   boundPort,
+			TargetPort:  podPort,
+			StartedAt:   time.Now().UTC(),
+			Pod:         resolved,
+		},
+	}
 	s.portForwardMu.Unlock()
 	return PortForwardResponse{ID: id, LocalPort: boundPort, Pod: resolved}, nil
 }
@@ -115,6 +132,29 @@ func (s *Service) StopAllPortForwards() {
 	for _, entry := range entries {
 		entry.stop()
 	}
+}
+
+// ListPortForwards exposes the active forward registry read-only, optionally
+// scoped to one context; an empty contextID returns every session. Stopping
+// still goes through StopPortForward — this never mutates the registry. Rows
+// are ordered oldest first so management surfaces show a stable order.
+func (s *Service) ListPortForwards(contextID string) []PortForwardSession {
+	s.portForwardMu.Lock()
+	sessions := make([]PortForwardSession, 0, len(s.portForwards))
+	for _, entry := range s.portForwards {
+		if contextID != "" && entry.session.ContextID != contextID {
+			continue
+		}
+		sessions = append(sessions, entry.session)
+	}
+	s.portForwardMu.Unlock()
+	sort.Slice(sessions, func(i, j int) bool {
+		if sessions[i].StartedAt.Equal(sessions[j].StartedAt) {
+			return sessions[i].ID < sessions[j].ID
+		}
+		return sessions[i].StartedAt.Before(sessions[j].StartedAt)
+	})
+	return sessions
 }
 
 func newPortForwardID() string {

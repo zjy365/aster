@@ -28,6 +28,12 @@ interface StoreState {
 const listeners = new Set<() => void>();
 let state: StoreState = { contextId: "", entries: new Map() };
 let snapshotCache: PortForwardEntry[] = [];
+/** Whole-registry snapshot (context + entries) for the sessions panel merge. */
+export interface PortForwardRegistrySnapshot {
+  contextId: string;
+  entries: PortForwardEntry[];
+}
+let registrySnapshot: PortForwardRegistrySnapshot = { contextId: "", entries: [] };
 export interface PendingForwardStop extends PortForwardEntry { contextId: string; id: string }
 const pendingStops = new Map<string, PendingForwardStop>();
 let pendingSnapshot: PendingForwardStop[] = [];
@@ -82,6 +88,7 @@ export function usePendingForwardStops() {
 
 function notify() {
   snapshotCache = Array.from(state.entries.values());
+  registrySnapshot = { contextId: state.contextId, entries: snapshotCache };
   pendingSnapshot = Array.from(pendingStops.values());
   for (const listener of listeners) listener();
 }
@@ -176,6 +183,14 @@ export function usePortForwards(contextId: string) {
     stop: stopPortForward,
     byKey,
   }), [entries, contextId, byKey]);
+}
+
+/**
+ * The full renderer-owned registry (one context's entries at a time), read by
+ * the sessions panel to reconcile against the sidecar's session list.
+ */
+export function usePortForwardRegistry(): PortForwardRegistrySnapshot {
+  return useSyncExternalStore(subscribe, () => registrySnapshot, () => registrySnapshot);
 }
 
 /** Test-only accessors; never imported by app code. */

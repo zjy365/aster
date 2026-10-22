@@ -70,6 +70,15 @@ func validateContextID(value string) error {
 	return checkLength("contextId", value, maxContextID)
 }
 
+// validateOptionalContextID accepts an absent contextId (an unfiltered list)
+// and only bounds a present one.
+func validateOptionalContextID(value string) error {
+	if value == "" {
+		return nil
+	}
+	return checkLength("contextId", value, maxContextID)
+}
+
 func validateContextHealthRequest(value contextHealthRequest) error {
 	if len(value.ContextIDs) == 0 {
 		return fmt.Errorf("contextIds is required")
