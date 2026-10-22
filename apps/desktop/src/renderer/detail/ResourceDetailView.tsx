@@ -256,7 +256,6 @@ export function ResourceDetailView({
 
   const currentRow = row;
   // Node scheduling state from the live YAML picks the Cordon/Uncordon label.
-  const isNode = currentRow.kind === "Node";
   const nodeUnschedulable = isNode ? parseNodeUnschedulable(detail?.yaml) : false;
   // Called after the early return above, so it must stay a plain call — not a hook.
   const actions = resourceActionsFor(currentRow.kind, isNode ? { nodeUnschedulable } : undefined);

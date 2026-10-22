@@ -291,7 +291,7 @@ type NodeDrainOptions struct {
 	// Job, DaemonSet) manages.
 	Force bool `json:"force,omitempty"`
 	// DeleteEmptyDirData proceeds past pods with emptyDir volumes instead of
-	// skipping them; their local data is lost with the pod.
+	// blocking the drain; their local data is lost with the pod.
 	DeleteEmptyDirData bool `json:"deleteEmptyDirData,omitempty"`
 	// DisableEviction uses pod DELETE requests instead of the eviction API,
 	// bypassing PodDisruptionBudgets server-side.

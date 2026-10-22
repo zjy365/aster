@@ -3948,3 +3948,40 @@ test("custom column headers stay aligned when reordered while scrolled", async (
   expect(failures).toEqual([]);
 });
 
+
+
+test("aggregate node tables keep cluster identity without borrowing primary metrics", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await page.evaluate(() => {
+    const api = window.__ASTER_DESKTOP__!;
+    const original = api.metrics.nodes;
+    (window as unknown as { nodeCalls: string[] }).nodeCalls = [];
+    api.metrics.nodes = async (contextId) => {
+      (window as unknown as { nodeCalls: string[] }).nodeCalls.push(contextId);
+      return original(contextId);
+    };
+  });
+  await page.getByTestId("context-picker-multi").click();
+  await page.getByTestId("context-option-dev").click();
+  await page.getByTestId("context-option-prod").click();
+  await page.getByTestId("context-picker-connect").click();
+  await page.getByTestId("resource-nav-nodes").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await expect(grid.getByRole("row").nth(1)).toContainText("nodes-0");
+  await expect(grid.getByRole("columnheader", { name: "Cluster", exact: true })).toBeVisible();
+  await expect(grid.getByRole("columnheader", { name: "CPU", exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { nodeCalls: string[] }).nodeCalls)).toEqual([]);
+  // Cluster identity remains a pinned column even when Name is hidden.
+  await page.getByTestId("table-columns-trigger").click();
+  await page.getByTestId("column-picker").getByTestId("column-toggle-name").click();
+  await page.keyboard.press("Escape");
+  const first = grid.getByRole("row").nth(1);
+  await expect(first.getByRole("gridcell").nth(1)).toHaveText("dev");
+  const header = await grid.getByRole("columnheader", { name: "Cluster", exact: true }).boundingBox();
+  const cell = await first.locator(".cluster-cell").boundingBox();
+  expect(Math.abs(header!.x - cell!.x)).toBeLessThanOrEqual(2);
+  await expectNoOverflow(page, "aggregate node table with custom columns");
+  await screenshot(page, "aggregate-node-columns-1280");
+});
