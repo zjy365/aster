@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CircleArrowUp, LoaderCircle, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ChevronDown, CircleArrowUp, LoaderCircle, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { YamlEditor } from "../components/YamlEditor";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { HelmReleaseDetail } from "../../shared/types";
+import type { HelmChartVersion, HelmReleaseDetail } from "../../shared/types";
+import { desktop } from "../lib/desktop";
+import { formatAge } from "../lib/format";
 import { MutationDiffView } from "../detail/MutationDiffView";
 import type { HelmUpgradeInput } from "../hooks/useHelm";
 
@@ -29,7 +31,8 @@ export interface HelmUpgradeDialogProps {
  * common values-only upgrade: the release stores its chart's full contents,
  * so the core reuses that chart instead of re-pulling one (releases never
  * record their origin repository). Filling a repo URL switches to pulling
- * the named chart (and optional version) from that repository.
+ * the named chart (and optional version) from that repository; the version
+ * field then offers the repository's published versions as a pick list.
  *
  * Submission is a two-step review, mirroring the resource mutation flow:
  * edit the values, review the diff against the release's current values,
@@ -135,18 +138,16 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
                   value={chart}
                 />
               </label>
-              <label className="helm-upgrade-field">
+              <div className="helm-upgrade-field">
                 <span>Chart version</span>
-                <input
-                  className="helm-upgrade-input"
-                  data-testid="helm-upgrade-version"
+                <ChartVersionField
+                  chart={chart}
                   disabled={busy || reuseChart}
-                  onChange={(event) => setVersion(event.target.value)}
-                  placeholder="latest"
-                  spellCheck={false}
+                  onChange={setVersion}
+                  repoUrl={repoUrl}
                   value={version}
                 />
-              </label>
+              </div>
             </div>
             <div className="helm-upgrade-columns">
               <div className="helm-upgrade-field">
@@ -214,5 +215,197 @@ export function HelmUpgradeDialog({ open, onOpenChange, detail, busy, onUpgrade 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface ChartVersionFieldProps {
+  repoUrl: string;
+  chart: string;
+  value: string;
+  disabled: boolean;
+  onChange(value: string): void;
+}
+
+/**
+ * Chart version combobox: a free-text input (the manual fallback) with a
+ * dropdown of the versions the repository has published, loaded once a repo
+ * URL and chart are known. The list is a convenience, never a gate — when it
+ * fails to load the field stays a plain input with a notice, so a private or
+ * unreachable repository never blocks an upgrade by hand.
+ *
+ * Keyboard-first like the rest of the app: arrows move the highlight (or
+ * open the list), Enter picks, Escape dismisses the list without closing the
+ * dialog, and typing filters the options.
+ */
+function ChartVersionField({ repoUrl, chart, value, disabled, onChange }: ChartVersionFieldProps) {
+  const [versions, setVersions] = useState<HelmChartVersion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Whether the input currently holds focus: a list that finishes loading
+  // while the user waits on it opens immediately instead of requiring a
+  // refocus.
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    // The list only exists once the upgrade pulls from a repository: the
+    // values-only path (empty repo URL) reuses the stored chart.
+    if (disabled || !repoUrl.trim() || !chart.trim()) {
+      setVersions([]);
+      setLoading(false);
+      setNotice("");
+      setOpen(false);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    setNotice("");
+    // Debounced so typing a URL or chart name does not fetch per keystroke.
+    const timer = setTimeout(() => {
+      void desktop.helm
+        .chartVersions({ repoUrl: repoUrl.trim(), chart: chart.trim() })
+        .then((response) => {
+          if (!active) return;
+          setVersions(response.versions ?? []);
+          setHighlighted(0);
+          if (focusedRef.current) setOpen(true);
+        })
+        .catch((cause) => {
+          if (!active) return;
+          setVersions([]);
+          setNotice(cause instanceof Error ? cause.message : String(cause));
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 300);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [repoUrl, chart, disabled]);
+
+  const query = value.trim().toLowerCase();
+  const matches = query
+    ? versions.filter((item) => item.version.toLowerCase().includes(query))
+    : versions;
+
+  // Keep the highlighted option in view as arrows move through the list.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector(`[data-option-index="${highlighted}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [highlighted, open]);
+
+  const pick = (item: HelmChartVersion) => {
+    onChange(item.version);
+    setOpen(false);
+  };
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "ArrowDown" && !open && matches.length) {
+      event.preventDefault();
+      setOpen(true);
+      setHighlighted(0);
+      return;
+    }
+    if (!open || !matches.length) return;
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setHighlighted((index) => Math.min(index + 1, matches.length - 1));
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setHighlighted((index) => Math.max(index - 1, 0));
+        break;
+      case "Enter":
+        event.preventDefault();
+        pick(matches[highlighted] ?? matches[0]);
+        break;
+      case "Escape":
+        // Dismiss the list only; the dialog itself stays open.
+        event.stopPropagation();
+        setOpen(false);
+        break;
+    }
+  }
+
+  return (
+    <div className="helm-version-combo" data-testid="helm-version-combo">
+      <div className="helm-version-input">
+        <input
+          aria-autocomplete="list"
+          aria-controls="helm-version-listbox"
+          aria-expanded={open}
+          className="helm-upgrade-input"
+          data-testid="helm-upgrade-version"
+          disabled={disabled}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setOpen(true);
+            setHighlighted(0);
+          }}
+          onFocus={() => {
+            focusedRef.current = true;
+            if (versions.length) setOpen(true);
+          }}
+          onBlur={() => {
+            focusedRef.current = false;
+            setOpen(false);
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder="latest"
+          role="combobox"
+          spellCheck={false}
+          value={value}
+        />
+        {loading ? (
+          <LoaderCircle aria-hidden="true" className="spin helm-version-affordance" />
+        ) : versions.length ? (
+          <ChevronDown aria-hidden="true" className="helm-version-affordance" data-open={open || undefined} />
+        ) : null}
+      </div>
+      {notice ? (
+        <span className="helm-version-notice" data-testid="helm-version-notice" role="status">
+          Version list unavailable ({notice}). Type a version manually.
+        </span>
+      ) : null}
+      {open && matches.length > 0 ? (
+        <div
+          aria-label="Chart versions"
+          className="helm-version-list"
+          data-testid="helm-version-list"
+          id="helm-version-listbox"
+          ref={listRef}
+          role="listbox"
+        >
+          {matches.map((item, index) => (
+            <button
+              key={item.version}
+              aria-selected={item.version === value.trim()}
+              className="helm-version-option"
+              data-highlighted={index === highlighted || undefined}
+              data-option-index={index}
+              data-testid="helm-version-option"
+              onClick={() => pick(item)}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setHighlighted(index)}
+              role="option"
+              title={item.description}
+              type="button"
+            >
+              <strong>{item.version}</strong>
+              {item.appVersion ? <span className="helm-version-app">app {item.appVersion}</span> : null}
+              {item.created ? <span className="helm-version-created">{formatAge(item.created)}</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }

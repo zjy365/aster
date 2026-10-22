@@ -192,6 +192,9 @@ const api: DesktopApi = {
     uninstall: async (request) => { await corePost("/v1/helm/releases/uninstall", request); },
     rollback: async (request) => { await corePost("/v1/helm/releases/rollback", request); },
     upgrade: (request) => corePost("/v1/helm/releases/upgrade", request),
+    chartVersions: (request) => coreGet(
+      `/v1/helm/chart-versions?repoUrl=${encodeURIComponent(request.repoUrl)}&chart=${encodeURIComponent(request.chart)}`,
+    ),
   },
   resources: {
     list: async (request) => {
