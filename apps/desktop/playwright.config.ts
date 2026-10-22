@@ -7,7 +7,7 @@ const port = Number(process.env.ASTER_SMOKE_PORT || 4173);
 
 export default defineConfig({
   testDir: "./tests",
-  testMatch: "renderer-smoke.spec.ts",
+  testMatch: ["renderer-smoke.spec.ts", "node-metrics.spec.ts"],
   timeout: 60_000,
   use: {
     baseURL: `http://127.0.0.1:${port}`,

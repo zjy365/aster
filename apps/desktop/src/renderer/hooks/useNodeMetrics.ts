@@ -38,7 +38,7 @@ export function useNodeMetrics(contextId: string, name: string): NodeMetricsStat
   const [latest, setLatest] = useState<{ cpu?: string; memory?: string }>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const timer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const refreshCurrent = useRef<(() => void) | undefined>(undefined);
 
   const record = useCallback((metrics: { name: string; cpu: string; memory: string }[]) => {
     const node = metrics.find((item) => item.name === name);
@@ -58,10 +58,12 @@ export function useNodeMetrics(contextId: string, name: string): NodeMetricsStat
   }, [name]);
 
   useEffect(() => {
+    setSamples([]);
+    setLatest({});
+    setError("");
+    setLoading(Boolean(contextId && name));
     if (!contextId || !name) return;
     let active = true;
-    setLoading(true);
-    setError("");
 
     const poll = async () => {
       if (!active) return;
@@ -69,32 +71,31 @@ export function useNodeMetrics(contextId: string, name: string): NodeMetricsStat
         const metrics = await desktop.metrics.nodes(contextId);
         if (active) {
           record(metrics);
-          setLoading(false);
+          setError("");
         }
       } catch (cause) {
         if (active) setError(messageOf(cause));
+      } finally {
+        if (active) setLoading(false);
       }
     };
 
+    // Manual refresh shares this identity's lifetime with interval polls.
+    // Leaving and revisiting a node must also reject its earlier requests.
+    refreshCurrent.current = () => void poll();
     void poll();
-    timer.current = setInterval(() => void poll(), SAMPLE_INTERVAL_MS);
+    const timer = setInterval(() => void poll(), SAMPLE_INTERVAL_MS);
 
     return () => {
       active = false;
-      if (timer.current !== undefined) clearInterval(timer.current);
-      timer.current = undefined;
+      clearInterval(timer);
+      refreshCurrent.current = undefined;
     };
   }, [contextId, name, record]);
 
   const refresh = useCallback(() => {
-    void desktop.metrics
-      .nodes(contextId)
-      .then((metrics) => {
-        record(metrics);
-        setError("");
-      })
-      .catch((cause) => setError(messageOf(cause)));
-  }, [contextId, record]);
+    refreshCurrent.current?.();
+  }, []);
 
   return { samples, cpu: latest.cpu, memory: latest.memory, loading, error, refresh };
 }
