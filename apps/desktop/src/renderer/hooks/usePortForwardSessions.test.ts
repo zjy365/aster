@@ -7,6 +7,7 @@ import {
   resetPortForwardStoreForTests,
   setPortForwardContext,
   startPortForward,
+  stopPortForward,
 } from "./usePortForwards";
 import { mergePortForwardRows, stopActionFor, type PortForwardRow } from "./usePortForwardSessions";
 
@@ -102,6 +103,18 @@ describe("mergePortForwardRows", () => {
     expect(rows[0]).toMatchObject({ id: "pf-stale", contextId: "dev", source: "renderer", stopKey: forwardKey("Pod", "apps", "web", 8080) });
   });
 
+  it("preserves the stopping state when the server also knows the session", () => {
+    const rows = mergePortForwardRows([session({ id: "pf-a" })], {
+      contextId: "dev",
+      entries: [{
+        key: forwardKey("Pod", "apps", "web", 8080), kind: "Pod", namespace: "apps",
+        name: "web", podPort: 8080, id: "pf-a", localPort: 49152, busy: true,
+      }],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: "pf-a", source: "server", busy: true });
+  });
+
   it("shows a starting renderer entry but never a failed one", () => {
     const rows = mergePortForwardRows([], {
       contextId: "dev",
@@ -151,5 +164,24 @@ describe("port forward session stop routing", () => {
   it("stops a server-only row by id", () => {
     const rows = mergePortForwardRows([session({ id: "pf-unknown", contextId: "prod" })], { contextId: "dev", entries: [] });
     expect(stopActionFor(rowFor(rows, "pf-unknown"))).toEqual({ kind: "id", id: "pf-unknown" });
+  });
+
+  it("clears a failed store stop while its retry is in flight", async () => {
+    startMock.mockResolvedValue({ id: "pf-a", localPort: 49152 });
+    await startPortForward({ contextId: "dev", namespace: "apps", name: "web", podPort: 8080 });
+    const key = forwardKey("Pod", "apps", "web", 8080);
+    stopMock.mockRejectedValueOnce(new Error("temporary stop failure"));
+    await stopPortForward(key);
+    expect(getPortForwardSnapshotForTests().get(key)?.error).toBe("temporary stop failure");
+    let release!: () => void;
+    stopMock.mockReturnValueOnce(new Promise<void>((resolve) => { release = resolve; }));
+    const retry = stopPortForward(key);
+    await Promise.resolve();
+    const entry = getPortForwardSnapshotForTests().get(key);
+    const state = { busy: entry?.busy, error: entry?.error };
+    release();
+    await retry;
+    expect(state).toEqual({ busy: true, error: undefined });
+    expect(getPortForwardSnapshotForTests().size).toBe(0);
   });
 });

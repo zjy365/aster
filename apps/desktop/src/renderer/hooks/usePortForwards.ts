@@ -149,6 +149,7 @@ export async function stopPortForward(key: string): Promise<void> {
   if (entry.busy && entry.id) return;
   if (entry.id) {
     entry.busy = true;
+    entry.error = undefined;
     notify();
     try {
       await stopById(entry.id);

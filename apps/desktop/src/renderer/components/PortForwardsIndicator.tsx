@@ -112,6 +112,9 @@ export function PortForwardsIndicator({ coreReady, contextLabel }: PortForwardsI
                     {row.kind} {row.namespace}/{row.name}
                   </span>
                   {row.pod ? <span className="port-forwards-pod" title={row.pod}>via {row.pod}</span> : null}
+                  {row.error && !row.busy ? (
+                    <span className="port-forwards-error" role="alert" title={row.error}>Stop failed: {row.error}</span>
+                  ) : null}
                 </span>
                 <span className="port-forwards-ports">
                   {row.localPort ? `${row.localPort} → ${row.targetPort}` : `port ${row.targetPort}`}
@@ -123,8 +126,6 @@ export function PortForwardsIndicator({ coreReady, contextLabel }: PortForwardsI
                       <LoaderCircle aria-hidden="true" className="spin" />
                       {row.id ? "Stopping…" : "Starting…"}
                     </>
-                  ) : row.error ? (
-                    <span className="port-forwards-error" title={row.error}>Failed: {row.error}</span>
                   ) : (
                     <Button
                       data-testid="port-forward-session-stop"

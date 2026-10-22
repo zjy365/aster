@@ -64,6 +64,7 @@ export function mergePortForwardRows(
       const serverRow = rows.get(entry.id);
       if (serverRow) {
         serverRow.stopKey = entry.key;
+        serverRow.busy = entry.busy;
         if (entry.error && !serverRow.error) serverRow.error = entry.error;
         continue;
       }
@@ -171,9 +172,11 @@ export function usePortForwardSessions(coreReady: boolean): PortForwardSessions 
 
   const stop = useCallback(async (row: PortForwardRow) => {
     const action = stopActionFor(row);
+    clearRowError(row.key);
     try {
       if (action.kind === "store") {
         // Renderer-owned: the store stops by id and clears the Ports-tab row.
+        // A failed stop resolves too: its error stays on the registry entry.
         await stopPortForward(action.stopKey);
       } else if (action.kind === "id") {
         setStoppingIds((current) => new Set(current).add(action.id));
@@ -188,7 +191,6 @@ export function usePortForwardSessions(coreReady: boolean): PortForwardSessions 
           });
         }
       }
-      clearRowError(row.key);
     } catch (cause) {
       const message = messageOf(cause);
       setRowErrors((current) => ({ ...current, [row.key]: message }));

@@ -3232,6 +3232,71 @@ test("manual forwards show addresses, survive navigation and stop on context exi
   expect(failures).toEqual([]);
 });
 
+for (const rendererOwned of [false, true]) {
+  test(`port forward session retries a transient stop failure (${rendererOwned ? "renderer-owned" : "server-only"})`, async ({ page }) => {
+    const failures = collectFailures(page);
+    await page.setViewportSize({ width: rendererOwned ? 1280 : 960, height: 800 });
+    await page.goto("/");
+    await page.evaluate((rendererOwned) => {
+      const scope = window as unknown as {
+        __portForwardSessions: Array<Record<string, unknown>>;
+        __pfAttempts: number;
+        __releaseStop: () => void;
+        __ASTER_DESKTOP__: { resources: {
+          portForwardStart(request: { podPort: number }): Promise<{ id: string; localPort: number }>;
+          portForwardStop(id: string): Promise<void>;
+        } };
+      };
+      const session = { id: "pf-retry", contextId: "dev", namespace: "default", resourceRef: { kind: "Pod", name: "pods-0" }, localPort: 43123, targetPort: 80, startedAt: "2026-10-17T08:00:00Z" };
+      scope.__pfAttempts = 0;
+      scope.__portForwardSessions = rendererOwned ? [] : [session];
+      scope.__ASTER_DESKTOP__.resources.portForwardStart = async (request) => {
+        scope.__portForwardSessions = [{ ...session, targetPort: request.podPort }];
+        return { id: session.id, localPort: session.localPort };
+      };
+      scope.__ASTER_DESKTOP__.resources.portForwardStop = async () => {
+        scope.__pfAttempts++;
+        if (scope.__pfAttempts === 1) throw new Error("Temporary stop failure");
+        await new Promise<void>((resolve) => {
+          scope.__releaseStop = () => { scope.__portForwardSessions = []; resolve(); };
+        });
+      };
+    }, rendererOwned);
+    await connectToDev(page);
+    if (rendererOwned) {
+      await page.getByTestId("resource-nav-pods").click();
+      await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+      await page.getByTestId("resource-detail-view").getByRole("tab", { name: "Ports", exact: true }).click();
+      await page.getByTestId("port-forward-row").first().getByTestId("port-forward-start").click();
+      await expect(page.getByTestId("port-forward-local")).toContainText("43123");
+    }
+    await expect(page.getByTestId("port-forwards-toggle")).toBeVisible();
+    await page.getByTestId("port-forwards-toggle").click();
+    const panel = page.getByTestId("port-forwards-panel");
+    const row = panel.getByTestId("port-forward-session-row");
+    await expect(row).toHaveCount(1);
+    await row.getByTestId("port-forward-session-stop").click();
+    await expect(row).toContainText("Temporary stop failure");
+    const retry = row.getByTestId("port-forward-session-stop");
+    await expect(retry).toBeVisible();
+    await expectNoOverflow(page, "failed port forward stop retry");
+    await screenshot(page, `port-forward-stop-retry-${rendererOwned ? "renderer" : "server"}`);
+    await retry.click();
+    await expect(row).toContainText("Stopping…");
+    await expect(row).not.toContainText("Temporary stop failure");
+    await expect(row.getByTestId("port-forward-session-stop")).toHaveCount(0);
+    await page.evaluate(() => (window as unknown as { __releaseStop: () => void }).__releaseStop());
+    await expect(row).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __pfAttempts: number }).__pfAttempts)).toBe(2);
+    if (rendererOwned) {
+      await expect(page.getByTestId("port-forward-local")).toHaveCount(0);
+      await expect(page.getByTestId("port-forward-row").first().getByTestId("port-forward-start")).toBeVisible();
+      await expect(page.getByTestId("port-forward-section")).not.toContainText("Temporary stop failure");
+    }
+    expect(failures).toEqual([]);
+  });
+}
+
 test("toolbar panel lists sidecar forward sessions across contexts and stops them", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });

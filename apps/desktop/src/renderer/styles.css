@@ -5629,6 +5629,7 @@ button.overview-card:focus-visible {
 }
 
 .port-forwards-error {
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
