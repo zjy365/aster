@@ -135,6 +135,43 @@ func TestValidatePortForwardLocalPort(t *testing.T) {
 	}
 }
 
+func TestValidatePodDebugRequest(t *testing.T) {
+	valid := resources.PodDebugRequest{
+		ContextID: "ctx",
+		Namespace: "apps",
+		PodName:   "web",
+		Container: resources.PodDebugContainer{
+			Image:               "busybox:1.36",
+			Command:             []string{"/bin/sh", "-c"},
+			TargetContainerName: "app",
+			Env:                 []resources.EnvVar{{Name: "TRACE", Value: "1"}},
+		},
+	}
+	if err := validatePodDebugRequest(valid); err != nil {
+		t.Fatalf("valid request rejected: %v", err)
+	}
+
+	cases := map[string]func(*resources.PodDebugRequest){
+		"missing contextId":  func(r *resources.PodDebugRequest) { r.ContextID = "" },
+		"missing image":       func(r *resources.PodDebugRequest) { r.Container.Image = "" },
+		"long image":          func(r *resources.PodDebugRequest) { r.Container.Image = strings.Repeat("x", maxImage+1) },
+		"long container name": func(r *resources.PodDebugRequest) { r.Container.Name = strings.Repeat("x", maxContainer+1) },
+		"long target":         func(r *resources.PodDebugRequest) { r.Container.TargetContainerName = strings.Repeat("x", maxContainer+1) },
+		"too many command":    func(r *resources.PodDebugRequest) { r.Container.Command = make([]string, maxDebugArgv+1) },
+		"long command entry":  func(r *resources.PodDebugRequest) { r.Container.Command = []string{strings.Repeat("x", maxDebugArgValue+1)} },
+		"too many env":        func(r *resources.PodDebugRequest) { r.Container.Env = make([]resources.EnvVar, maxDebugEnvVars+1) },
+		"long env name":       func(r *resources.PodDebugRequest) { r.Container.Env = []resources.EnvVar{{Name: strings.Repeat("x", maxDebugEnvName+1)}} },
+		"long env value":      func(r *resources.PodDebugRequest) { r.Container.Env = []resources.EnvVar{{Name: "K", Value: strings.Repeat("x", maxDebugArgValue+1)}} },
+	}
+	for name, mutate := range cases {
+		request := valid
+		mutate(&request)
+		if err := validatePodDebugRequest(request); err == nil {
+			t.Errorf("%s: expected rejection", name)
+		}
+	}
+}
+
 func TestInvalidInputReturns400(t *testing.T) {
 	service := resources.NewService(rpcClientProvider{client: nil})
 	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))

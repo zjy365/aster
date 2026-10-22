@@ -136,6 +136,27 @@ spec:
     expect(details?.conditions).toEqual([]);
     expect(podSelector(details)).toBeUndefined();
   });
+
+  it("lists a pod's ephemeral debug containers alongside its regular containers", () => {
+    const details = parseWorkloadDetails(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web
+spec:
+  containers:
+    - name: app
+      image: example/app:v1
+  ephemeralContainers:
+    - name: debugger-x7k2q
+      image: busybox:1.36
+      targetContainerName: app
+`);
+    expect(details?.containers).toEqual([{ name: "app", image: "example/app:v1" }]);
+    expect(details?.ephemeralContainers).toEqual([
+      { name: "debugger-x7k2q", image: "busybox:1.36" },
+    ]);
+  });
 });
 
 describe("podSelector", () => {

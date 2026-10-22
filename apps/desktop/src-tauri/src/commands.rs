@@ -150,6 +150,11 @@ pub async fn pods_exec(state: State<'_, AppState>, request: Value) -> Result<Val
 }
 
 #[tauri::command]
+pub async fn pods_debug(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
+    state.core.post("/v1/pods/debug", request).await
+}
+
+#[tauri::command]
 pub async fn resources_mutate(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
     state.core.post("/v1/resources/mutate", request).await
 }

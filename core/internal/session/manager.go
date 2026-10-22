@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	streamspdy "k8s.io/apimachinery/pkg/util/httpstream/spdy"
+	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -181,6 +182,95 @@ func (m *Manager) PodExec(ctx context.Context, contextID, namespace, name, conta
 	stderr := &cappedBuffer{limit: 1 << 20}
 	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: stdout, Stderr: stderr})
 	return stdout.String(), stderr.String(), err
+}
+
+// debugContainerPrefix matches the kubectl debug convention for generated
+// ephemeral container names.
+const debugContainerPrefix = "debugger"
+
+// AddEphemeralContainer appends an ephemeral debug container to a running Pod
+// through the pods/ephemeralcontainers subresource (kubectl debug semantics).
+// Defaults mirror kubectl: a uniquely generated name when none is given,
+// process namespace sharing through targetContainer (the pod's own
+// shareProcessNamespace is immutable after creation), and TTY/stdin off —
+// this is an inject-then-inspect action, not an interactive session. The
+// pod's regular spec is untouched, so the owning workload never rolls.
+func (m *Manager) AddEphemeralContainer(ctx context.Context, contextID, namespace, podName, name, image string, command, args []string, targetContainer string, env []corev1.EnvVar) (*corev1.EphemeralContainer, error) {
+	if contextID == "" || namespace == "" || podName == "" || strings.TrimSpace(image) == "" {
+		return nil, fmt.Errorf("contextId, namespace, podName and image are required")
+	}
+	client, err := m.coreClient(contextID)
+	if err != nil {
+		return nil, err
+	}
+	pod, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get pod %q: %w", podName, err)
+	}
+	container, err := buildEphemeralContainer(pod, name, image, command, args, targetContainer, env)
+	if err != nil {
+		return nil, err
+	}
+	pod.Spec.EphemeralContainers = append(pod.Spec.EphemeralContainers, *container)
+	updated, err := client.CoreV1().Pods(namespace).UpdateEphemeralContainers(ctx, pod.Name, pod, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("update ephemeral containers: %w", err)
+	}
+	for index := range updated.Spec.EphemeralContainers {
+		if entry := &updated.Spec.EphemeralContainers[index]; entry.Name == container.Name {
+			return entry, nil
+		}
+	}
+	return nil, fmt.Errorf("ephemeral container %q was not stored by the API server", container.Name)
+}
+
+// buildEphemeralContainer assembles the subresource entry: an explicit name
+// must not collide with an existing ephemeral container, a missing name gets
+// the kubectl-style generated suffix, and process sharing rides on the
+// target container reference.
+func buildEphemeralContainer(pod *corev1.Pod, name, image string, command, args []string, targetContainer string, env []corev1.EnvVar) (*corev1.EphemeralContainer, error) {
+	name = strings.TrimSpace(name)
+	if name != "" {
+		for index := range pod.Spec.EphemeralContainers {
+			if pod.Spec.EphemeralContainers[index].Name == name {
+				return nil, fmt.Errorf("ephemeral container %q already exists on pod %q", name, pod.Name)
+			}
+		}
+	} else {
+		// Keep drawing until the suffix is unused; five-char alphabetic
+		// suffixes leave ~11M combinations, so a couple of draws suffice
+		// even on heavily debugged pods.
+		for range 8 {
+			candidate := debugContainerPrefix + "-" + rand.String(5)
+			taken := false
+			for index := range pod.Spec.EphemeralContainers {
+				if pod.Spec.EphemeralContainers[index].Name == candidate {
+					taken = true
+					break
+				}
+			}
+			if !taken {
+				name = candidate
+				break
+			}
+		}
+		if name == "" {
+			return nil, fmt.Errorf("could not generate a unique debug container name for pod %q", pod.Name)
+		}
+	}
+	entry := &corev1.EphemeralContainer{
+		EphemeralContainerCommon: corev1.EphemeralContainerCommon{
+			Name:                     name,
+			Image:                    image,
+			Command:                  command,
+			Args:                     args,
+			Env:                      env,
+			Stdin:                    false,
+			TerminationMessagePolicy: corev1.TerminationMessageReadFile,
+		},
+		TargetContainerName: strings.TrimSpace(targetContainer),
+	}
+	return entry, nil
 }
 
 func (m *Manager) Contexts() ([]ContextInfo, error) {

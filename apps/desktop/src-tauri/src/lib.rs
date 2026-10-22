@@ -138,6 +138,7 @@ pub fn run() {
             commands::pods_logs,
             commands::workloads_logs,
             commands::pods_exec,
+            commands::pods_debug,
             commands::pods_portforward_start,
             commands::pods_portforward_stop,
             commands::nodes_cordon,

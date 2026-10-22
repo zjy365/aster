@@ -67,6 +67,7 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("POST /v1/workloads/logs/stream", server.streamWorkloadLogs)
 	mux.HandleFunc("POST /v1/metrics/pods", server.podMetrics)
 	mux.HandleFunc("POST /v1/pods/exec", server.podExec)
+	mux.HandleFunc("POST /v1/pods/debug", server.podDebug)
 	mux.HandleFunc("POST /v1/pods/portforward", server.startPortForward)
 	mux.HandleFunc("POST /v1/pods/portforward/stop", server.stopPortForward)
 	mux.HandleFunc("POST /v1/nodes/cordon", server.cordonNode)
@@ -657,6 +658,24 @@ func (s *Server) podExec(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	result, err := s.resources.Exec(request.Context(), value)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+// podDebug injects an ephemeral debug container into a running pod through
+// the pods/ephemeralcontainers subresource.
+func (s *Server) podDebug(writer http.ResponseWriter, request *http.Request) {
+	var value resources.PodDebugRequest
+	if err := decodeJSON(writer, request, &value); err != nil {
+		return
+	}
+	if rejectInvalid(writer, validatePodDebugRequest(value)) {
+		return
+	}
+	result, err := s.resources.DebugPod(request.Context(), value)
 	if err != nil {
 		writeServiceError(writer, err)
 		return
