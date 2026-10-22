@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -20,7 +21,12 @@ type errorBody struct {
 }
 
 func writeError(writer http.ResponseWriter, status int, code string, err error) {
-	writeJSON(writer, status, errorResponse{Error: errorBody{Code: code, Message: err.Error()}})
+	message := err.Error()
+	var unknownCA x509.UnknownAuthorityError
+	if errors.As(err, &unknownCA) {
+		message += "\nIf you updated kubeconfig or CA certificates, refresh contexts on the cluster selection screen. If this still fails, fully quit and reopen Aster to reload all connections. If the error persists, verify the kubeconfig's CA with your cluster administrator."
+	}
+	writeJSON(writer, status, errorResponse{Error: errorBody{Code: code, Message: message}})
 }
 
 func writeServiceError(writer http.ResponseWriter, err error) {
