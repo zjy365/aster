@@ -85,6 +85,8 @@ Aster is designed so your hands don't leave the keyboard. Menus are a fallback, 
 
 **Browse and watch** — the common resource catalog (workloads, traffic, storage, config, RBAC, CRDs) with native pagination, label selectors, and scoped watches that reconnect and recover from expired resource versions.
 
+**Compare clusters side by side** — select two or more contexts in the cluster picker and one table shows the same resource kind and namespace scope merged across all of them, with a Cluster column marking each row's source. It is a snapshot: the renderer fans out ordinary single-cluster list requests and merges the pages locally, a failed cluster degrades to a retryable error badge instead of breaking the view, and clicking a row opens that cluster's ordinary detail workspace.
+
 **Find anything** — `⌘K` searches the whole cluster by name. It fans out bounded, parallel list calls across the resource catalog and goes straight to the API server. No informer, no cache, nothing warming up in the background.
 
 **Inspect** — a full detail workspace per resource: Overview, Pods, syntax-highlighted YAML, Events, and owner-reference Related navigation that walks you from a Deployment to its ReplicaSets, Pods, and Services.
@@ -108,7 +110,7 @@ These are decisions, not a backlog:
 - **No Secret mutation.** Reading is sanitized; writing is disabled.
 - **No interactive shell.** There is no `exec` into a pod and no persistent TTY.
 - **No global informer cache or startup cache sync.** Clients are created lazily, for the view you actually opened. Launching Aster does not touch your cluster until you ask it to.
-- **No cluster aggregation layer.** Aster shows you one context at a time, honestly.
+- **No server-side cluster aggregation.** Multi-cluster comparison is a renderer-side merge of ordinary single-context requests — never a proxy, a federated query, or credentials crossing a cluster boundary. Writes always target exactly one context.
 - **No telemetry, accounts, or remote services.** There is no server to send anything to.
 - **No privilege escalation as a convenience.** Aster will never create a ServiceAccount, Role, ClusterRole, or binding on your behalf.
 

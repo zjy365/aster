@@ -171,6 +171,7 @@ export function usePortForwards(contextId: string) {
   const byKey = useCallback((key: string) => state.contextId === contextId ? state.entries.get(key) : undefined, [contextId]);
   return useMemo(() => ({
     entries: state.contextId === contextId ? entries : [],
+    canStart: state.contextId === contextId,
     start: startPortForward,
     stop: stopPortForward,
     byKey,

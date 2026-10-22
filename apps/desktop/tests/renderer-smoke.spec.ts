@@ -355,8 +355,13 @@ const MOCK_DESKTOP_API = `
     },
     resources: {
       list: async (request) => {
-        // Recorded so the multi-namespace fan-out tests can count requests.
-        (window.__resourceRequests = window.__resourceRequests || []).push({ kind: "list", namespace: request.namespace || "" });
+        // Recorded so the multi-namespace and multi-cluster fan-out tests can
+        // count requests and tell the clusters apart.
+        (window.__resourceRequests = window.__resourceRequests || []).push({ kind: "list", namespace: request.namespace || "", contextId: request.contextId });
+        // The aggregate degradation test marks whole contexts as down.
+        if ((window.__asterFailingContexts || []).includes(request.contextId)) {
+          throw new Error("simulated cluster outage: connection refused");
+        }
         return pageOf(request);
       },
       get: async (request) => {
@@ -2836,6 +2841,101 @@ test("multi-selection caps at 32 namespaces with a footer message", async ({ pag
   expect(failures).toEqual([]);
 });
 
+test("aggregate view compares clusters side by side with per-cluster degradation", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  // Multi-select mode: the subtitle switches to the aggregate explanation
+  // and cards join a selection instead of replacing the radio highlight.
+  await page.getByTestId("context-picker-multi").click();
+  await expect(page.getByTestId("context-picker-subtitle")).toContainText("two or more clusters");
+  await page.getByTestId("context-option-dev").click();
+  await expect(page.getByTestId("context-picker-connect")).toContainText("Connect");
+  await page.getByTestId("context-option-prod").click();
+  await expect(page.locator(".context-picker-selection")).toContainText("2 clusters selected · aggregate view");
+  const connect = page.getByTestId("context-picker-connect");
+  await expect(connect).toHaveAttribute("data-aggregate", "true");
+  await expect(connect).toContainText("Compare 2 clusters");
+  await screenshot(page, "picker-multi-select");
+  await connect.click();
+
+  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  const requests = () => page.evaluate(() => (window as unknown as { __resourceRequests?: Array<{ kind: string; namespace: string; contextId: string }> }).__resourceRequests ?? []);
+  const listBy = async (contextId: string) => (await requests()).filter((request) => request.kind === "list" && request.contextId === contextId);
+
+  // One snapshot page per cluster for the shared default namespace — never a
+  // watch stream: the aggregate view is snapshot-only by design.
+  await expect(grid.getByRole("row").nth(1)).toContainText("deployments-0", { timeout: 15_000 });
+  expect((await listBy("dev")).map((request) => request.namespace)).toEqual(["default"]);
+  expect((await listBy("prod")).map((request) => request.namespace)).toEqual(["default"]);
+  expect((await requests()).filter((request) => request.kind === "watch")).toEqual([]);
+
+  // The heading and the per-cluster strip both say what kind of view this is.
+  await expect(page.locator(".pane-heading")).toContainText("2 clusters (aggregate · snapshot, refresh to update)");
+  const strip = page.getByTestId("aggregate-cluster-strip");
+  await expect(strip).toBeVisible();
+  await expect(strip.locator(".aggregate-cluster-chip", { hasText: "dev" })).toHaveAttribute("data-state", "ok");
+  await expect(strip.locator(".aggregate-cluster-chip", { hasText: "prod" })).toHaveAttribute("data-state", "ok");
+
+  // The Cluster column identifies each row's source; the merge keeps cluster
+  // order, so prod's rows follow the dev block below the fold.
+  await expect(grid.getByRole("columnheader", { name: "Cluster" })).toBeVisible();
+  await expect(grid.getByRole("row").nth(1).locator(".cluster-cell")).toHaveText("dev");
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 150 * 36; });
+  await expect(grid.getByRole("row").nth(1).locator(".cluster-cell")).toHaveText("prod");
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 0; });
+
+  // "Load more" continues every cluster's next page, not just the first's.
+  // The footer row is virtualized like any other, so scroll it into view.
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await grid.getByTestId("load-more").click();
+  await expect.poll(async () => (await listBy("dev")).length).toBe(2);
+  await expect.poll(async () => (await listBy("prod")).length).toBe(2);
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = 0; });
+
+  // The namespace inventory unions the selected clusters: kube-system exists
+  // only in dev, but the aggregate picker still offers it.
+  await page.getByTestId("namespace-select").click();
+  await expect(page.locator(".namespace-combobox-item", { hasText: "kube-system" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // A row drills into the ordinary single-cluster detail view; Escape returns
+  // to the aggregate table, exactly like the single-cluster flow.
+  await grid.getByRole("row").nth(1).click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+  await expect(detail).toContainText("deployments-0");
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+
+  // Degradation is per cluster: prod goes down, its chip offers a retry,
+  // and dev's rows stay on screen instead of the whole table erroring.
+  await page.evaluate(() => {
+    (window as unknown as { __asterFailingContexts?: string[] }).__asterFailingContexts = ["prod"];
+  });
+  await page.keyboard.press("F5");
+  const prodChip = strip.locator(".aggregate-cluster-chip", { hasText: "prod" });
+  await expect(prodChip).toHaveAttribute("data-state", "error");
+  await expect(prodChip).toContainText("simulated cluster outage");
+  await expect(strip.locator(".aggregate-cluster-chip", { hasText: "dev" })).toHaveAttribute("data-state", "ok");
+  await expect(grid.getByRole("row").nth(1).locator(".cluster-cell")).toHaveText("dev");
+
+  // The retry re-fetches only the failed cluster and recovers it in place.
+  await page.evaluate(() => {
+    (window as unknown as { __asterFailingContexts?: string[] }).__asterFailingContexts = [];
+  });
+  const before = (await listBy("prod")).length;
+  await prodChip.getByTestId("aggregate-retry-prod").click();
+  await expect(prodChip).toHaveAttribute("data-state", "ok");
+  expect((await listBy("prod")).length).toBeGreaterThan(before);
+
+  await expectNoOverflow(page, "aggregate view 1280x800");
+  await screenshot(page, "aggregate-two-clusters");
+  expect(failures).toEqual([]);
+});
+
 test("helm merges releases across a multi-namespace selection", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -3189,3 +3289,120 @@ test("failed context cleanup remains visible and can be retried from another con
   expect(await page.evaluate(() => (window as unknown as { stopped: string[] }).stopped)).toEqual(["pf-1"]);
   expect(failures).toEqual([]);
 });
+
+test("aggregate pagination preserves a cluster arriving during load more", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await page.evaluate(() => {
+    const gate = window as unknown as { releaseProd?: () => void; releaseMore?: () => void };
+    const original = window.__ASTER_DESKTOP__!.resources.list;
+    window.__ASTER_DESKTOP__!.resources.list = async (request) => {
+      const result = await original(request);
+      if (request.contextId === "prod" && !request.continueToken) {
+        await new Promise<void>((resolve) => { gate.releaseProd = resolve; });
+      }
+      if (request.contextId === "dev" && request.continueToken) {
+        await new Promise<void>((resolve) => { gate.releaseMore = resolve; });
+      }
+      return result;
+    };
+  });
+  await page.getByTestId("context-picker-multi").click();
+  await page.getByTestId("context-option-dev").click();
+  await page.getByTestId("context-option-prod").click();
+  await page.getByTestId("context-picker-connect").click();
+  await expect(page.getByText("100 loaded", { exact: true })).toBeVisible();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await grid.getByTestId("load-more").click();
+  await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { releaseMore?: () => void }).releaseMore))).toBe(true);
+  await page.evaluate(() => (window as unknown as { releaseProd: () => void }).releaseProd());
+  await expect(page.getByText("200 loaded", { exact: true })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { releaseMore: () => void }).releaseMore());
+  await expect(page.getByText("300 loaded", { exact: true })).toBeVisible();
+});
+
+test("aggregate non-primary port forwarding explains its disabled state", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await page.evaluate(() => {
+    const original = window.__ASTER_DESKTOP__!.resources.list;
+    window.__ASTER_DESKTOP__!.resources.list = async (request) => {
+      const result = await original(request);
+      return { ...result, items: result.items.slice(0, 1), continueToken: undefined };
+    };
+  });
+  await page.getByTestId("context-picker-multi").click();
+  await page.getByTestId("context-option-dev").click();
+  await page.getByTestId("context-option-prod").click();
+  await page.getByTestId("context-picker-connect").click();
+  await page.getByTestId("resource-nav-pods").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await expect(grid.getByRole("row").nth(2).locator(".cluster-cell")).toHaveText("prod");
+  await grid.getByRole("row").nth(2).click();
+  const detail = page.getByTestId("resource-detail-view");
+  await detail.getByRole("tab", { name: "Ports" }).click();
+  const section = page.getByTestId("port-forward-section");
+  await expect(section.getByTestId("port-forward-start").first()).toBeDisabled();
+  await expect(section).toContainText("Open this cluster on its own to start port forwarding.");
+  await expect(detail.getByTestId("resource-detail-cluster")).toHaveText("Cluster: prod ·");
+  await expect(section.getByTestId("port-forward-manual-start")).toBeDisabled();
+  await expectNoOverflow(page, "aggregate non-primary port forwarding");
+  await screenshot(page, "aggregate-nonprimary-port-forward");
+  expect(failures).toEqual([]);
+});
+
+for (const navigation of ["related", "palette"] as const) {
+  test(`aggregate ${navigation} navigation keeps the target cluster`, async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByTestId("context-option-dev")).toBeVisible();
+    await page.evaluate((mode) => {
+      const api = window.__ASTER_DESKTOP__!;
+      const original = api.resources.list;
+      const listNamespaces = api.namespaces.list;
+      api.namespaces.list = async (contextId) => {
+        const fixture = window as unknown as { namespaceLoads?: number };
+        fixture.namespaceLoads = (fixture.namespaceLoads ?? 0) + 1;
+        return listNamespaces(contextId);
+      };
+      const target = { group: "", version: "v1", resource: "pods", kind: "Pod", namespace: "default", name: "pods-0", relation: "owned" as const };
+      api.resources.related = async () => [target];
+      api.resources.search = async () => [target];
+      api.resources.list = async (request) => {
+        const result = await original(request);
+        if (mode === "palette" && request.resourceKind.kind === "Pod" && request.contextId === "dev") {
+          await new Promise<void>((resolve) => { (window as unknown as { releaseTarget: () => void }).releaseTarget = resolve; });
+        }
+        return { ...result, items: result.items.slice(0, 1), continueToken: undefined };
+      };
+    }, navigation);
+    await page.getByTestId("context-picker-multi").click();
+    await page.getByTestId("context-option-dev").click();
+    await page.getByTestId("context-option-prod").click();
+    await page.getByTestId("context-picker-connect").click();
+    const grid = page.getByRole("grid", { name: "Resources" });
+    await expect(grid.getByRole("row").nth(2).locator(".cluster-cell")).toHaveText("prod");
+    const detail = page.getByTestId("resource-detail-view");
+    if (navigation === "related") {
+      await grid.getByRole("row").nth(2).click();
+      await detail.getByRole("tab", { name: "Related" }).click();
+      await detail.getByTestId("related-Pod-pods-0").click();
+      await expect(detail.locator("h1")).toHaveText("pods-0");
+      await expect(detail.getByTestId("resource-detail-cluster")).toHaveText("Cluster: prod ·");
+    } else {
+      await page.keyboard.press("Meta+k");
+      await page.getByTestId("command-palette-input").fill("pods-0");
+      await page.getByTestId("command-item-search:/v1/pods:default/pods-0").click();
+      // A same-name pod from another cluster arrives first. It must not be
+      // selected while the primary cluster's actual search target is pending.
+      await expect(grid.getByRole("row").nth(1).locator(".cluster-cell")).toHaveText("prod");
+      await expect(detail).toHaveCount(0);
+      await page.evaluate(() => (window as unknown as { releaseTarget: () => void }).releaseTarget());
+      await expect(detail.locator("h1")).toHaveText("pods-0");
+      await expect(detail.getByTestId("resource-detail-cluster")).toHaveText("Cluster: dev ·");
+      expect(await page.evaluate(() => (window as unknown as { namespaceLoads?: number }).namespaceLoads)).toBe(2);
+    }
+  });
+}

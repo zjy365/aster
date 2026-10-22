@@ -19,7 +19,7 @@ export interface PortForwardSectionProps {
  * Forwards live in a module-scoped store, so they survive navigation.
  */
 export function PortForwardSection({ contextId, namespace, name, kind, ports }: PortForwardSectionProps) {
-  const { entries, start, stop, byKey } = usePortForwards(contextId);
+  const { entries, start, stop, byKey, canStart } = usePortForwards(contextId);
   const [manualPort, setManualPort] = useState("");
   const [manualLocalPort, setManualLocalPort] = useState("");
   const [localPorts, setLocalPorts] = useState<Record<number, string>>({});
@@ -31,7 +31,7 @@ export function PortForwardSection({ contextId, namespace, name, kind, ports }: 
     }
   }
   function startForward(podPort: number, localValue = localPorts[podPort] ?? "") {
-    if (!validLocalPort(localValue)) return;
+    if (!canStart || !validLocalPort(localValue)) return;
     const localPort = localValue === "" ? 0 : Number(localValue);
     void start({
       contextId,
@@ -51,7 +51,9 @@ export function PortForwardSection({ contextId, namespace, name, kind, ports }: 
       <div className="resource-section-heading">
         <div>
           <h2>Port forwarding</h2>
-          <p>Connect through a local TCP port. Leave the local port empty to assign one automatically.</p>
+          <p>{canStart
+            ? "Connect through a local TCP port. Leave the local port empty to assign one automatically."
+            : "Open this cluster on its own to start port forwarding."}</p>
         </div>
       </div>
 
@@ -102,7 +104,7 @@ export function PortForwardSection({ contextId, namespace, name, kind, ports }: 
                   <Button
                     variant="outline"
                     data-testid="port-forward-start"
-                    disabled={entry?.busy || !validLocalPort(localPorts[port.port] ?? "")}
+                    disabled={!canStart || entry?.busy || !validLocalPort(localPorts[port.port] ?? "")}
                     onClick={() => startForward(port.port)}
                   >
                     {entry?.busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <ArrowRightLeft aria-hidden="true" />}
@@ -142,7 +144,7 @@ export function PortForwardSection({ contextId, namespace, name, kind, ports }: 
             title="Local port: 1–65535, or empty for a random port"
             onChange={(event) => setManualLocalPort(event.target.value.replace(/[^0-9]/g, "").slice(0, 5))}
           />
-          <Button variant="outline" type="submit" disabled={!manualValid} data-testid="port-forward-manual-start">
+          <Button variant="outline" type="submit" disabled={!canStart || !manualValid} data-testid="port-forward-manual-start">
             <ArrowRightLeft aria-hidden="true" />
             Forward
           </Button>

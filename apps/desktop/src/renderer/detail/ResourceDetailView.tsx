@@ -69,6 +69,8 @@ const POD_KIND: ResourceKind = findEnabledResourceKind("pods") ?? {
 
 export interface ResourceDetailViewProps {
   contextId: string;
+  /** Explicit action target when inspecting a row from an aggregate view. */
+  sourceClusterLabel?: string;
   /** True when the local core is ready; gates the scoped pods watch. */
   coreReady: boolean;
   row?: ResourceRow;
@@ -91,6 +93,7 @@ export interface ResourceDetailViewProps {
 
 export function ResourceDetailView({
   contextId,
+  sourceClusterLabel,
   coreReady,
   row,
   detail,
@@ -294,6 +297,7 @@ export function ResourceDetailView({
     <section className="resource-detail-view" data-testid="resource-detail-view">
       <DetailHeader
         row={currentRow}
+        sourceClusterLabel={sourceClusterLabel}
         rollout={rollout}
         actions={actions}
         canMutate={canMutate}
