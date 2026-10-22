@@ -283,7 +283,7 @@ export default function App() {
     const custom = customResourceGroups(discovered);
     return custom.length ? [...SIDEBAR_RESOURCE_GROUPS, ...custom] : SIDEBAR_RESOURCE_GROUPS;
   }, [discovered]);
-  const [pendingSelect, setPendingSelect] = useState<{ name: string; namespace: string }>();
+  const [pendingSelect, setPendingSelect] = useState<{ contextId: string; name: string; namespace: string }>();
   const [paletteQuery, setPaletteQuery] = useState("");
 
   // Checkbox multi-select over the currently loaded rows (uids). Resets
@@ -379,7 +379,7 @@ export default function App() {
 
   // Shared navigation for related resources and palette search results:
   // switch kind/namespace, then select the row once its list page arrives.
-  const openResource = useCallback((target: { group: string; version: string; resource: string; name: string; namespace?: string }) => {
+  const openResource = useCallback((target: { group: string; version: string; resource: string; name: string; namespace?: string }, targetContextId = contextId) => {
     const match = flattenResourceGroups(resourceGroups)
       .find((item) => item.group === target.group && item.version === target.version && item.resource === target.resource && item.enabled !== false);
     if (!match) return;
@@ -388,18 +388,20 @@ export default function App() {
     // Palette/related navigation pins the scope to the one target namespace,
     // replacing any multi-selection so the pending row cannot get lost.
     if (!(namespaceScope.length === 1 && namespaceScope[0] === namespace)) namespaces.setNamespaceScope(namespace ? [namespace] : []);
-    setPendingSelect({ name: target.name, namespace });
+    setPendingSelect({ contextId: targetContextId, name: target.name, namespace });
     selectKind(nextKind);
-  }, [resourceGroups, namespaceScope, namespaces, selectKind]);
+  }, [contextId, resourceGroups, namespaceScope, namespaces, selectKind]);
 
   useEffect(() => {
     if (!pendingSelect) return;
-    const row = resources.list.items.find((item) => item.name === pendingSelect.name && (item.namespace || "") === pendingSelect.namespace);
+    const row = resources.list.items.find((item) => item.name === pendingSelect.name
+      && (item.namespace || "") === pendingSelect.namespace
+      && (item.sourceContextId || contextId) === pendingSelect.contextId);
     if (row) {
       detail.select(row);
       setPendingSelect(undefined);
     }
-  }, [pendingSelect, resources.list.items, detail]);
+  }, [pendingSelect, resources.list.items, detail, contextId]);
 
   useEffect(() => {
     const query = paletteQuery.trim();
@@ -965,7 +967,7 @@ export default function App() {
                 }
               }}
               onCancelMutation={mutation.cancelMutation}
-              onNavigateRelated={openResource}
+              onNavigateRelated={(target) => openResource(target, selectedContextId)}
               onBack={detail.clear}
               />
             </Suspense>

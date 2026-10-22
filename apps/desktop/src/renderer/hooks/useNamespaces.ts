@@ -150,7 +150,7 @@ export function useNamespaces(
   }, [contextId, clusterKey]);
 
   const load = useCallback(() => {
-    if (!contextId || loadingRef.current) return;
+    if (!contextId || loadingRef.current || (aggregate && loaded)) return;
     if (!aggregate) {
       const cached = readNamespaceCache(contextId);
       if (cached) {
@@ -160,9 +160,10 @@ export function useNamespaces(
         return;
       }
     }
-    // Cold path: first time this scope's list is needed (always, in aggregate).
+    // Cold path: first time this scope's inventory is needed. The aggregate
+    // inventory stays loaded until the connected cluster selection changes.
     fetchList(true);
-  }, [contextId, aggregate, fetchList]);
+  }, [contextId, aggregate, loaded, fetchList]);
 
   return { namespaces, truncated, loading, loaded, namespaceScope, setNamespaceScope, load };
 }

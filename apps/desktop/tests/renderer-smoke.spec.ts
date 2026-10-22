@@ -3353,3 +3353,56 @@ test("aggregate non-primary port forwarding explains its disabled state", async 
   await screenshot(page, "aggregate-nonprimary-port-forward");
   expect(failures).toEqual([]);
 });
+
+for (const navigation of ["related", "palette"] as const) {
+  test(`aggregate ${navigation} navigation keeps the target cluster`, async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByTestId("context-option-dev")).toBeVisible();
+    await page.evaluate((mode) => {
+      const api = window.__ASTER_DESKTOP__!;
+      const original = api.resources.list;
+      const listNamespaces = api.namespaces.list;
+      api.namespaces.list = async (contextId) => {
+        const fixture = window as unknown as { namespaceLoads?: number };
+        fixture.namespaceLoads = (fixture.namespaceLoads ?? 0) + 1;
+        return listNamespaces(contextId);
+      };
+      const target = { group: "", version: "v1", resource: "pods", kind: "Pod", namespace: "default", name: "pods-0", relation: "owned" as const };
+      api.resources.related = async () => [target];
+      api.resources.search = async () => [target];
+      api.resources.list = async (request) => {
+        const result = await original(request);
+        if (mode === "palette" && request.resourceKind.kind === "Pod" && request.contextId === "dev") {
+          await new Promise<void>((resolve) => { (window as unknown as { releaseTarget: () => void }).releaseTarget = resolve; });
+        }
+        return { ...result, items: result.items.slice(0, 1), continueToken: undefined };
+      };
+    }, navigation);
+    await page.getByTestId("context-picker-multi").click();
+    await page.getByTestId("context-option-dev").click();
+    await page.getByTestId("context-option-prod").click();
+    await page.getByTestId("context-picker-connect").click();
+    const grid = page.getByRole("grid", { name: "Resources" });
+    await expect(grid.getByRole("row").nth(2).locator(".cluster-cell")).toHaveText("prod");
+    const detail = page.getByTestId("resource-detail-view");
+    if (navigation === "related") {
+      await grid.getByRole("row").nth(2).click();
+      await detail.getByRole("tab", { name: "Related" }).click();
+      await detail.getByTestId("related-Pod-pods-0").click();
+      await expect(detail.locator("h1")).toHaveText("pods-0");
+      await expect(detail.getByTestId("resource-detail-cluster")).toHaveText("Cluster: prod ·");
+    } else {
+      await page.keyboard.press("Meta+k");
+      await page.getByTestId("command-palette-input").fill("pods-0");
+      await page.getByTestId("command-item-search:/v1/pods:default/pods-0").click();
+      // A same-name pod from another cluster arrives first. It must not be
+      // selected while the primary cluster's actual search target is pending.
+      await expect(grid.getByRole("row").nth(1).locator(".cluster-cell")).toHaveText("prod");
+      await expect(detail).toHaveCount(0);
+      await page.evaluate(() => (window as unknown as { releaseTarget: () => void }).releaseTarget());
+      await expect(detail.locator("h1")).toHaveText("pods-0");
+      await expect(detail.getByTestId("resource-detail-cluster")).toHaveText("Cluster: dev ·");
+      expect(await page.evaluate(() => (window as unknown as { namespaceLoads?: number }).namespaceLoads)).toBe(2);
+    }
+  });
+}
