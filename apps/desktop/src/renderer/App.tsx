@@ -991,6 +991,13 @@ export default function App() {
               onNavigateRelated={(target) => openResource(target, selectedContextId)}
               onRecordJournal={mutation.recordJournal}
               onNodeChanged={() => void detail.refetch()}
+              onDebugContainerAdded={(name) => {
+                // The ephemeral container lands outside the mutation pipeline;
+                // journal it like any other write and refetch so the containers
+                // overview surfaces the new entry.
+                mutation.recordJournal(`debug-container ${name}`);
+                void detail.refetch();
+              }}
               onBack={detail.clear}
               />
             </Suspense>

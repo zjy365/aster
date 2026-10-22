@@ -122,6 +122,50 @@ type ExecResponse struct {
 	Stderr string `json:"stderr"`
 }
 
+// PodDebugRequest injects an ephemeral debug container into a running Pod
+// through the pods/ephemeralcontainers subresource (kubectl debug semantics:
+// the workload spec itself is never modified).
+type PodDebugRequest struct {
+	ContextID string             `json:"contextId"`
+	Namespace string             `json:"namespace"`
+	PodName   string             `json:"podName"`
+	Container PodDebugContainer  `json:"container"`
+}
+
+// PodDebugContainer is the requested debug container. Only the image is
+// required; every other field falls back to the kubectl-debug defaults
+// (generated unique name, image entrypoint, no target).
+type PodDebugContainer struct {
+	Name                string   `json:"name,omitempty"`
+	Image               string   `json:"image"`
+	Command             []string `json:"command,omitempty"`
+	Args                []string `json:"args,omitempty"`
+	TargetContainerName string   `json:"targetContainerName,omitempty"`
+	Env                 []EnvVar `json:"env,omitempty"`
+}
+
+// EnvVar is one NAME=value environment entry for a debug container.
+type EnvVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type PodDebugResponse struct {
+	// Container is the ephemeral container entry the API server stored.
+	Container PodDebugContainerEntry `json:"container"`
+}
+
+// PodDebugContainerEntry echoes the stored ephemeral container: generated
+// fields (the unique name) resolved, optional fields omitted when unset.
+type PodDebugContainerEntry struct {
+	Name                string   `json:"name"`
+	Image               string   `json:"image"`
+	Command             []string `json:"command,omitempty"`
+	Args                []string `json:"args,omitempty"`
+	TargetContainerName string   `json:"targetContainerName,omitempty"`
+	Env                 []EnvVar `json:"env,omitempty"`
+}
+
 type DiscoveredResource struct {
 	Group      string `json:"group"`
 	Version    string `json:"version"`

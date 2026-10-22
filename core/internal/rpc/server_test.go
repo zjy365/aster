@@ -406,6 +406,57 @@ func TestServerValidatesHelmRequests(t *testing.T) {
 	}
 }
 
+type fakeDebugProvider struct {
+	rpcClientProvider
+	added *corev1.EphemeralContainer
+}
+
+func (p *fakeDebugProvider) AddEphemeralContainer(_ context.Context, _, _, _, name, image string, command, _ []string, target string, env []corev1.EnvVar) (*corev1.EphemeralContainer, error) {
+	if name == "" {
+		name = "debugger-x7k2q"
+	}
+	p.added = &corev1.EphemeralContainer{
+		EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: name, Image: image, Command: command, Env: env},
+		TargetContainerName:      target,
+	}
+	return p.added, nil
+}
+
+func TestServerInjectsEphemeralDebugContainer(t *testing.T) {
+	provider := &fakeDebugProvider{rpcClientProvider: rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())}}
+	server, err := NewServer("token", fakeContexts{}, resources.NewService(provider), helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := performJSONRequest(t, server, http.MethodPost, "/v1/pods/debug", `{
+		"contextId":"dev",
+		"namespace":"apps",
+		"podName":"web",
+		"container":{"image":"busybox:1.36","targetContainerName":"app","command":["/bin/sh"],"env":[{"name":"TRACE","value":"1"}]}
+	}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var decoded resources.PodDebugResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Container.Name != "debugger-x7k2q" || decoded.Container.Image != "busybox:1.36" || decoded.Container.TargetContainerName != "app" {
+		t.Fatalf("decoded = %#v", decoded.Container)
+	}
+
+	missingImage := performJSONRequest(t, server, http.MethodPost, "/v1/pods/debug", `{
+		"contextId":"dev",
+		"namespace":"apps",
+		"podName":"web",
+		"container":{}
+	}`)
+	if missingImage.Code != http.StatusBadRequest || !contains(missingImage.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("status=%d body=%s", missingImage.Code, missingImage.Body.String())
+	}
+}
+
 func TestServerContextsHealth(t *testing.T) {
 	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
 	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))

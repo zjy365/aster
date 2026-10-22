@@ -276,6 +276,7 @@ export function createTauriDesktopApi(): DesktopApi {
         return () => void invoke("pods_logs_follow_stop", { id });
       },
       exec: (request) => invoke("pods_exec", { request }),
+      debugContainer: (request) => invoke("pods_debug", { request }),
       portForwardStart: (request) => invoke("pods_portforward_start", { request }),
       portForwardStop: (id) => invoke<void>("pods_portforward_stop", { request: { id } }),
       nodeCordon: (request) => invoke("nodes_cordon", { request }),

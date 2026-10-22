@@ -242,6 +242,68 @@ func validateExecRequest(value resources.ExecRequest) error {
 	return checkLength("container", value.Container, maxContainer)
 }
 
+// debug argv caps match the service-side exec caps (command and args each
+// hold a bounded argv; env is a bounded name/value list).
+const (
+	maxDebugArgv     = 32
+	maxDebugArgValue = 4_096
+	maxDebugEnvVars  = 64
+	maxDebugEnvName  = 512
+)
+
+func validatePodDebugRequest(value resources.PodDebugRequest) error {
+	if err := validateContextID(value.ContextID); err != nil {
+		return err
+	}
+	if err := checkLength("namespace", value.Namespace, maxNamespace); err != nil {
+		return err
+	}
+	if err := checkLength("podName", value.PodName, maxName); err != nil {
+		return err
+	}
+	container := value.Container
+	if err := checkLength("container.name", container.Name, maxContainer); err != nil {
+		return err
+	}
+	if container.Image == "" {
+		return fmt.Errorf("container.image is required")
+	}
+	if err := checkLength("container.image", container.Image, maxImage); err != nil {
+		return err
+	}
+	if err := checkLength("container.targetContainerName", container.TargetContainerName, maxContainer); err != nil {
+		return err
+	}
+	for _, field := range []struct {
+		label string
+		value []string
+	}{
+		{"container.command", container.Command},
+		{"container.args", container.Args},
+	} {
+		if len(field.value) > maxDebugArgv {
+			return fmt.Errorf("%s must have at most %d entries", field.label, maxDebugArgv)
+		}
+		for _, entry := range field.value {
+			if len(entry) > maxDebugArgValue {
+				return fmt.Errorf("%s is too long", field.label)
+			}
+		}
+	}
+	if len(container.Env) > maxDebugEnvVars {
+		return fmt.Errorf("container.env must have at most %d entries", maxDebugEnvVars)
+	}
+	for _, entry := range container.Env {
+		if err := checkLength("container.env name", entry.Name, maxDebugEnvName); err != nil {
+			return err
+		}
+		if err := checkLength("container.env value", entry.Value, maxDebugArgValue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func validateMetricsRequest(value resources.MetricsRequest) error {
 	if err := validateContextID(value.ContextID); err != nil {
 		return err

@@ -425,6 +425,9 @@ const MOCK_DESKTOP_API = `
         return () => timers.forEach(clearTimeout);
       },
       exec: async () => ({ stdout: "", stderr: "" }),
+      debugContainer: async (request) => ({
+        container: { name: request.container.name || "debugger-x7k2q", image: request.container.image },
+      }),
       portForwardStart: async (request) => ({ id: "pf-1", localPort: request.localPort || 12_345 }),
       portForwardStop: async () => undefined,
       nodeCordon: async (request) => {
@@ -3179,6 +3182,90 @@ test("pod detail forwards a declared port and stops it", async ({ page }) => {
 
   await expectNoOverflow(page, "pod detail port forward 1280x800");
   await screenshot(page, "pod-detail-port-forward-1280");
+  expect(failures).toEqual([]);
+});
+
+test("pod detail injects an ephemeral debug container", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    const fixture = window as unknown as {
+      debugRequests: Array<{ container: { image: string; command?: string[]; targetContainerName?: string } }>;
+      __ASTER_DESKTOP__: {
+        resources: {
+          get(request: { resourceKind: { kind: string }; name: string }): Promise<{ row: unknown; yaml: string }>;
+          debugContainer(request: { container: { image: string; command?: string[]; targetContainerName?: string } }): Promise<unknown>;
+        };
+      };
+    };
+    fixture.debugRequests = [];
+    fixture.__ASTER_DESKTOP__.resources.debugContainer = async (request) => {
+      if (request.container.image === "rejected:1.0") throw new Error("image pull failed");
+      fixture.debugRequests.push(request);
+      return {
+        container: {
+          name: "debugger-x7k2q",
+          image: request.container.image,
+          targetContainerName: request.container.targetContainerName,
+        },
+      };
+    };
+    // Once the injection lands, the refreshed pod YAML carries the stored
+    // ephemeral container entry.
+    const originalGet = fixture.__ASTER_DESKTOP__.resources.get;
+    fixture.__ASTER_DESKTOP__.resources.get = async (request) => {
+      const response = await originalGet(request);
+      if (request.resourceKind.kind === "Pod" && fixture.debugRequests.length > 0) {
+        response.yaml += "\n  ephemeralContainers:\n    - name: debugger-x7k2q\n      image: busybox:1.36\n      targetContainerName: app\n";
+      }
+      return response;
+    };
+  });
+  await connectToDev(page);
+
+  await page.getByTestId("resource-nav-pods").click();
+  await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+  const detail = page.getByTestId("resource-detail-view");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+  await expect(detail.getByTestId("overview-containers")).toContainText("nginx:1.27");
+  await expect(detail.getByTestId("overview-ephemeral-containers")).toHaveCount(0);
+
+  // The dialog proposes busybox, takes an optional generated name, a command,
+  // and a target whose process namespace gets shared.
+  await detail.getByTestId("resource-action-debug-container").click();
+  const dialog = page.getByTestId("debug-container-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Debug container image")).toHaveValue("busybox:1.36");
+  // Invalid quoting stays local and leaves the form usable for correction.
+  await dialog.getByLabel("Debug container command").fill("/bin/sh -c 'ps aux");
+  await dialog.getByTestId("debug-container-submit").click();
+  await expect(dialog.getByTestId("debug-container-error")).toContainText("Unclosed quote");
+  expect(await page.evaluate(() => (window as unknown as { debugRequests: unknown[] }).debugRequests)).toEqual([]);
+  await expect(dialog.getByTestId("debug-container-submit")).toBeEnabled();
+  await dialog.getByLabel("Debug container command").fill("/bin/sh -c 'ps aux'");
+  await dialog.getByLabel("Target container").selectOption("app");
+  await dialog.getByTestId("debug-container-submit").click();
+  await expect(dialog).toHaveCount(0);
+
+  // The stored entry surfaces under the regular containers.
+  const ephemeral = detail.getByTestId("overview-ephemeral-containers");
+  await expect(ephemeral).toContainText("debugger-x7k2q");
+  await expect(ephemeral).toContainText("busybox:1.36");
+  await expect(ephemeral).toContainText("debug");
+  await expect.poll(() => page.evaluate(() => (window as unknown as { debugRequests: Array<{ container: { image: string; command?: string[]; targetContainerName?: string } }> }).debugRequests.map((request) => request.container))).toEqual([{
+    image: "busybox:1.36", command: ["/bin/sh", "-c", "ps aux"], targetContainerName: "app",
+  }]);
+
+  // A rejected injection keeps the dialog open with the error inline.
+  await detail.getByTestId("resource-action-debug-container").click();
+  await dialog.getByLabel("Debug container image").fill("rejected:1.0");
+  await dialog.getByTestId("debug-container-submit").click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("debug-container-error")).toContainText("image pull failed");
+
+  await expectNoOverflow(page, "pod detail debug container 1280x800");
+  await screenshot(page, "pod-detail-debug-container-1280");
   expect(failures).toEqual([]);
 });
 
