@@ -3237,7 +3237,13 @@ test("pod detail injects an ephemeral debug container", async ({ page }) => {
   const dialog = page.getByTestId("debug-container-dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel("Debug container image")).toHaveValue("busybox:1.36");
-  await dialog.getByLabel("Debug container command").fill("/bin/sh -c ps aux");
+  // Invalid quoting stays local and leaves the form usable for correction.
+  await dialog.getByLabel("Debug container command").fill("/bin/sh -c 'ps aux");
+  await dialog.getByTestId("debug-container-submit").click();
+  await expect(dialog.getByTestId("debug-container-error")).toContainText("Unclosed quote");
+  expect(await page.evaluate(() => (window as unknown as { debugRequests: unknown[] }).debugRequests)).toEqual([]);
+  await expect(dialog.getByTestId("debug-container-submit")).toBeEnabled();
+  await dialog.getByLabel("Debug container command").fill("/bin/sh -c 'ps aux'");
   await dialog.getByLabel("Target container").selectOption("app");
   await dialog.getByTestId("debug-container-submit").click();
   await expect(dialog).toHaveCount(0);
@@ -3248,7 +3254,7 @@ test("pod detail injects an ephemeral debug container", async ({ page }) => {
   await expect(ephemeral).toContainText("busybox:1.36");
   await expect(ephemeral).toContainText("debug");
   await expect.poll(() => page.evaluate(() => (window as unknown as { debugRequests: Array<{ container: { image: string; command?: string[]; targetContainerName?: string } }> }).debugRequests.map((request) => request.container))).toEqual([{
-    image: "busybox:1.36", command: ["/bin/sh", "-c", "ps", "aux"], targetContainerName: "app",
+    image: "busybox:1.36", command: ["/bin/sh", "-c", "ps aux"], targetContainerName: "app",
   }]);
 
   // A rejected injection keeps the dialog open with the error inline.

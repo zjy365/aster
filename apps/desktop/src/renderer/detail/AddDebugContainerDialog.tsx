@@ -66,6 +66,13 @@ export function AddDebugContainerDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!valid || busy) return;
+    let commandArgv: string[];
+    try {
+      commandArgv = parseDebugCommand(command);
+    } catch (cause) {
+      setError(messageOf(cause));
+      return;
+    }
     setBusy(true);
     setError("");
     const request: PodDebugRequest = {
@@ -75,7 +82,7 @@ export function AddDebugContainerDialog({
       container: {
         image: trimmedImage,
         ...(name.trim() ? { name: name.trim() } : {}),
-        ...(command.trim() ? { command: parseDebugCommand(command) } : {}),
+        ...(commandArgv.length ? { command: commandArgv } : {}),
         ...(target ? { targetContainerName: target } : {}),
       },
     };
@@ -131,7 +138,7 @@ export function AddDebugContainerDialog({
               <input
                 type="text"
                 value={command}
-                placeholder="/bin/sh -c ps aux"
+                placeholder="/bin/sh -c 'ps aux'"
                 aria-label="Debug container command"
                 onChange={(event) => setCommand(event.target.value)}
               />
