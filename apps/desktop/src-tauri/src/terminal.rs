@@ -103,11 +103,14 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
-/// Picks the first terminal that is actually installed. iTerm2 is detected by
+/// Prefers Ghostty when installed. iTerm2 is detected by
 /// its app bundle (or its it2cli utility on PATH); WezTerm, Kitty and Ghostty
 /// by their CLI on PATH or their app bundle; Terminal.app is the always-there
 /// fallback.
 pub fn detect_terminal(paths: &TerminalPaths) -> Option<TerminalSpec> {
+    if let Some(program) = paths.binary_in_path("ghostty").or_else(|| paths.bundle_binary("Ghostty.app", "ghostty")) {
+        return Some(TerminalSpec { kind: TerminalKind::Ghostty, program });
+    }
     if paths.bundle_exists("iTerm.app") || paths.binary_in_path("it2cli").is_some() {
         return Some(TerminalSpec { kind: TerminalKind::Iterm2, program: "/usr/bin/osascript".into() });
     }
@@ -116,9 +119,6 @@ pub fn detect_terminal(paths: &TerminalPaths) -> Option<TerminalSpec> {
     }
     if let Some(program) = paths.binary_in_path("kitty").or_else(|| paths.bundle_binary("kitty.app", "kitty")) {
         return Some(TerminalSpec { kind: TerminalKind::Kitty, program });
-    }
-    if let Some(program) = paths.binary_in_path("ghostty").or_else(|| paths.bundle_binary("Ghostty.app", "ghostty")) {
-        return Some(TerminalSpec { kind: TerminalKind::Ghostty, program });
     }
     if paths.bundle_exists("Utilities/Terminal.app") {
         return Some(TerminalSpec { kind: TerminalKind::AppleTerminal, program: "/usr/bin/open".into() });
@@ -170,7 +170,7 @@ fn launch_argv(spec: &TerminalSpec, snippet: &str, script: Option<&Path>) -> Vec
             "-e".into(),
             format!(
                 "tell application id \"com.googlecode.iterm2\" to create window with default profile command \"{}\"",
-                applescript_escape(snippet)
+                applescript_escape(&format!("/bin/sh -c {}", shell_quote(snippet)))
             ),
         ],
         TerminalKind::WezTerm => vec![
@@ -432,24 +432,31 @@ mod tests {
     }
 
     #[test]
-    fn detection_prefers_iterm_then_wezterm_kitty_ghostty_terminal() {
+    fn detection_prefers_ghostty_then_iterm_wezterm_kitty_terminal() {
         let everything = fixture_paths(
             &[("iTerm.app", None), ("WezTerm.app", Some("wezterm")), ("kitty.app", Some("kitty")), ("Ghostty.app", Some("ghostty")), ("Utilities/Terminal.app", None)],
             &["wezterm", "kitty", "ghostty"],
         );
-        assert_eq!(detect_terminal(&everything).unwrap().kind, TerminalKind::Iterm2);
+        assert_eq!(detect_terminal(&everything).unwrap().kind, TerminalKind::Ghostty);
+
+        let iterm_only = fixture_paths(&[("iTerm.app", None), ("Utilities/Terminal.app", None)], &[]);
+        assert_eq!(detect_terminal(&iterm_only).unwrap().kind, TerminalKind::Iterm2);
+        let wezterm_only = fixture_paths(&[("Utilities/Terminal.app", None)], &["wezterm"]);
+        assert_eq!(detect_terminal(&wezterm_only).unwrap().kind, TerminalKind::WezTerm);
+        let kitty_only = fixture_paths(&[("Utilities/Terminal.app", None)], &["kitty"]);
+        assert_eq!(detect_terminal(&kitty_only).unwrap().kind, TerminalKind::Kitty);
 
         let no_iterm = fixture_paths(
             &[("WezTerm.app", Some("wezterm")), ("kitty.app", Some("kitty")), ("Ghostty.app", Some("ghostty")), ("Utilities/Terminal.app", None)],
             &["wezterm", "kitty", "ghostty"],
         );
-        assert_eq!(detect_terminal(&no_iterm).unwrap().kind, TerminalKind::WezTerm);
+        assert_eq!(detect_terminal(&no_iterm).unwrap().kind, TerminalKind::Ghostty);
 
         let no_wezterm = fixture_paths(
             &[("kitty.app", Some("kitty")), ("Ghostty.app", Some("ghostty")), ("Utilities/Terminal.app", None)],
             &["kitty", "ghostty"],
         );
-        assert_eq!(detect_terminal(&no_wezterm).unwrap().kind, TerminalKind::Kitty);
+        assert_eq!(detect_terminal(&no_wezterm).unwrap().kind, TerminalKind::Ghostty);
 
         let no_kitty = fixture_paths(&[("Ghostty.app", Some("ghostty")), ("Utilities/Terminal.app", None)], &["ghostty"]);
         assert_eq!(detect_terminal(&no_kitty).unwrap().kind, TerminalKind::Ghostty);
@@ -535,6 +542,22 @@ mod tests {
             terminal_app.iter().map(String::as_str).collect::<Vec<_>>(),
             ["/usr/bin/open", "-a", "Terminal", "/staged/y.command"]
         );
+    }
+
+    #[test]
+    fn iterm_command_runs_shell_syntax_through_an_explicit_shell() {
+        let snippet = "printf '%s' \"$KUBECONFIG\"";
+        let argv = launch_argv(&TerminalSpec { kind: TerminalKind::Iterm2, program: "/usr/bin/osascript".into() }, snippet, None);
+        let prefix = "tell application id \"com.googlecode.iterm2\" to create window with default profile command \"";
+        let command = argv[2].strip_prefix(prefix).unwrap().strip_suffix('"').unwrap();
+        // Undo the AppleScript string encoding, then execute the command the
+        // terminal receives. A shell builtin cannot be the executable itself.
+        let command = command.replace("\\\"", "\"").replace("\\\\", "\\");
+        assert!(command.starts_with("/bin/sh -c "), "{command}");
+        let output = std::process::Command::new("/bin/sh").args(["-c", &command])
+            .env("KUBECONFIG", "/tmp/config with ' quotes").output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), "/tmp/config with ' quotes");
     }
 
     #[test]

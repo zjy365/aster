@@ -563,7 +563,7 @@ export interface DesktopApi {
      */
     kubectlAvailable(): Promise<boolean>;
     /**
-     * Opens the user's terminal (iTerm2, WezTerm, Kitty, Ghostty, then
+     * Opens the user's terminal (Ghostty, iTerm2, WezTerm, Kitty, then
      * Terminal.app) with a single-context kubeconfig staged by the shell in a
      * 0600 temp file: KUBECONFIG points at it, a banner names the context,
      * then an interactive shell takes over. Only the context id travels
