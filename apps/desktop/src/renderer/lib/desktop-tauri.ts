@@ -7,6 +7,8 @@ import type {
   ContextInfo,
   CoreStatus,
   DesktopApi,
+  HelmChartVersionsRequest,
+  HelmChartVersionsResponse,
   HelmGetRequest,
   HelmReleaseDetail,
   HelmListEvent,
@@ -191,6 +193,12 @@ export function createTauriDesktopApi(): DesktopApi {
       },
       upgrade: async (request: HelmUpgradeRequest): Promise<HelmUpgradeResponse> => {
         return invoke<HelmUpgradeResponse>("helm_releases_upgrade", { request });
+      },
+      chartVersions: (request: HelmChartVersionsRequest): Promise<HelmChartVersionsResponse> => {
+        return invoke<HelmChartVersionsResponse>("helm_chart_versions", {
+          repoUrl: request.repoUrl,
+          chart: request.chart,
+        });
       },
     },
     resources: {

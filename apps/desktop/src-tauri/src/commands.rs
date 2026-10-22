@@ -207,6 +207,19 @@ pub async fn helm_releases_upgrade(state: State<'_, AppState>, request: Value) -
 }
 
 #[tauri::command]
+pub async fn helm_chart_versions(state: State<'_, AppState>, repo_url: String, chart: String) -> Result<Value, String> {
+    // Read-only repository index lookup: it never touches a cluster, so it
+    // rides the ordinary 30s client. Caps mirror the core's validation.
+    let repo_url = repo_url.trim().to_string();
+    let chart = chart.trim().to_string();
+    if repo_url.is_empty() || repo_url.len() > 2048 || chart.is_empty() || chart.len() > 253 {
+        return Err("Invalid chart version request".into());
+    }
+    let query = format!("repoUrl={}&chart={}", url_encode(&repo_url), url_encode(&chart));
+    state.core.get(&format!("/v1/helm/chart-versions?{query}")).await
+}
+
+#[tauri::command]
 pub async fn pods_portforward_start(state: State<'_, AppState>, request: Value) -> Result<Value, String> {
     state.core.post("/v1/pods/portforward", request).await
 }

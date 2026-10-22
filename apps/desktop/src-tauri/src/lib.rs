@@ -129,6 +129,7 @@ pub fn run() {
             commands::helm_releases_uninstall,
             commands::helm_releases_rollback,
             commands::helm_releases_upgrade,
+            commands::helm_chart_versions,
             commands::resources_list,
             commands::resources_get,
             commands::resources_related,
