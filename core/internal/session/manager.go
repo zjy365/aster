@@ -178,7 +178,20 @@ func (m *Manager) PodExec(ctx context.Context, contextID, namespace, name, conta
 }
 
 func (m *Manager) Contexts() ([]ContextInfo, error) {
-	return m.loader.Contexts()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	contexts, err := m.loader.Contexts()
+	if err != nil {
+		return nil, err
+	}
+	// A context refresh reloads kubeconfig files. Clients hold a snapshot of
+	// their TLS and authentication settings, so refreshing only the inventory
+	// leaves corrected CAs or credentials stale until the core is restarted.
+	// Rebuild lazily on the next request, serialized with client creation.
+	clear(m.clients)
+	clear(m.coreClients)
+	clear(m.discoveryClients)
+	return contexts, nil
 }
 
 // RenameEntry resolves a kubeconfig name collision by renaming the colliding
