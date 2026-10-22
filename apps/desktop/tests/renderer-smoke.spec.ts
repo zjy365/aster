@@ -427,6 +427,23 @@ const MOCK_DESKTOP_API = `
       exec: async () => ({ stdout: "", stderr: "" }),
       portForwardStart: async (request) => ({ id: "pf-1", localPort: request.localPort || 12_345 }),
       portForwardStop: async () => undefined,
+      nodeCordon: async (request) => {
+        window.__nodeCordonRequests = window.__nodeCordonRequests || [];
+        window.__nodeCordonRequests.push(request);
+        return { nodeName: request.nodeName, unschedulable: request.unschedulable, changed: true };
+      },
+      drainNode: (request, listener) => {
+        window.__nodeDrainRequests = window.__nodeDrainRequests || [];
+        window.__nodeDrainRequests.push(request);
+        const events = [
+          { type: "cordon", node: request.nodeName, unschedulable: true, changed: true },
+          { type: "pod", node: request.nodeName, namespace: "default", pod: "web-1", status: "evicting" },
+          { type: "pod", node: request.nodeName, namespace: "default", pod: "web-1", status: "evicted" },
+          { type: "summary", node: request.nodeName, total: 1, evicted: 1, skipped: 0, failed: 0, complete: true },
+        ];
+        const timers = events.map((event, index) => setTimeout(() => listener(event), 20 * (index + 1)));
+        return () => timers.forEach(clearTimeout);
+      },
       mutate: async (request) => {
         // Mirror the API server's optimistic concurrency: the live object sits
         // at resourceVersion 1001 (the dry-run response reports it), so an apply
@@ -3406,3 +3423,65 @@ for (const navigation of ["related", "palette"] as const) {
     }
   });
 }
+
+test("node detail cordons, uncordons and drains with streamed progress", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  // The generic Node YAML carries no spec, so pin unschedulable: true to
+  // exercise the Uncordon half of the toggle before draining.
+  await page.evaluate(() => {
+    const fixture = window as unknown as {
+      __ASTER_DESKTOP__: { resources: { get(request: { resourceKind: { kind: string } }): Promise<{ yaml: string }> } };
+    };
+    const base = fixture.__ASTER_DESKTOP__.resources.get;
+    fixture.__ASTER_DESKTOP__.resources.get = async (request) => {
+      const result = await base(request);
+      if (request.resourceKind.kind === "Node") {
+        return { ...result, yaml: result.yaml + "spec:\n  unschedulable: true\n" };
+      }
+      return result;
+    };
+  });
+  await connectToDev(page);
+  await page.getByTestId("resource-nav-nodes").click();
+  await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+  const detail = page.getByTestId("resource-detail-view");
+
+  // The live YAML flips the header action to Uncordon.
+  await expect(detail.getByTestId("resource-action-uncordon")).toBeVisible();
+  await expect(detail.getByTestId("resource-action-cordon")).toHaveCount(0);
+  await expect(detail.getByTestId("resource-action-drain")).toBeVisible();
+
+  // Uncordon confirms before dispatching the endpoint.
+  await detail.getByTestId("resource-action-uncordon").click();
+  await expect(page.getByTestId("node-cordon-dialog")).toBeVisible();
+  await page.getByTestId("node-cordon-confirm").click();
+  await expect(page.getByTestId("node-cordon-dialog")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __nodeCordonRequests?: Array<{ nodeName: string; unschedulable: boolean }> }).__nodeCordonRequests))
+    .toEqual([{ contextId: "dev", nodeName: "nodes-0", unschedulable: false }]);
+  await expect(detail.getByTestId("resource-detail-status")).toContainText("uncordoned");
+
+  // Drain review carries the kubectl-safe defaults, then streams per-pod lines.
+  await detail.getByTestId("resource-action-drain").click();
+  const dialog = page.getByTestId("node-drain-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("node-drain-option-ignoreDaemonsets")).toBeChecked();
+  for (const option of ["force", "deleteEmptyDirData", "disableEviction"]) {
+    await expect(dialog.getByTestId(`node-drain-option-${option}`)).not.toBeChecked();
+  }
+  await dialog.getByTestId("node-drain-confirm").click();
+  const progress = dialog.getByTestId("node-drain-progress");
+  await expect(progress).toContainText("Node cordoned");
+  await expect(progress).toContainText("default/web-1 — evicting");
+  await expect(progress).toContainText("default/web-1 — evicted");
+  await expect(dialog.getByTestId("node-drain-summary")).toContainText("1 evicted");
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __nodeDrainRequests?: Array<{ nodeName: string; options: Record<string, boolean> }> }).__nodeDrainRequests))
+    .toEqual([{ contextId: "dev", nodeName: "nodes-0", options: { ignoreDaemonsets: true, force: false, deleteEmptyDirData: false, disableEviction: false } }]);
+  await dialog.getByTestId("node-drain-cancel").click();
+  await expect(dialog).toHaveCount(0);
+
+  await expectNoOverflow(page, "node drain dialog 1280x800");
+  await screenshot(page, "node-drain-1280");
+  expect(failures).toEqual([]);
+});

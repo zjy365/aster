@@ -152,6 +152,12 @@ func (m *Manager) coreClient(contextID string) (kubernetes.Interface, error) {
 	return client, nil
 }
 
+// NodeClient hands node operations (cordon/uncordon, drain) the same lazy
+// per-context typed client the log and exec paths use.
+func (m *Manager) NodeClient(contextID string) (kubernetes.Interface, error) {
+	return m.coreClient(contextID)
+}
+
 func (m *Manager) PodExec(ctx context.Context, contextID, namespace, name, container string, command []string) (string, string, error) {
 	if contextID == "" || namespace == "" || name == "" || len(command) == 0 {
 		return "", "", fmt.Errorf("contextId, namespace, name and command are required")

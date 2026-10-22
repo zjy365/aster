@@ -15,12 +15,17 @@ import (
 	"github.com/zjy365/aster/core/internal/helm"
 	"github.com/zjy365/aster/core/internal/resources"
 	"github.com/zjy365/aster/core/internal/session"
+	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
+	kubernetesfake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
 
@@ -422,3 +427,117 @@ func contains(value, fragment string) bool {
 	}
 	return false
 }
+
+type rpcNodeProvider struct {
+	rpcClientProvider
+	core kubernetes.Interface
+}
+
+func (p rpcNodeProvider) NodeClient(string) (kubernetes.Interface, error) {
+	return p.core, nil
+}
+
+func newDrainServer(t *testing.T) (*Server, *kubernetesfake.Clientset) {
+	t.Helper()
+	clientset := kubernetesfake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-1"}})
+	clientset.PrependReactor("create", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		create := action.(clienttesting.CreateAction)
+		if create.GetSubresource() != "eviction" {
+			return false, nil, nil
+		}
+		eviction := create.GetObject().(*policyv1.Eviction)
+		if err := clientset.Tracker().Delete(schema.GroupVersionResource{Version: "v1", Resource: "pods"}, eviction.Namespace, eviction.Name); err != nil {
+			return true, nil, err
+		}
+		return true, eviction, nil
+	})
+	service := resources.NewService(rpcNodeProvider{
+		rpcClientProvider: rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())},
+		core:              clientset,
+	})
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return server, clientset
+}
+
+func TestServerCordonNode(t *testing.T) {
+	server, _ := newDrainServer(t)
+	request := httptest.NewRequest(http.MethodPost, "/v1/nodes/cordon",
+		strings.NewReader(`{"contextId":"dev","nodeName":"worker-1","unschedulable":true}`))
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !contains(response.Body.String(), `"unschedulable":true`) || !contains(response.Body.String(), `"changed":true`) {
+		t.Fatalf("body=%s", response.Body.String())
+	}
+
+	for _, payload := range []string{`{"nodeName":"worker-1"}`, `{"contextId":"dev"}`, `{"contextId":"dev","nodeName":"` + strings.Repeat("n", 254) + `"}`} {
+		invalid := httptest.NewRequest(http.MethodPost, "/v1/nodes/cordon", strings.NewReader(payload))
+		invalid.Header.Set("Authorization", "Bearer token")
+		rejected := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rejected, invalid)
+		if rejected.Code != http.StatusBadRequest || !contains(rejected.Body.String(), `"code":"invalid_request"`) {
+			t.Fatalf("payload %s: status=%d body=%s", payload, rejected.Code, rejected.Body.String())
+		}
+	}
+}
+
+func TestServerStreamsDrainAsNDJSON(t *testing.T) {
+	server, clientset := newDrainServer(t)
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "web-1",
+			Namespace:       "apps",
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "web-abc", Controller: ptrTo(true)}},
+		},
+		Spec:   corev1.PodSpec{NodeName: "worker-1"},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	if _, err := clientset.CoreV1().Pods("apps").Create(context.Background(), &pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/nodes/drain",
+		strings.NewReader(`{"contextId":"dev","nodeName":"worker-1","options":{"ignoreDaemonsets":true}}`))
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/x-ndjson" {
+		t.Fatalf("status=%d content-type=%q body=%s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+
+	var events []resources.NodeDrainEvent
+	for _, line := range strings.Split(strings.TrimSpace(response.Body.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var event resources.NodeDrainEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("line %q: %v", line, err)
+		}
+		events = append(events, event)
+	}
+	if len(events) != 4 {
+		t.Fatalf("events = %#v", events)
+	}
+	if events[0].Type != "cordon" || !events[0].Unschedulable || !events[0].Changed || events[0].Node != "worker-1" {
+		t.Fatalf("cordon event = %#v", events[0])
+	}
+	if events[1].Type != "pod" || events[1].Pod != "web-1" || events[1].Namespace != "apps" || events[1].Status != "evicting" {
+		t.Fatalf("evicting event = %#v", events[1])
+	}
+	if events[2].Type != "pod" || events[2].Status != "evicted" {
+		t.Fatalf("evicted event = %#v", events[2])
+	}
+	summary := events[3]
+	if summary.Type != "summary" || !summary.Complete || summary.Evicted != 1 || summary.Total != 1 {
+		t.Fatalf("summary = %#v", summary)
+	}
+}
+
+func ptrTo(value bool) *bool { return &value }
