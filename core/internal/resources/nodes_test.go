@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -195,7 +196,7 @@ func TestDrainForceEvictsUnmanagedPods(t *testing.T) {
 	}
 }
 
-func TestDrainSkipsEmptyDirWithoutOverride(t *testing.T) {
+func TestDrainAbortsOnEmptyDirWithoutOverride(t *testing.T) {
 	fixture := newDrainFixture(t)
 	local := managedPod("apps", "batchy", "worker-1")
 	local.Spec.Volumes = []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
@@ -203,9 +204,13 @@ func TestDrainSkipsEmptyDirWithoutOverride(t *testing.T) {
 
 	events := fixture.drain(NodeDrainOptions{IgnoreDaemonsets: true})
 	summary := lastEvent(events)
-	if !summary.Complete || summary.Evicted != 1 || summary.Skipped != 1 {
+	if summary.Complete || summary.Evicted != 0 || summary.Skipped != 1 || !strings.Contains(summary.Error, "emptyDir") {
 		t.Fatalf("summary = %#v", summary)
 	}
+	if len(fixture.evictions()) != 0 || len(fixture.actions("delete", "pods")) != 0 {
+		t.Fatal("emptyDir blocker must prevent every pod removal")
+	}
+	fixture.assertNodeCordoned(t)
 	for _, event := range events {
 		if event.Pod == "batchy" && event.Status == "skipped" && !strings.Contains(event.Reason, "emptyDir") {
 			t.Fatalf("emptyDir reason = %q", event.Reason)
@@ -303,6 +308,121 @@ func TestDrainTerminationWaitTimesOut(t *testing.T) {
 		if event.Pod == "stuck" && event.Status == "failed" && !strings.Contains(event.Message, "terminate") {
 			t.Fatalf("stuck failure = %#v", event)
 		}
+	}
+}
+
+func TestDrainDoesNotRemoveSameNameReplacement(t *testing.T) {
+	for _, mode := range []string{"eviction", "delete", "terminal"} {
+		t.Run(mode, func(t *testing.T) {
+			original := managedPod("apps", "database-0", "worker-1")
+			original.UID = "original"
+			if mode == "terminal" {
+				original.Status.Phase = corev1.PodSucceeded
+			}
+			replacement := managedPod("apps", "database-0", "worker-2")
+			replacement.UID = "replacement"
+			client := kubernetesfake.NewSimpleClientset(&replacement)
+			// Model a StatefulSet recreation between the drain's initial list
+			// and its queued removal. The API rejects an old UID precondition.
+			client.PrependReactor("*", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+				var options *metav1.DeleteOptions
+				switch {
+				case action.GetVerb() == "delete":
+					value := action.(clienttesting.DeleteAction).GetDeleteOptions()
+					options = &value
+				case action.GetVerb() == "create" && action.GetSubresource() == "eviction":
+					options = action.(clienttesting.CreateAction).GetObject().(*policyv1.Eviction).DeleteOptions
+				default:
+					return false, nil, nil
+				}
+				if options != nil && options.Preconditions != nil && options.Preconditions.UID != nil && *options.Preconditions.UID != replacement.UID {
+					return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, replacement.Name, fmt.Errorf("UID precondition failed"))
+				}
+				return true, nil, client.Tracker().Delete(podsGVR(), replacement.Namespace, replacement.Name)
+			})
+			err := removePod(context.Background(), client, original, NodeDrainOptions{DisableEviction: mode == "delete"})
+			if !apierrors.IsConflict(err) {
+				t.Fatalf("removing replaced pod returned %v, want UID conflict", err)
+			}
+			stored, err := client.CoreV1().Pods(replacement.Namespace).Get(context.Background(), replacement.Name, metav1.GetOptions{})
+			if err != nil || stored.UID != replacement.UID || stored.Spec.NodeName != "worker-2" {
+				t.Fatalf("replacement was affected: pod=%#v err=%v", stored, err)
+			}
+		})
+	}
+}
+
+func TestDrainCompletesWhenRemovedPodIsRecreated(t *testing.T) {
+	for _, disableEviction := range []bool{false, true} {
+		t.Run(fmt.Sprintf("disableEviction=%t", disableEviction), func(t *testing.T) {
+			original := managedPod("apps", "database-0", "worker-1")
+			original.UID = "original"
+			client := kubernetesfake.NewSimpleClientset(&original)
+			client.PrependReactor("*", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+				if action.GetVerb() != "delete" && !(action.GetVerb() == "create" && action.GetSubresource() == "eviction") {
+					return false, nil, nil
+				}
+				replacement := original.DeepCopy()
+				replacement.UID = "replacement"
+				replacement.Spec.NodeName = "worker-2"
+				if err := client.Tracker().Update(podsGVR(), replacement, replacement.Namespace); err != nil {
+					return true, nil, err
+				}
+				return true, replacement, nil
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			if err := removePod(ctx, client, original, NodeDrainOptions{DisableEviction: disableEviction}); err != nil {
+				t.Fatalf("original UID is gone, but drain did not complete: %v", err)
+			}
+		})
+	}
+}
+
+func TestDrainRemovesFinishedLocalStorageAndDaemonSetPods(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodSucceeded, corev1.PodFailed} {
+		t.Run(string(phase), func(t *testing.T) {
+			fixture := newDrainFixture(t)
+			pod := managedPod("apps", "finished", "worker-1")
+			pod.Status.Phase = phase
+			pod.OwnerReferences = []metav1.OwnerReference{ownerRef("DaemonSet", "agent", true)}
+			pod.Spec.Volumes = []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
+			fixture.addPod(pod)
+			summary := lastEvent(fixture.drain(NodeDrainOptions{}))
+			if !summary.Complete || summary.Evicted != 1 || len(fixture.actions("delete", "pods")) != 1 {
+				t.Fatalf("finished pod should not need destructive overrides: %#v", summary)
+			}
+		})
+	}
+}
+
+func TestPodsOnNodeFollowsPagination(t *testing.T) {
+	client := kubernetesfake.NewSimpleClientset()
+	pages := 0
+	client.PrependReactor("list", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		options := action.(interface{ GetListOptions() metav1.ListOptions }).GetListOptions()
+		if options.FieldSelector != "spec.nodeName=worker-1" || options.Limit != drainPodPageSize {
+			t.Errorf("pagination lost node scope or page cap: %#v", options)
+		}
+		pages++
+		if pages == 1 {
+			if options.Continue != "" {
+				t.Errorf("initial continuation = %q", options.Continue)
+			}
+			list := &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "page-2"}}
+			for index := 0; index < drainPodPageSize; index++ {
+				list.Items = append(list.Items, managedPod("apps", fmt.Sprintf("web-%d", index), "worker-1"))
+			}
+			return true, list, nil
+		}
+		if pages != 2 || options.Continue != "page-2" {
+			return true, nil, fmt.Errorf("unexpected pagination request %d: continue=%q", pages, options.Continue)
+		}
+		return true, &corev1.PodList{Items: []corev1.Pod{managedPod("apps", "last", "worker-1")}}, nil
+	})
+	pods, err := podsOnNode(context.Background(), client, "worker-1")
+	if err != nil || len(pods) != drainPodPageSize+1 || pages != 2 {
+		t.Fatalf("pods=%d pages=%d err=%v", len(pods), pages, err)
 	}
 }
 

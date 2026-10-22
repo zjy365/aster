@@ -219,7 +219,7 @@ func removePod(ctx context.Context, client kubernetes.Interface, pod corev1.Pod,
 	if options.DisableEviction || terminalPod(&pod) {
 		// Terminal pods cannot pass the eviction API, so they take the DELETE
 		// path alongside DisableEviction requests.
-		if err := deletePod(ctx, client, pod.Namespace, pod.Name); err != nil {
+		if err := deletePod(ctx, client, pod); err != nil {
 			return err
 		}
 	} else {
@@ -227,12 +227,15 @@ func removePod(ctx context.Context, client kubernetes.Interface, pod corev1.Pod,
 			return err
 		}
 	}
-	return waitForPodGone(ctx, client, pod.Namespace, pod.Name)
+	return waitForPodGone(ctx, client, pod)
 }
 
 func evictPod(ctx context.Context, client kubernetes.Interface, pod corev1.Pod) error {
 	eviction := &policyv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace},
+		DeleteOptions: &metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &pod.UID},
+		},
 	}
 	backoff := drainEvictionBackoff
 	var lastErr error
@@ -255,23 +258,30 @@ func evictPod(ctx context.Context, client kubernetes.Interface, pod corev1.Pod) 
 	return fmt.Errorf("eviction still blocked after %d attempts: %w", drainEvictionAttempts, lastErr)
 }
 
-func deletePod(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
-	err := client.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+func deletePod(ctx context.Context, client kubernetes.Interface, pod corev1.Pod) error {
+	// A queued pod may have been replaced on another node since the list.
+	// Never apply this drain's deletion to a new object with the same name.
+	err := client.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &pod.UID},
+	})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
 	return nil
 }
 
-func waitForPodGone(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+func waitForPodGone(ctx context.Context, client kubernetes.Interface, pod corev1.Pod) error {
 	deadline := time.Now().Add(drainTerminationWait)
 	for {
-		_, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		current, err := client.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		if current.UID != pod.UID {
+			return nil
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("pod did not terminate within %s", drainTerminationWait)
@@ -285,10 +295,12 @@ func waitForPodGone(ctx context.Context, client kubernetes.Interface, namespace,
 // podsOnNode lists every pod scheduled on the node across all namespaces.
 func podsOnNode(ctx context.Context, client kubernetes.Interface, nodeName string) ([]corev1.Pod, error) {
 	var pods []corev1.Pod
+	continueToken := ""
 	for page := 0; page < drainMaxPodPages; page++ {
 		list, err := client.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
 			FieldSelector: "spec.nodeName=" + nodeName,
 			Limit:         drainPodPageSize,
+			Continue:      continueToken,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("list pods on node %q: %w", nodeName, err)
@@ -297,6 +309,7 @@ func podsOnNode(ctx context.Context, client kubernetes.Interface, nodeName strin
 		if list.Continue == "" {
 			return pods, nil
 		}
+		continueToken = list.Continue
 	}
 	return nil, fmt.Errorf("node %q exceeded %d pages of pods", nodeName, drainMaxPodPages)
 }
@@ -311,10 +324,14 @@ type drainPlan struct {
 const mirrorPodAnnotation = "kubernetes.io/config.mirror"
 
 // classifyDrainPod applies the kubectl drain filters in kubectl's order:
-// mirror pods, DaemonSet ownership, local storage, then controller ownership.
+// mirror pods, terminal pods, DaemonSet ownership, local storage, then
+// controller ownership. Finished pods can be removed without data-loss flags.
 func classifyDrainPod(pod *corev1.Pod, options NodeDrainOptions) drainPlan {
 	if _, mirror := pod.Annotations[mirrorPodAnnotation]; mirror {
 		return drainPlan{action: "skip", reason: "mirror pod managed directly on the node"}
+	}
+	if terminalPod(pod) {
+		return drainPlan{action: "delete", reason: "terminal pod"}
 	}
 	if daemonSetOwned(pod) {
 		if !options.IgnoreDaemonsets {
@@ -323,13 +340,10 @@ func classifyDrainPod(pod *corev1.Pod, options NodeDrainOptions) drainPlan {
 		return drainPlan{action: "skip", reason: "DaemonSet-managed"}
 	}
 	if hasEmptyDir(pod) && !options.DeleteEmptyDirData {
-		return drainPlan{action: "skip", reason: "uses emptyDir local storage"}
+		return drainPlan{action: "abort", reason: "pods use emptyDir local storage (enable deleteEmptyDirData to discard it)"}
 	}
-	if !controllerOwned(pod) && !terminalPod(pod) && !options.Force {
+	if !controllerOwned(pod) && !options.Force {
 		return drainPlan{action: "abort", reason: "pods not managed by a controller must be forced (enable force)"}
-	}
-	if terminalPod(pod) {
-		return drainPlan{action: "delete", reason: "terminal pod"}
 	}
 	return drainPlan{action: "evict"}
 }
