@@ -3289,3 +3289,67 @@ test("failed context cleanup remains visible and can be retried from another con
   expect(await page.evaluate(() => (window as unknown as { stopped: string[] }).stopped)).toEqual(["pf-1"]);
   expect(failures).toEqual([]);
 });
+
+test("aggregate pagination preserves a cluster arriving during load more", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await page.evaluate(() => {
+    const gate = window as unknown as { releaseProd?: () => void; releaseMore?: () => void };
+    const original = window.__ASTER_DESKTOP__!.resources.list;
+    window.__ASTER_DESKTOP__!.resources.list = async (request) => {
+      const result = await original(request);
+      if (request.contextId === "prod" && !request.continueToken) {
+        await new Promise<void>((resolve) => { gate.releaseProd = resolve; });
+      }
+      if (request.contextId === "dev" && request.continueToken) {
+        await new Promise<void>((resolve) => { gate.releaseMore = resolve; });
+      }
+      return result;
+    };
+  });
+  await page.getByTestId("context-picker-multi").click();
+  await page.getByTestId("context-option-dev").click();
+  await page.getByTestId("context-option-prod").click();
+  await page.getByTestId("context-picker-connect").click();
+  await expect(page.getByText("100 loaded", { exact: true })).toBeVisible();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await grid.locator(".table-viewport").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await grid.getByTestId("load-more").click();
+  await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { releaseMore?: () => void }).releaseMore))).toBe(true);
+  await page.evaluate(() => (window as unknown as { releaseProd: () => void }).releaseProd());
+  await expect(page.getByText("200 loaded", { exact: true })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { releaseMore: () => void }).releaseMore());
+  await expect(page.getByText("300 loaded", { exact: true })).toBeVisible();
+});
+
+test("aggregate non-primary port forwarding explains its disabled state", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+  await page.evaluate(() => {
+    const original = window.__ASTER_DESKTOP__!.resources.list;
+    window.__ASTER_DESKTOP__!.resources.list = async (request) => {
+      const result = await original(request);
+      return { ...result, items: result.items.slice(0, 1), continueToken: undefined };
+    };
+  });
+  await page.getByTestId("context-picker-multi").click();
+  await page.getByTestId("context-option-dev").click();
+  await page.getByTestId("context-option-prod").click();
+  await page.getByTestId("context-picker-connect").click();
+  await page.getByTestId("resource-nav-pods").click();
+  const grid = page.getByRole("grid", { name: "Resources" });
+  await expect(grid.getByRole("row").nth(2).locator(".cluster-cell")).toHaveText("prod");
+  await grid.getByRole("row").nth(2).click();
+  const detail = page.getByTestId("resource-detail-view");
+  await detail.getByRole("tab", { name: "Ports" }).click();
+  const section = page.getByTestId("port-forward-section");
+  await expect(section.getByTestId("port-forward-start").first()).toBeDisabled();
+  await expect(section).toContainText("Open this cluster on its own to start port forwarding.");
+  await expect(detail.getByTestId("resource-detail-cluster")).toHaveText("Cluster: prod ·");
+  await expect(section.getByTestId("port-forward-manual-start")).toBeDisabled();
+  await expectNoOverflow(page, "aggregate non-primary port forwarding");
+  await screenshot(page, "aggregate-nonprimary-port-forward");
+  expect(failures).toEqual([]);
+});

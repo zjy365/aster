@@ -70,6 +70,7 @@ export function useAggregateResourceList({ contextIds, kind, namespaceScope, cor
   const [generation, setGeneration] = useState(0);
   // Supersedes every in-flight cell on scope change or refresh.
   const requestGen = useRef(0);
+  const loadingMoreGeneration = useRef<number | undefined>(undefined);
   // Per-cluster epochs: a retry supersedes only that cluster's in-flight cells.
   const clusterEpochs = useRef<Record<string, number>>({});
   const pagesRef = useRef(pages);
@@ -149,6 +150,7 @@ export function useAggregateResourceList({ contextIds, kind, namespaceScope, cor
     const gen = ++requestGen.current;
     clusterEpochs.current = {};
     setPages({});
+    setLoadingMore(false);
     setClusterStates({});
     for (const contextId of idsRef.current) loadCluster(contextId, gen);
   }, [active, selectionKey, scopeKey, kind, generation, loadCluster]);
@@ -163,12 +165,12 @@ export function useAggregateResourceList({ contextIds, kind, namespaceScope, cor
   const loading = active && clusters.length > 0 && clusters.every((cluster) => cluster.status === "loading");
 
   const loadMore = useCallback(async () => {
-    if (!active) return;
+    if (!active || loadingMoreGeneration.current === requestGen.current) return;
     const pending = Object.entries(pagesRef.current).filter(([, page]) => page.continueToken);
     if (!pending.length) return;
     const gen = requestGen.current;
+    loadingMoreGeneration.current = gen;
     setLoadingMore(true);
-    let next = pagesRef.current;
     await Promise.all(pending.map(async ([key, page]) => {
       const { contextId, namespace } = splitClusterPageKey(key);
       const epoch = clusterEpochs.current[contextId] ?? 0;
@@ -182,19 +184,21 @@ export function useAggregateResourceList({ contextIds, kind, namespaceScope, cor
         });
         if (gen !== requestGen.current || epoch !== (clusterEpochs.current[contextId] ?? 0)) return;
         const decorated: ResourceListResponse = { ...response, items: response.items.map((row) => decorateClusterRow(row, contextId)) };
-        next = appendClusterPage(next, contextId, namespace, decorated);
+        // A different cluster's first page or retry may settle while this
+        // page is in flight. Append only to the latest state, never a snapshot
+        // captured before the request; the token also rejects double delivery.
+        setPages((current) => {
+          if (gen !== requestGen.current || epoch !== (clusterEpochs.current[contextId] ?? 0)
+            || current[key]?.continueToken !== page.continueToken) return current;
+          return appendClusterPage(current, contextId, namespace, decorated);
+        });
       } catch {
         // Keep that cell's loaded page and token; the footer button retries
         // only the cells that still have one.
       }
     }));
-    if (gen !== requestGen.current) {
-      setLoadingMore(false);
-      return;
-    }
-    pagesRef.current = next;
-    setPages(next);
-    setLoadingMore(false);
+    if (loadingMoreGeneration.current === gen) loadingMoreGeneration.current = undefined;
+    if (gen === requestGen.current) setLoadingMore(false);
   }, [active, kind]);
 
   const retryCluster = useCallback((contextId: string) => {

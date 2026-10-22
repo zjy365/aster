@@ -148,6 +148,11 @@ export default function App() {
   // Every row-scoped surface below dials the selected row's own cluster in
   // an aggregate view, and the plain context otherwise.
   const selectedContextId = detail.selected?.sourceContextId || contextId;
+  const selectedContextInfo = contexts.contexts.find((item) => item.id === selectedContextId);
+  const selectedContextName = selectedContextInfo ? contextDisplayName(selectedContextInfo, settings.contextAliases) : selectedContextId;
+  const sourceClusterLabel = aggregate
+    ? selectedContextName === selectedContextId ? selectedContextId : `${selectedContextName} (${selectedContextId})`
+    : undefined;
   const diagnostics = useDiagnostics({
     contextId: selectedContextId,
     kind,
@@ -929,6 +934,7 @@ export default function App() {
             <Suspense fallback={<TableState icon={LoaderCircle} title="Opening resource" detail="Loading the resource workspace." spinning />}>
               <ResourceDetailView
                 contextId={selectedContextId}
+                sourceClusterLabel={sourceClusterLabel}
                 coreReady={core.state === "ready"}
               row={detail.selected}
               detail={detail.detail}

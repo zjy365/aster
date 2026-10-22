@@ -16,6 +16,7 @@ import type { RolloutStatus } from "./workload-detail";
 
 export interface DetailHeaderProps {
   row: ResourceRow;
+  sourceClusterLabel?: string;
   /** Live rollout state for workload kinds; absent when there is nothing to say. */
   rollout?: RolloutStatus;
   actions: ResourceActionDescriptor[];
@@ -34,6 +35,7 @@ export interface DetailHeaderProps {
  */
 export function DetailHeader({
   row,
+  sourceClusterLabel,
   rollout,
   actions,
   canMutate,
@@ -58,6 +60,7 @@ export function DetailHeader({
 
         <div className="resource-detail-identity">
           <span className="resource-detail-breadcrumb">
+            {sourceClusterLabel && <span data-testid="resource-detail-cluster">Cluster: {sourceClusterLabel} · </span>}
             {row.namespace || "Cluster scoped"} · {row.kind}
           </span>
           <div className="resource-detail-title-row">
