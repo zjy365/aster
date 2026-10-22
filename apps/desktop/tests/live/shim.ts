@@ -28,6 +28,7 @@ import {
   type CoreOverview,
   type CoreResourceRow,
   discoveredResourceList,
+  nodeMetricList,
   normalizeRow,
   podMetricList,
   relatedResourceList,
@@ -158,6 +159,7 @@ const api: DesktopApi = {
   },
   metrics: {
     pods: async (contextId, namespace) => podMetricList(await corePost("/v1/metrics/pods", { contextId, namespace })),
+    nodes: async (contextId) => nodeMetricList(await coreGet(`/v1/metrics/nodes?contextId=${encodeURIComponent(contextId)}`)),
   },
   overview: {
     get: async (contextId): Promise<Overview> => {

@@ -37,6 +37,7 @@ import {
   type CoreOverview,
   type CoreResourceRow,
   discoveredResourceList,
+  nodeMetricList,
   normalizeRow,
   podMetricList,
   relatedResourceList,
@@ -154,6 +155,7 @@ export function createTauriDesktopApi(): DesktopApi {
     },
     metrics: {
       pods: async (contextId, namespace) => podMetricList(await invoke("metrics_pods", { request: { contextId, namespace } })),
+      nodes: async (contextId) => nodeMetricList(await invoke("metrics_nodes", { contextId })),
     },
     overview: {
       get: async (contextId): Promise<Overview> => {

@@ -1,5 +1,6 @@
 import type {
   DiscoveredResource,
+  NodeMetric,
   OverviewCount,
   OverviewResource,
   PodMetric,
@@ -114,6 +115,21 @@ export function podMetricList(input: unknown): PodMetric[] {
           memory: (container.memory === undefined ? "" : optionalText(container.memory, "container.memory", 32)) || "",
         };
       }),
+    };
+  });
+}
+
+export function nodeMetricList(input: unknown): NodeMetric[] {
+  const value = object(input, "node metrics response");
+  const nodes = Array.isArray(value.nodes) ? value.nodes : [];
+  return nodes.map((item) => {
+    const entry = object(item, "node metric");
+    return {
+      name: requiredText(entry.name, "name", 253),
+      cpu: (entry.cpu === undefined ? "" : optionalText(entry.cpu, "cpu", 32)) || "",
+      memory: (entry.memory === undefined ? "" : optionalText(entry.memory, "memory", 32)) || "",
+      ...(entry.window === undefined ? {} : { window: optionalText(entry.window, "window", 32) || "" }),
+      ...(entry.timestamp === undefined ? {} : { timestamp: optionalText(entry.timestamp, "timestamp", 64) || "" }),
     };
   });
 }

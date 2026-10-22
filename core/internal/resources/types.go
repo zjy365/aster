@@ -203,6 +203,12 @@ type MetricsRequest struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// NodeMetricsRequest is the cluster-scoped counterpart of MetricsRequest:
+// nodes have no namespace, so the context is the only scope.
+type NodeMetricsRequest struct {
+	ContextID string `json:"contextId"`
+}
+
 type ContainerMetric struct {
 	Name   string `json:"name"`
 	CPU    string `json:"cpu"`
@@ -217,6 +223,22 @@ type PodMetric struct {
 
 type MetricsResponse struct {
 	Pods []PodMetric `json:"pods"`
+}
+
+// NodeMetric mirrors one metrics.k8s.io NodeMetrics item, serialized with the
+// same conventions as pod metrics: usage stays a raw quantity string
+// ("620m", "48Mi") so the renderer reuses its pod formatters, and the
+// aggregation window and sample timestamp pass through untouched.
+type NodeMetric struct {
+	Name      string `json:"name"`
+	CPU       string `json:"cpu"`
+	Memory    string `json:"memory"`
+	Window    string `json:"window,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
+}
+
+type NodeMetricsResponse struct {
+	Nodes []NodeMetric `json:"nodes"`
 }
 
 type PortForwardRequest struct {
@@ -401,4 +423,8 @@ type ResourceRow struct {
 	InvolvedObject  string            `json:"involvedObject,omitempty"`
 	Count           *int64            `json:"count,omitempty"`
 	LastTimestamp   *time.Time        `json:"lastTimestamp,omitempty"`
+	// Node allocatable capacity as raw quantity strings ("4", "16Gi"); the
+	// usage columns read them to show pressure relative to capacity.
+	AllocatableCPU    string `json:"allocatableCpu,omitempty"`
+	AllocatableMemory string `json:"allocatableMemory,omitempty"`
 }

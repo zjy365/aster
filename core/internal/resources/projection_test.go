@@ -66,14 +66,18 @@ func TestExtendedResourceProjections(t *testing.T) {
 			object: map[string]any{
 				"apiVersion": "v1", "kind": "Node", "metadata": map[string]any{"name": "worker"},
 				"status": map[string]any{
-					"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
-					"addresses":  []any{map[string]any{"type": "InternalIP", "address": "10.0.0.2"}},
-					"nodeInfo":   map[string]any{"kubeletVersion": "v1.36.3"},
+					"conditions":  []any{map[string]any{"type": "Ready", "status": "True"}},
+					"addresses":   []any{map[string]any{"type": "InternalIP", "address": "10.0.0.2"}},
+					"nodeInfo":    map[string]any{"kubeletVersion": "v1.36.3"},
+					"allocatable": map[string]any{"cpu": "4", "memory": "16Gi", "pods": "110"},
 				},
 			},
 			check: func(t *testing.T, row ResourceRow) {
 				if row.Status != "Ready" || row.Version != "v1.36.3" || !reflect.DeepEqual(row.Addresses, []string{"InternalIP:10.0.0.2"}) {
 					t.Fatalf("row = %#v", row)
+				}
+				if row.AllocatableCPU != "4" || row.AllocatableMemory != "16Gi" {
+					t.Fatalf("allocatable cpu=%q memory=%q", row.AllocatableCPU, row.AllocatableMemory)
 				}
 			},
 		},
