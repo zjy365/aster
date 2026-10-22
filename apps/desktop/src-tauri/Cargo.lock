@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "aster-desktop"
-version = "1.0.6"
+version = "1.1.0-rc.1"
 dependencies = [
  "bytes",
  "dirs",

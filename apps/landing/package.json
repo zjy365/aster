@@ -1,6 +1,6 @@
 {
   "name": "@aster/landing",
-  "version": "1.0.6",
+  "version": "1.1.0-rc.1",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
