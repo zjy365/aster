@@ -143,6 +143,7 @@ pub fn run() {
             commands::nodes_cordon,
             commands::nodes_drain_start,
             commands::nodes_drain_stop,
+            commands::pods_portforward_list,
             commands::resources_mutate,
             commands::resources_watch_start,
             commands::resources_watch_stop,

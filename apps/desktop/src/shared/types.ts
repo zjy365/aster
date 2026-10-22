@@ -341,6 +341,26 @@ export interface NodeDrainEvent {
   error?: string;
 }
 
+/** The object a forward was requested for, before pod resolution. */
+export interface PortForwardResourceRef {
+  kind: string;
+  name: string;
+}
+
+/** One active forward session in the sidecar's registry (read-only view). */
+export interface PortForwardSession {
+  id: string;
+  contextId: string;
+  namespace: string;
+  resourceRef: PortForwardResourceRef;
+  localPort: number;
+  /** The resolved pod port the forward terminates on. */
+  targetPort: number;
+  startedAt: string;
+  /** The backing pod for service/workload forwards. */
+  pod?: string;
+}
+
 export interface PortForwardStartRequest {
   contextId: string;
   namespace: string;
@@ -713,6 +733,12 @@ export interface DesktopApi {
     nodeCordon(request: NodeCordonRequest): Promise<NodeCordonResponse>;
     /** Streams drain progress; the dispose function aborts the drain. */
     drainNode(request: NodeDrainRequest, listener: (event: NodeDrainEvent) => void): () => void;
+    /**
+     * Lists the sidecar's active forward sessions across every context
+     * (optionally filtered by one). The sidecar is the source of truth —
+     * the renderer reconciles its own registry against this list.
+     */
+    portForwardList(contextId?: string): Promise<PortForwardSession[]>;
     exec(request: PodExecRequest): Promise<PodExecResponse>;
     mutate(request: ResourceMutationRequest): Promise<ResourceMutationResponse>;
     watch(request: ResourceListRequest, listener: (batch: ResourceWatchBatch) => void): () => void;

@@ -24,6 +24,7 @@ import type {
   NodeDrainRequest,
   Overview,
   PodLogsRequest,
+  PortForwardSession,
   ResourceGetRequest,
   ResourceListRequest,
   ResourceWatchBatch,
@@ -284,6 +285,10 @@ export function createTauriDesktopApi(): DesktopApi {
         channel.onmessage = listener;
         void invoke("nodes_drain_start", { id, request, channel });
         return () => void invoke("nodes_drain_stop", { id });
+      },
+      portForwardList: async (contextId) => {
+        const value = await invoke<{ forwards: PortForwardSession[] }>("pods_portforward_list", { contextId: contextId || null });
+        return value.forwards || [];
       },
       mutate: (request) => invoke("resources_mutate", {
         request: {

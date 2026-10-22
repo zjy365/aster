@@ -118,6 +118,81 @@ func TestStartPortForwardDetachesFromRequestContext(t *testing.T) {
 	}
 }
 
+func TestServerListsPortForwards(t *testing.T) {
+	provider := &capturingPFProvider{
+		rpcClientProvider: rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())},
+		stop:              func() {},
+	}
+	service := resources.NewService(provider)
+	t.Cleanup(service.StopAllPortForwards)
+	server, err := NewServer("token", fakeContexts{}, service, helm.NewService(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := func(payload string) string {
+		request := httptest.NewRequest(http.MethodPost, "/v1/pods/portforward", strings.NewReader(payload))
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("start status=%d body=%s", response.Code, response.Body.String())
+		}
+		var started struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+			t.Fatal(err)
+		}
+		return started.ID
+	}
+	first := start(`{"contextId":"dev","namespace":"apps","name":"web","podPort":8080}`)
+	start(`{"contextId":"prod","namespace":"apps","name":"api","podPort":443}`)
+
+	empty := performRequest(t, server, http.MethodGet, "/v1/portforwards")
+	if empty.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", empty.Code, empty.Body.String())
+	}
+	var list struct {
+		Forwards []resources.PortForwardSession `json:"forwards"`
+	}
+	if err := json.NewDecoder(empty.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Forwards) != 2 {
+		t.Fatalf("forwards=%d want 2 (%s)", len(list.Forwards), empty.Body.String())
+	}
+	if list.Forwards[0].ID != first || list.Forwards[0].ContextID != "dev" ||
+		list.Forwards[0].Namespace != "apps" || list.Forwards[0].ResourceRef.Kind != "Pod" ||
+		list.Forwards[0].ResourceRef.Name != "web" || list.Forwards[0].LocalPort != 43123 ||
+		list.Forwards[0].TargetPort != 8080 || list.Forwards[0].StartedAt.IsZero() {
+		t.Fatalf("session=%#v", list.Forwards[0])
+	}
+
+	filtered := performRequest(t, server, http.MethodGet, "/v1/portforwards?contextId=prod")
+	if filtered.Code != http.StatusOK {
+		t.Fatalf("filtered status=%d body=%s", filtered.Code, filtered.Body.String())
+	}
+	if err := json.NewDecoder(filtered.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Forwards) != 1 || list.Forwards[0].ContextID != "prod" {
+		t.Fatalf("filtered forwards=%#v", list.Forwards)
+	}
+
+	// No active forwards decodes as an empty array, not null.
+	service.StopAllPortForwards()
+	drained := performRequest(t, server, http.MethodGet, "/v1/portforwards?contextId=prod")
+	if drained.Code != http.StatusOK || !contains(drained.Body.String(), `"forwards":[]`) {
+		t.Fatalf("drained status=%d body=%s", drained.Code, drained.Body.String())
+	}
+
+	tooLong := performRequest(t, server, http.MethodGet, "/v1/portforwards?contextId="+strings.Repeat("x", 600))
+	if tooLong.Code != http.StatusBadRequest || !contains(tooLong.Body.String(), `"code":"invalid_request"`) {
+		t.Fatalf("tooLong status=%d body=%s", tooLong.Code, tooLong.Body.String())
+	}
+}
+
 func TestServerRequiresTokenAndServesHealthAndContexts(t *testing.T) {
 	service := resources.NewService(rpcClientProvider{client: fake.NewSimpleDynamicClient(runtime.NewScheme())})
 	server, err := NewServer("token", fakeContexts{values: []session.ContextInfo{{ID: "dev", Name: "dev", Current: true}}}, service, helm.NewService(nil))

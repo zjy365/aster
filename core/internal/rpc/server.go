@@ -71,6 +71,7 @@ func NewServer(token string, contexts contextService, resourceService *resources
 	mux.HandleFunc("POST /v1/pods/portforward/stop", server.stopPortForward)
 	mux.HandleFunc("POST /v1/nodes/cordon", server.cordonNode)
 	mux.HandleFunc("POST /v1/nodes/drain", server.drainNode)
+	mux.HandleFunc("GET /v1/portforwards", server.listPortForwards)
 	mux.HandleFunc("POST /v1/resources/watch", server.watchResources)
 	server.handler = server.authenticate(mux)
 	return server, nil
@@ -602,6 +603,17 @@ func (s *Server) drainNode(writer http.ResponseWriter, request *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// listPortForwards serves the active forward registry read-only. The
+// contextId query parameter is optional: absent means every context.
+func (s *Server) listPortForwards(writer http.ResponseWriter, request *http.Request) {
+	contextID := request.URL.Query().Get("contextId")
+	if err := validateOptionalContextID(contextID); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, resources.PortForwardListResponse{Forwards: s.resources.ListPortForwards(contextID)})
 }
 
 func (s *Server) podMetrics(writer http.ResponseWriter, request *http.Request) {

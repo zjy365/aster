@@ -444,6 +444,9 @@ const MOCK_DESKTOP_API = `
         const timers = events.map((event, index) => setTimeout(() => listener(event), 20 * (index + 1)));
         return () => timers.forEach(clearTimeout);
       },
+      // Mirrors the sidecar registry; tests seed window.__portForwardSessions
+      // to stage sessions the renderer never started.
+      portForwardList: async () => window.__portForwardSessions || [],
       mutate: async (request) => {
         // Mirror the API server's optimistic concurrency: the live object sits
         // at resourceVersion 1001 (the dry-run response reports it), so an apply
@@ -3226,6 +3229,124 @@ test("manual forwards show addresses, survive navigation and stop on context exi
   await detail.getByRole("tab", { name: "Overview", exact: true }).click();
   await page.getByTestId("change-context").click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { stopped: string[] }).stopped)).toEqual(["pf-8080", "pf-8080"]);
+  expect(failures).toEqual([]);
+});
+
+for (const rendererOwned of [false, true]) {
+  test(`port forward session retries a transient stop failure (${rendererOwned ? "renderer-owned" : "server-only"})`, async ({ page }) => {
+    const failures = collectFailures(page);
+    await page.setViewportSize({ width: rendererOwned ? 1280 : 960, height: 800 });
+    await page.goto("/");
+    await page.evaluate((rendererOwned) => {
+      const scope = window as unknown as {
+        __portForwardSessions: Array<Record<string, unknown>>;
+        __pfAttempts: number;
+        __releaseStop: () => void;
+        __ASTER_DESKTOP__: { resources: {
+          portForwardStart(request: { podPort: number }): Promise<{ id: string; localPort: number }>;
+          portForwardStop(id: string): Promise<void>;
+        } };
+      };
+      const session = { id: "pf-retry", contextId: "dev", namespace: "default", resourceRef: { kind: "Pod", name: "pods-0" }, localPort: 43123, targetPort: 80, startedAt: "2026-10-17T08:00:00Z" };
+      scope.__pfAttempts = 0;
+      scope.__portForwardSessions = rendererOwned ? [] : [session];
+      scope.__ASTER_DESKTOP__.resources.portForwardStart = async (request) => {
+        scope.__portForwardSessions = [{ ...session, targetPort: request.podPort }];
+        return { id: session.id, localPort: session.localPort };
+      };
+      scope.__ASTER_DESKTOP__.resources.portForwardStop = async () => {
+        scope.__pfAttempts++;
+        if (scope.__pfAttempts === 1) throw new Error("Temporary stop failure");
+        await new Promise<void>((resolve) => {
+          scope.__releaseStop = () => { scope.__portForwardSessions = []; resolve(); };
+        });
+      };
+    }, rendererOwned);
+    await connectToDev(page);
+    if (rendererOwned) {
+      await page.getByTestId("resource-nav-pods").click();
+      await page.getByRole("grid", { name: "Resources" }).getByRole("row").nth(1).click();
+      await page.getByTestId("resource-detail-view").getByRole("tab", { name: "Ports", exact: true }).click();
+      await page.getByTestId("port-forward-row").first().getByTestId("port-forward-start").click();
+      await expect(page.getByTestId("port-forward-local")).toContainText("43123");
+    }
+    await expect(page.getByTestId("port-forwards-toggle")).toBeVisible();
+    await page.getByTestId("port-forwards-toggle").click();
+    const panel = page.getByTestId("port-forwards-panel");
+    const row = panel.getByTestId("port-forward-session-row");
+    await expect(row).toHaveCount(1);
+    await row.getByTestId("port-forward-session-stop").click();
+    await expect(row).toContainText("Temporary stop failure");
+    const retry = row.getByTestId("port-forward-session-stop");
+    await expect(retry).toBeVisible();
+    await expectNoOverflow(page, "failed port forward stop retry");
+    await screenshot(page, `port-forward-stop-retry-${rendererOwned ? "renderer" : "server"}`);
+    await retry.click();
+    await expect(row).toContainText("Stopping…");
+    await expect(row).not.toContainText("Temporary stop failure");
+    await expect(row.getByTestId("port-forward-session-stop")).toHaveCount(0);
+    await page.evaluate(() => (window as unknown as { __releaseStop: () => void }).__releaseStop());
+    await expect(row).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __pfAttempts: number }).__pfAttempts)).toBe(2);
+    if (rendererOwned) {
+      await expect(page.getByTestId("port-forward-local")).toHaveCount(0);
+      await expect(page.getByTestId("port-forward-row").first().getByTestId("port-forward-start")).toBeVisible();
+      await expect(page.getByTestId("port-forward-section")).not.toContainText("Temporary stop failure");
+    }
+    expect(failures).toEqual([]);
+  });
+}
+
+test("toolbar panel lists sidecar forward sessions across contexts and stops them", async ({ page }) => {
+  const failures = collectFailures(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  // Stage sessions only the sidecar knows about (the renderer-lost case) and
+  // record stops: the panel must list them read-only-with-stop.
+  await page.evaluate(() => {
+    const scope = window as unknown as {
+      __portForwardSessions?: Array<Record<string, unknown>>;
+      __pfStopped: string[];
+      __ASTER_DESKTOP__: { resources: { portForwardStop(id: string): Promise<void> } };
+    };
+    scope.__pfStopped = [];
+    scope.__portForwardSessions = [
+      { id: "pf-sidecar-dev", contextId: "dev", namespace: "monitoring", resourceRef: { kind: "Service", name: "grafana" }, localPort: 43123, targetPort: 3000, startedAt: "2026-10-17T08:00:00Z", pod: "grafana-abc" },
+      { id: "pf-sidecar-prod", contextId: "prod", namespace: "apps", resourceRef: { kind: "Pod", name: "api-0" }, localPort: 43124, targetPort: 443, startedAt: "2026-10-17T09:30:00Z" },
+    ];
+    scope.__ASTER_DESKTOP__.resources.portForwardStop = async (id) => {
+      scope.__pfStopped.push(id);
+      scope.__portForwardSessions = (scope.__portForwardSessions || []).filter((session) => session.id !== id);
+    };
+  });
+  await connectToDev(page);
+
+  const indicator = page.getByTestId("port-forwards-indicator");
+  await expect(indicator).toBeVisible();
+  await expect(page.getByTestId("port-forwards-count")).toHaveText("2");
+
+  await page.getByTestId("port-forwards-toggle").click();
+  const panel = page.getByTestId("port-forwards-panel");
+  await expect(panel).toBeVisible();
+  const rows = panel.getByTestId("port-forward-session-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("grafana");
+  await expect(rows.first()).toContainText("43123 → 3000");
+  await expect(rows.first()).toContainText("via grafana-abc");
+  await expect(rows.nth(1)).toContainText("prod");
+  await expect(rows.nth(1)).toContainText("43124 → 443");
+  await expectNoOverflow(page, "port forwards panel 1280x800");
+  await screenshot(page, "port-forwards-panel-1280");
+
+  await rows.nth(1).getByTestId("port-forward-session-stop").click();
+  await expect(rows).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __pfStopped: string[] }).__pfStopped)).toEqual(["pf-sidecar-prod"]);
+
+  // Stop all drains the remaining session per row, and the badge follows.
+  await page.getByTestId("port-forwards-stop-all").click();
+  await expect(panel.getByTestId("port-forward-session-row")).toHaveCount(0);
+  await expect(page.getByTestId("port-forwards-count")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __pfStopped: string[] }).__pfStopped)).toEqual(["pf-sidecar-prod", "pf-sidecar-dev"]);
   expect(failures).toEqual([]);
 });
 

@@ -5471,6 +5471,171 @@ button.overview-card:focus-visible {
   overflow: auto;
   overflow-wrap: anywhere;
 }
+
+/* Toolbar indicator + panel over the sidecar's forward-session registry. */
+
+.port-forwards-indicator {
+  position: relative;
+}
+
+/* Count chip pinned to the indicator button's top-right corner. */
+.port-forwards-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 13px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.port-forwards-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 70;
+  width: min(560px, calc(100vw - 200px));
+  max-height: min(420px, calc(100vh - 120px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 14px 40px rgb(0 0 0 / 16%);
+  color: var(--text);
+}
+
+.port-forwards-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.port-forwards-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.port-forwards-header p {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.port-forwards-header-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.port-forwards-columns,
+.port-forward-session-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.9fr) minmax(150px, 1.6fr) 110px 44px 76px;
+  align-items: center;
+  gap: 10px;
+  padding-inline: 14px;
+}
+
+.port-forwards-columns {
+  min-height: 26px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.port-forwards-list {
+  min-height: 40px;
+  overflow: auto;
+}
+
+.port-forwards-empty {
+  margin: 0;
+  padding: 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.port-forward-session-row {
+  min-height: 44px;
+  padding-block: 8px;
+}
+
+.port-forward-session-row + .port-forward-session-row {
+  border-top: 1px solid var(--border);
+}
+
+.port-forwards-cluster,
+.port-forwards-resource-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.port-forwards-pod {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.port-forwards-ports {
+  color: var(--text);
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.port-forwards-age {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.port-forwards-state {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.port-forwards-state svg {
+  width: 12px;
+  height: 12px;
+}
+
+.port-forwards-error {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--failed);
+}
+
 .helm-list-status {
   flex: 0 0 auto;
   padding: 8px 12px;
