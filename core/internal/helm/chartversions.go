@@ -3,14 +3,17 @@ package helm
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/repo"
 	"sigs.k8s.io/yaml"
 
@@ -53,7 +56,7 @@ func (s *Service) ChartVersions(ctx context.Context, request ChartVersionsReques
 	}
 	settings := cli.New()
 	entry := repoEntryForURL(settings.RepositoryConfig, repoURL)
-	index, err := fetchRepoIndex(settings, entry)
+	index, err := fetchRepoIndex(ctx, entry)
 	if err != nil {
 		return ChartVersionsResponse{}, err
 	}
@@ -104,40 +107,13 @@ func repoEntryForURL(configPath, repoURL string) repo.Entry {
 	return entry
 }
 
-// fetchRepoIndex downloads and parses the repository's index.yaml through the
-// helm getters, so HTTP semantics (credentials, TLS material, proxies) match
-// the helm CLI exactly. The result is stateless: nothing is cached.
-func fetchRepoIndex(settings *cli.EnvSettings, entry repo.Entry) (*repo.IndexFile, error) {
-	parsed, err := url.Parse(entry.URL)
+// fetchRepoIndex reads a repository index with a streaming size cap before
+// decoding it. The request shares the RPC cancellation and repository TLS/auth
+// settings; Helm's getter buffers whole responses before returning them.
+func fetchRepoIndex(ctx context.Context, entry repo.Entry) (*repo.IndexFile, error) {
+	raw, err := downloadRepoIndex(ctx, entry, maxRepoIndexBytes)
 	if err != nil {
-		return nil, invalid("repoUrl must be a full http(s) repository URL")
-	}
-	client, err := getter.All(settings).ByScheme(parsed.Scheme)
-	if err != nil {
-		return nil, invalid("repoUrl must be a full http(s) repository URL")
-	}
-	indexURL, err := repo.ResolveReferenceURL(entry.URL, "index.yaml")
-	if err != nil {
-		return nil, invalid("repoUrl must be a full http(s) repository URL")
-	}
-	data, err := client.Get(indexURL,
-		getter.WithURL(entry.URL),
-		getter.WithUserAgent(version.UserAgent()),
-		getter.WithTimeout(repoIndexTimeout),
-		getter.WithInsecureSkipVerifyTLS(entry.InsecureSkipTLSverify),
-		getter.WithTLSClientConfig(entry.CertFile, entry.KeyFile, entry.CAFile),
-		getter.WithBasicAuth(entry.Username, entry.Password),
-		getter.WithPassCredentialsAll(entry.PassCredentialsAll),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("could not fetch the repository index for %q: %w; verify the repository URL is reachable and, for private repositories, added to your local helm config with credentials (helm repo add)", entry.URL, err)
-	}
-	raw, err := io.ReadAll(io.LimitReader(data, maxRepoIndexBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("could not read the repository index for %q: %w", entry.URL, err)
-	}
-	if len(raw) > maxRepoIndexBytes {
-		return nil, fmt.Errorf("repository index for %q exceeds the 64 MiB read limit", entry.URL)
+		return nil, err
 	}
 	index := &repo.IndexFile{}
 	if err := yaml.Unmarshal(raw, index); err != nil {
@@ -146,7 +122,76 @@ func fetchRepoIndex(settings *cli.EnvSettings, entry repo.Entry) (*repo.IndexFil
 	if index.APIVersion == "" {
 		return nil, fmt.Errorf("repository %q did not return a valid Helm index.yaml (missing apiVersion)", entry.URL)
 	}
-	// Newest first per chart (canonical Helm index ordering).
+	// Validate all entries before sorting: Helm's embedded Metadata can be nil
+	// for sparse YAML, and both SortEntries and the picker dereference it.
+	for name, entries := range index.Entries {
+		for _, item := range entries {
+			if item == nil || item.Metadata == nil || item.Version == "" {
+				return nil, fmt.Errorf("repository %q contains an invalid entry for chart %q", entry.URL, name)
+			}
+		}
+	}
 	index.SortEntries()
 	return index, nil
+}
+
+func downloadRepoIndex(ctx context.Context, entry repo.Entry, maxBytes int64) ([]byte, error) {
+	indexURL, err := repo.ResolveReferenceURL(entry.URL, "index.yaml")
+	if err != nil {
+		return nil, invalid("repoUrl must be a full http(s) repository URL")
+	}
+	tlsConfig := &tls.Config{InsecureSkipVerify: entry.InsecureSkipTLSverify}
+	if entry.CertFile != "" && entry.KeyFile != "" {
+		certificate, err := tls.LoadX509KeyPair(entry.CertFile, entry.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load repository client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{certificate}
+	}
+	if entry.CAFile != "" {
+		ca, err := os.ReadFile(entry.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read repository CA: %w", err)
+		}
+		tlsConfig.RootCAs = x509.NewCertPool()
+		if !tlsConfig.RootCAs.AppendCertsFromPEM(ca) {
+			return nil, fmt.Errorf("repository CA contains no certificates")
+		}
+	}
+	transport := &http.Transport{Proxy: http.ProxyFromEnvironment, DisableCompression: true, TLSClientConfig: tlsConfig}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: repoIndexTimeout}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, indexURL, nil)
+	if err != nil {
+		return nil, invalid("repoUrl must be a full http(s) repository URL")
+	}
+	request.Header.Set("User-Agent", version.UserAgent())
+	source, err := url.Parse(entry.URL)
+	if err != nil {
+		return nil, invalid("repoUrl must be a full http(s) repository URL")
+	}
+	if entry.PassCredentialsAll || (source.Scheme == request.URL.Scheme && source.Host == request.URL.Host) {
+		if entry.Username != "" && entry.Password != "" {
+			request.SetBasicAuth(entry.Username, entry.Password)
+		}
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch the repository index for %q: %w; verify the repository URL and local helm credentials (helm repo add)", entry.URL, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("could not fetch the repository index for %q: %s", entry.URL, response.Status)
+	}
+	if response.ContentLength > maxBytes {
+		return nil, fmt.Errorf("repository index for %q exceeds the read limit (%d bytes)", entry.URL, maxBytes)
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("could not read the repository index for %q: %w", entry.URL, err)
+	}
+	if int64(len(raw)) > maxBytes {
+		return nil, fmt.Errorf("repository index for %q exceeds the read limit (%d bytes)", entry.URL, maxBytes)
+	}
+	return raw, nil
 }

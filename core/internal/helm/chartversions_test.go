@@ -3,6 +3,7 @@ package helm
 
 import (
 	"context"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"helm.sh/helm/v3/pkg/repo"
 )
 
 // testIndexYAML is a canned repository index: the "web" chart lists its
@@ -240,5 +244,76 @@ func TestChartVersionsBoundsResultToNewest100(t *testing.T) {
 	}
 	if response.Versions[0].Version != "1.119.0" || response.Versions[maxChartVersions-1].Version != "1.20.0" {
 		t.Fatalf("bounding kept the wrong slice: first=%s last=%s", response.Versions[0].Version, response.Versions[maxChartVersions-1].Version)
+	}
+}
+
+func TestRepositoryIndexRejectsMalformedChartEntries(t *testing.T) {
+	for _, entries := range []string{"[null]", "[{}, {}]", "[{name: web}]"} {
+		t.Run(entries, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintf(w, "apiVersion: v1\nentries:\n  web: %s\n", entries)
+			}))
+			defer server.Close()
+			_, err := fetchRepoIndex(context.Background(), repo.Entry{URL: server.URL})
+			if err == nil || !strings.Contains(err.Error(), "invalid entry") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRepositoryIndexDownloadLimitsStreamingBody(t *testing.T) {
+	// Flushing removes Content-Length, so the streaming cap must do the work.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.(http.Flusher).Flush()
+		fmt.Fprint(w, strings.Repeat("x", 1024))
+	}))
+	defer server.Close()
+	_, err := downloadRepoIndex(context.Background(), repo.Entry{URL: server.URL}, 32)
+	if err == nil || !strings.Contains(err.Error(), "read limit") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRepositoryIndexDownloadCancellation(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.(http.Flusher).Flush()
+		close(started)
+		<-r.Context().Done()
+		close(stopped)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { _, err := downloadRepoIndex(ctx, repo.Entry{URL: server.URL}, 32); result <- err }()
+	<-started
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled download stayed open")
+	}
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream request was not cancelled")
+	}
+}
+
+func TestRepositoryIndexDownloadUsesConfiguredCA(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, testIndexYAML) }))
+	defer server.Close()
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fetchRepoIndex(context.Background(), repo.Entry{URL: server.URL, CAFile: caFile}); err != nil {
+		t.Fatal(err)
 	}
 }
