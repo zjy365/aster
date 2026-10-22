@@ -125,7 +125,9 @@ export function ResourceTable({ rows, selected, checkedRows, onToggleRow, onTogg
     }
   };
   useEffect(() => {
-    if (header.current) header.current.style.transform = "translateX(0px)";
+    if (header.current && viewport.current) {
+      header.current.style.transform = `translateX(${-viewport.current.scrollLeft}px)`;
+    }
   }, [gridTemplate]);
 
   const clampedFocus = rows.length ? Math.min(focusIndex, rows.length - 1) : 0;

@@ -5348,7 +5348,7 @@ button.overview-card:focus-visible {
    by the viewport's scrollLeft. That keeps many columns horizontally
    scrollable with header and cells in lockstep. */
 .table-grid-custom {
-  grid-template-columns: 32px var(--table-columns);
+  grid-template-columns: var(--table-columns);
 }
 
 .table-header.table-grid-custom,
