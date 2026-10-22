@@ -3709,7 +3709,7 @@ test("node detail cordons, uncordons and drains with streamed progress", async (
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
-  // The generic Node YAML carries no spec, so pin unschedulable: true to
+  // The Node YAML carries no spec, so pin unschedulable: true to
   // exercise the Uncordon half of the toggle before draining.
   await page.evaluate(() => {
     const fixture = window as unknown as {
@@ -3719,7 +3719,7 @@ test("node detail cordons, uncordons and drains with streamed progress", async (
     fixture.__ASTER_DESKTOP__.resources.get = async (request) => {
       const result = await base(request);
       if (request.resourceKind.kind === "Node") {
-        return { ...result, yaml: result.yaml + "spec:\n  unschedulable: true\n" };
+        return { ...result, yaml: result.yaml + "\nspec:\n  unschedulable: true\n" };
       }
       return result;
     };
