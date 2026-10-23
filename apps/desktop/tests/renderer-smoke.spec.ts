@@ -561,6 +561,59 @@ test("context picker renders without overflow at both viewports", async ({ page 
   expect(failures).toEqual([]);
 });
 
+test("context picker keeps every toolbar control on one row", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("context-option-dev")).toBeVisible();
+
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 900, height: 640 }]) {
+    await page.setViewportSize(viewport);
+    for (const layout of ["list", "grid"]) {
+      await page.getByTestId(`context-layout-${layout}`).click();
+      for (const multi of [false, true]) {
+        const compare = page.getByTestId("context-picker-multi");
+        if ((await compare.getAttribute("aria-pressed")) !== String(multi)) await compare.click();
+        const boxes = await Promise.all([
+          page.locator(".context-search").boundingBox(),
+          compare.boundingBox(),
+          page.locator(".context-layout-toggle").boundingBox(),
+          page.getByTestId("context-picker-refresh").boundingBox(),
+        ]);
+        for (const box of boxes) {
+          expect(box).not.toBeNull();
+          expect(Math.abs(box!.y + box!.height / 2 - boxes[0]!.y - boxes[0]!.height / 2))
+            .toBeLessThanOrEqual(1);
+        }
+        for (let index = 1; index < boxes.length; index++) {
+          expect(boxes[index]!.x).toBeGreaterThanOrEqual(boxes[index - 1]!.x + boxes[index - 1]!.width);
+        }
+        await expectNoOverflow(page, `picker toolbar ${viewport.width} ${layout} multi=${multi}`);
+        await screenshot(page, `picker-toolbar-${viewport.width}-${layout}-${multi ? "multi" : "single"}`);
+      }
+    }
+  }
+});
+
+test("context picker scrolls without trailing row hover animations", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  const list = page.getByTestId("context-picker-list");
+  await expect(page.getByTestId("context-health-dev")).toHaveAttribute("data-state", "ok");
+  const box = (await list.boundingBox())!;
+  // Keep the pointer stationary over the rows, as with a trackpad gesture.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let index = 0; index < 4; index++) {
+    const before = await list.evaluate((element) => element.scrollTop);
+    await page.mouse.wheel(0, 90);
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
+    const trailingAnimations = await list.evaluate((element) => element.getAnimations({ subtree: true }).length);
+    expect(trailingAnimations, "scrolled rows must update hover feedback immediately").toBe(0);
+  }
+  await expect(page.locator(".context-card:hover .context-alias-edit")).toHaveCSS("opacity", "1");
+  await expect(page.locator(".context-picker-brand")).toBeVisible();
+  await expectNoOverflow(page, "picker after wheel scrolling");
+  await screenshot(page, "picker-wheel-scroll");
+});
+
 test("context picker shows cluster reachability status", async ({ page }) => {
   const failures = collectFailures(page);
   await page.setViewportSize({ width: 1280, height: 800 });
