@@ -44,6 +44,7 @@ export function SiteFooter() {
         <div className="mt-11 flex flex-wrap items-center justify-between gap-3 border-t border-hairline-soft pt-5">
           <span className="font-mono text-[12.5px] text-ink-3">© 2026 Aster contributors · Apache-2.0</span>
           <ThemeSwitcher />
+          <p className="w-full text-[12px] text-ink-3">Website only: self-hosted Rybbit measures visits and selected clicks using a browser visitor identifier. No raw IP storage or session replay. The desktop app has no analytics.</p>
         </div>
       </Container>
     </footer>
