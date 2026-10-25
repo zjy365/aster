@@ -60,6 +60,8 @@ function DownloadGrid({ releases }: { releases: Release[] }) {
           </div>
           <Button
             href={release.href}
+            data-rybbit-prop-platform={release.os}
+            data-rybbit-prop-variant={release.id}
             variant={release.primary ? "onDark" : "ghost"}
             glyph={<DownloadGlyph />}
             className="mt-7"

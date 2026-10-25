@@ -74,7 +74,7 @@ export function Button({
   size?: keyof typeof SIZES;
   external?: boolean;
   className?: string;
-} & { "aria-label"?: string }) {
+} & { "aria-label"?: string; "data-rybbit-prop-platform"?: string; "data-rybbit-prop-variant"?: string }) {
   return (
     <a
       href={href}
