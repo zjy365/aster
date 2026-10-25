@@ -23,7 +23,9 @@ export const metadata: Metadata = {
   title: site.title,
   description: site.description,
   metadataBase: new URL("https://aster.zjy365.dev"),
+  alternates: { canonical: "https://aster.zjy365.dev/" },
   openGraph: {
+    url: "https://aster.zjy365.dev/",
     title: site.title,
     description: site.description,
     type: "website",
