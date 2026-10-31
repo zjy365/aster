@@ -17,9 +17,9 @@ export const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 export const asset = (path: string) => `${basePath}${path}`;
 
 export const site = {
-  title: "Aster — A quiet workbench for Kubernetes",
+  title: "Free Open-Source Kubernetes GUI Desktop Client | Aster",
   description:
-    "A Kubernetes desktop app that runs entirely on your machine. Find anything in seconds, watch it change live, and see exactly what a change will do before it happens.",
+    "A free, open-source Kubernetes desktop GUI. Browse resources, follow pod and workload logs, and review supported changes before applying them. No Aster account required.",
   repo: "https://github.com/zjy365/aster",
   releasesUrl: "https://github.com/zjy365/aster/releases",
   licenseUrl: "https://github.com/zjy365/aster/blob/main/LICENSE",
@@ -42,11 +42,11 @@ export type FeatureCard = {
 export type FooterLink = NavLink;
 
 export const hero = {
-  titleLine1: "Change anything.",
+  titleLine1: "A Kubernetes GUI.",
   titleLine2Before: "",
-  titleLine2Em: "Surprise",
-  titleLine2After: " nothing.",
-  sub: "A Kubernetes desktop app that runs entirely on your machine. Find anything in seconds, and see what a change does before it happens.",
+  titleLine2Em: "On your",
+  titleLine2After: " machine.",
+  sub: "Browse Kubernetes resources, follow logs, and review supported changes before applying them. Connect with your kubeconfig; no Aster account required.",
   primaryCta: { label: "Download for macOS", href: "#download" },
   secondaryCta: { label: "View on GitHub", href: site.repo, external: true },
   note: "Free and open source · macOS, Windows & Linux · No account required",
@@ -243,6 +243,7 @@ export const footer: { brand: string; columns: { title: string; links: FooterLin
         { label: "Features", href: "#features" },
         { label: "Security", href: "#security" },
         { label: "Download", href: "#download" },
+        { label: "Kubernetes guides", href: `${basePath}/blog/` },
       ],
     },
     {

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import { site } from "@/lib/content";
+import { siteOrigin } from "@/lib/seo";
 import "./globals.css";
 
 const instrument = Instrument_Serif({
@@ -21,7 +22,7 @@ const jbmono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: site.title,
   description: site.description,
-  metadataBase: new URL("https://aster.zjy365.dev"),
+  metadataBase: new URL(siteOrigin),
   openGraph: {
     title: site.title,
     description: site.description,

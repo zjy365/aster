@@ -2,6 +2,7 @@ import { footer } from "@/lib/content";
 import { AsterMark } from "./aster-mark";
 import { Container } from "./container";
 import { ThemeSwitcher } from "./theme-switcher";
+import { basePath } from "@/lib/content";
 
 export function SiteFooter() {
   return (
@@ -10,7 +11,7 @@ export function SiteFooter() {
         <div className="flex flex-wrap items-start justify-between gap-10">
           <div className="max-w-[340px]">
             <a
-              href="#top"
+              href={`${basePath}/#top`}
               aria-label="Aster home"
               className="flex items-center gap-[9px] text-[15px] font-semibold tracking-[-0.01em]"
             >
@@ -29,7 +30,7 @@ export function SiteFooter() {
                 {col.links.map((link) => (
                   <a
                     key={link.label}
-                    href={link.href}
+                    href={link.href.startsWith("#") ? `${basePath}/${link.href}` : link.href}
                     {...(link.external ? { rel: "noopener noreferrer", target: "_blank" } : {})}
                     className="block py-1 text-[14px] text-ink-2 transition-colors duration-200 ease-(--ease-out) hover:text-ink"
                   >

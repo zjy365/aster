@@ -23,7 +23,7 @@
   <img src="docs/media/aster-resources.png" alt="Aster's main Kubernetes workspace showing a Deployments list" width="1200">
 </p>
 
-Aster is a Kubernetes desktop client built for the thing you actually do fifty times a day: open it, find one resource, look at it, close it.
+Aster is a free and open-source **Kubernetes GUI** — a desktop client built for the thing you actually do fifty times a day: open it, find one resource, look at it, close it.
 
 It ships as a **28 MB download** (63 MB installed) because it is a native Tauri shell talking to a small Go sidecar — not a browser engine with a control plane bolted on. It has **no account, no telemetry, and no backend**. It reads your kubeconfig and talks straight to your cluster's API server.
 
@@ -41,6 +41,10 @@ It ships as a **28 MB download** (63 MB installed) because it is a native Tauri 
 | **Your credentials** | Never reach the UI layer. No kubeconfig contents, no Secret values, no tokens. |
 | **Your data** | Never leaves your machine. No account, no telemetry, no remote service. |
 | **Permissions** | Exactly what's already in your kubeconfig. Aster never creates a ServiceAccount or ClusterRole for its own convenience. |
+
+## How Aster compares
+
+Aster focuses on local resource inspection, log reading and deliberately reviewed changes. Compare FreeLens for an IDE-style workflow or keep K9s for terminal work — see [Lens alternatives compared](https://aster.zjy365.dev/blog/lens-alternatives/) for the workflows, trade-offs and Aster's limits.
 
 ## Install
 

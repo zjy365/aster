@@ -1,9 +1,9 @@
 import type { MetadataRoute } from "next";
+import { articles } from "@/content/articles";
+import { siteOrigin } from "@/lib/seo";
 
 export const dynamic = "force-static";
 
-const siteUrl = "https://aster.zjy365.dev";
-
 export default function sitemap(): MetadataRoute.Sitemap {
-  return [{ url: `${siteUrl}/`, lastModified: new Date() }];
+  return ["/", "/blog/", ...articles.map(article => `/blog/${article.slug}/`)].map(path => ({ url: siteOrigin + path }));
 }

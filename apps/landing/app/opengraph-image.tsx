@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 
 export const dynamic = "force-static";
 
-export const alt = "Aster — A quiet workbench for Kubernetes";
+export const alt = "Aster — a free, open-source Kubernetes desktop GUI";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -35,7 +35,7 @@ export default function OpengraphImage() {
             letterSpacing: "-0.02em",
           }}
         >
-          A quiet workbench for Kubernetes
+          Your local Kubernetes GUI
         </div>
       </div>
     ),
