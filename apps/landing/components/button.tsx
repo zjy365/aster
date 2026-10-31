@@ -74,10 +74,11 @@ export function Button({
   size?: keyof typeof SIZES;
   external?: boolean;
   className?: string;
-} & { "aria-label"?: string }) {
+} & { "aria-label"?: string; "data-rybbit-prop-platform"?: string; "data-rybbit-prop-variant"?: string }) {
   return (
     <a
       href={href}
+      data-rybbit-event={/\.(dmg|exe|msi|deb|rpm|appimage|zip)(?:$|\?)/i.test(href) ? "download_click" : href.includes("github.com/") ? "github_click" : href === "#download" ? "download_section_click" : undefined}
       {...(external ? { rel: "noopener noreferrer", target: "_blank" } : {})}
       className={`${BASE} ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
       {...rest}

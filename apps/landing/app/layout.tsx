@@ -1,3 +1,4 @@
+import Script from "next/script";
 import type { Metadata, Viewport } from "next";
 import { Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import { site } from "@/lib/content";
@@ -23,7 +24,9 @@ export const metadata: Metadata = {
   title: site.title,
   description: site.description,
   metadataBase: new URL(siteOrigin),
+  alternates: { canonical: `${siteOrigin}/` },
   openGraph: {
+    url: `${siteOrigin}/`,
     title: site.title,
     description: site.description,
     type: "website",
@@ -54,7 +57,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <Script src="https://stats.lzgpt.top/api/script.js?siteId=4" strategy="afterInteractive" />
+      </body>
     </html>
   );
 }
