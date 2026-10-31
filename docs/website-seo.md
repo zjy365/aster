@@ -25,6 +25,7 @@
 - 竞品能力查官方文档。K9s 已有日志与管理能力，kubectl logs 支持 follow、selectors、多个来源等参数；不要通过错误描述制造 GUI 的优势。
 - 对比文章说明作者与 Aster 的关系，将选择标准与实测结果分开，不把技术栈当作性能证据。
 - `lib/seo.ts` 统一标题、描述、canonical、OG 与 Twitter。每页自指规范网址，分享图片必须实际生成；文章结构化数据对应可见标题、摘要和面包屑。
+- Next.js 导出的 `/opengraph-image` 没有文件扩展名；保留 `apps/landing/public/_headers` 的 `Content-Type: image/png` 规则，并在正式域名检查响应类型，避免被静态托管当作二进制下载文件。
 - 不把所有构建时间写成真实内容更新时间，不设固定字数或关键词密度，不改已有链接。经验规则以 [Google SEO 入门指南](https://developers.google.com/search/docs/fundamentals/seo-starter-guide)校准。
 
 ## 验证
