@@ -51,7 +51,20 @@ export function SiteFooter() {
 
         <div className="mt-12 border-t border-hairline-soft pt-6">
           <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <span className="font-mono text-xs leading-5 text-ink-3">© 2026 Aster contributors · Apache-2.0</span>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs leading-5 text-ink-3">
+              <span className="font-mono">© 2026 Aster contributors · Apache-2.0</span>
+              <p>
+                Built by{" "}
+                <a
+                  href="https://zjy365.dev/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-ink-2 underline underline-offset-4 hover:text-ink"
+                >
+                  zjy365
+                </a>
+              </p>
+            </div>
             <ThemeSwitcher />
           </div>
           <p className="mt-5 text-xs leading-5 text-ink-3">Website only: self-hosted Rybbit measures visits and selected clicks using a browser visitor identifier. No raw IP storage or session replay. The desktop app has no analytics.</p>
