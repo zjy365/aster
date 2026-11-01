@@ -39,7 +39,7 @@ export type FeatureCard = {
   hint?: string;
 };
 
-export type FooterLink = NavLink;
+export type FooterLink = NavLink & { emphasis?: boolean };
 
 export const hero = {
   titleLine1: "A Kubernetes GUI.",
@@ -238,12 +238,22 @@ export const footer: { brand: string; columns: { title: string; links: FooterLin
     "A Kubernetes desktop app that runs on your machine. Fast on big clusters, careful with every change.",
   columns: [
     {
+      title: "Guides",
+      links: [
+        { label: "Lens alternatives", href: `${basePath}/blog/lens-alternatives/` },
+        { label: "Kubernetes GUI", href: `${basePath}/blog/kubernetes-gui/` },
+        { label: "K9s alternatives", href: `${basePath}/blog/k9s-alternatives/` },
+        { label: "Kubernetes log viewer", href: `${basePath}/blog/kubernetes-log-viewer/` },
+        { label: "Local Kubernetes dashboard", href: `${basePath}/blog/local-kubernetes-dashboard/` },
+        { label: "All guides", href: `${basePath}/blog/`, emphasis: true },
+      ],
+    },
+    {
       title: "Product",
       links: [
         { label: "Features", href: "#features" },
         { label: "Security", href: "#security" },
         { label: "Download", href: "#download" },
-        { label: "Kubernetes guides", href: `${basePath}/blog/` },
       ],
     },
     {
