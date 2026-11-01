@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { articles } from "@/content/articles";
 import { footer } from "@/lib/content";
 import { AsterMark } from "./aster-mark";
 import { Container } from "./container";
@@ -8,6 +10,30 @@ export function SiteFooter() {
   return (
     <footer className="border-t border-hairline-soft pt-12 pb-14">
       <Container>
+        <nav aria-labelledby="footer-guides-title" className="mb-10 border-b border-hairline-soft pb-10">
+          <h2 id="footer-guides-title" className="font-display text-2xl sm:text-3xl">
+            Choose your next Kubernetes workflow
+          </h2>
+          <p className="mt-3 max-w-2xl text-sm text-ink-2">
+            Compare clients, connect a development cluster, or get more context while reading logs.
+          </p>
+          <ul className="mt-5 grid gap-x-10 gap-y-1 md:grid-cols-2">
+            {articles.map((article) => (
+              <li key={article.slug}>
+                <Link
+                  className="block py-2 text-sm text-ink-2 hover:text-ink hover:underline"
+                  href={`/blog/${article.slug}/`}
+                >
+                  {article.title}
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <Link className="mt-4 inline-block py-1 text-sm text-primary underline" href="/blog/">
+            Browse all Kubernetes guides →
+          </Link>
+        </nav>
+
         <div className="flex flex-wrap items-start justify-between gap-10">
           <div className="max-w-[340px]">
             <a
