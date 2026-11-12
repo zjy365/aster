@@ -3,6 +3,7 @@ package helm
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -112,8 +113,57 @@ func TestChartVersionsOrdersNewestFirst(t *testing.T) {
 	if first.AppVersion != "9.0.0-rc.1" || first.Description != "Web server chart prerelease" {
 		t.Fatalf("first version metadata = %#v", first)
 	}
-	if first.Created.IsZero() || first.Created.Year() != 2026 {
+	if first.Created == nil || first.Created.IsZero() || first.Created.Year() != 2026 {
 		t.Fatalf("first version created = %v, want 2026", first.Created)
+	}
+}
+
+func TestChartVersionsCreatedJSON(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		created string
+		want    string
+	}{
+		{name: "missing"},
+		{name: "zero", created: "0001-01-01T00:00:00Z"},
+		{name: "present", created: "2026-04-04T00:00:00Z", want: "2026-04-04T00:00:00Z"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolatedRepoConfig(t, "")
+			index := "apiVersion: v1\nentries:\n  web:\n    - apiVersion: v2\n      name: web\n      version: 1.0.0\n"
+			if test.created != "" {
+				index += fmt.Sprintf("      created: %q\n", test.created)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(writer, index)
+			}))
+			t.Cleanup(server.Close)
+			response, err := NewService(nil).ChartVersions(context.Background(), ChartVersionsRequest{RepoURL: server.URL, Chart: "web"})
+			if err != nil {
+				t.Fatalf("ChartVersions: %v", err)
+			}
+			if len(response.Versions) != 1 {
+				t.Fatalf("versions = %d, want 1", len(response.Versions))
+			}
+			data, err := json.Marshal(response)
+			if err != nil {
+				t.Fatalf("marshal response: %v", err)
+			}
+			var wire struct {
+				Versions []map[string]json.RawMessage `json:"versions"`
+			}
+			if err := json.Unmarshal(data, &wire); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			created, exists := wire.Versions[0]["created"]
+			if test.want == "" {
+				if exists {
+					t.Fatalf("created = %s, want omitted", created)
+				}
+			} else if string(created) != fmt.Sprintf("%q", test.want) {
+				t.Fatalf("created = %s, want %q", created, test.want)
+			}
+		})
 	}
 }
 

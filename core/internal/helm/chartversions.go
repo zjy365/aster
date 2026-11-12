@@ -69,7 +69,12 @@ func (s *Service) ChartVersions(ctx context.Context, request ChartVersionsReques
 		if len(versions) >= maxChartVersions {
 			break
 		}
-		info := ChartVersionInfo{Version: item.Version, Created: item.Created}
+		info := ChartVersionInfo{Version: item.Version}
+		// A sparse index may omit the timestamp; zero stays absent instead
+		// of marshaling as year 1.
+		if !item.Created.IsZero() {
+			info.Created = &item.Created
+		}
 		if item.Metadata != nil {
 			info.AppVersion = item.AppVersion
 			info.Description = item.Description
