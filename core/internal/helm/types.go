@@ -137,11 +137,15 @@ type ChartVersionsRequest struct {
 
 // ChartVersionInfo is one pickable version of a chart in a repository,
 // newest first. It carries only index metadata, never chart contents.
+// Created is a pointer so an index entry without a timestamp omits the
+// field — time.Time's zero value would otherwise marshal as
+// "0001-01-01T00:00:00Z", which the renderer's age formatter would
+// render as an absurd age.
 type ChartVersionInfo struct {
-	Version     string    `json:"version"`
-	AppVersion  string    `json:"appVersion,omitempty"`
-	Created     time.Time `json:"created,omitempty"`
-	Description string    `json:"description,omitempty"`
+	Version     string     `json:"version"`
+	AppVersion  string     `json:"appVersion,omitempty"`
+	Created     *time.Time `json:"created,omitempty"`
+	Description string     `json:"description,omitempty"`
 }
 
 type ChartVersionsResponse struct {
